@@ -7,6 +7,13 @@ macro_rules! operator {
     };
 }
 
+pub(crate) fn unary_test_operator(word: Option<&str>) -> Option<&'static str> {
+    operator!(
+        word, "-a", "-b", "-c", "-d", "-e", "-f", "-g", "-h", "-k", "-n", "-o", "-p", "-r", "-s",
+        "-t", "-u", "-v", "-w", "-x", "-z", "-G", "-L", "-N", "-O", "-R", "-S"
+    )
+}
+
 impl Reader {
     pub(super) fn test_or(&mut self) -> Result<Expr, Error> {
         let first = self.test_and()?;
@@ -68,35 +75,7 @@ impl Reader {
                 _ => return Err(Error::Invalid("expected ')' in conditional expression")),
             }
         }
-        if let Some(op) = operator!(
-            self.keyword(),
-            "-a",
-            "-b",
-            "-c",
-            "-d",
-            "-e",
-            "-f",
-            "-g",
-            "-h",
-            "-k",
-            "-n",
-            "-o",
-            "-p",
-            "-r",
-            "-s",
-            "-t",
-            "-u",
-            "-v",
-            "-w",
-            "-x",
-            "-z",
-            "-G",
-            "-L",
-            "-N",
-            "-O",
-            "-R",
-            "-S"
-        ) {
+        if let Some(op) = unary_test_operator(self.keyword()) {
             self.tokens.pop_front();
             return Ok(Expr::Unary(op, self.test_word()?));
         }

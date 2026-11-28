@@ -145,7 +145,10 @@ pub fn test(words: &[String], session: &mut Session) -> u8 {
     }
 }
 
-fn test_args(args: &[String], session: &mut Session) -> Result<bool, &'static str> {
+fn test_args(
+    args: &[String],
+    session: &mut Session,
+) -> Result<bool, std::borrow::Cow<'static, str>> {
     match args {
         [] => return Ok(false),
         [s] => return Ok(!s.is_empty()),
@@ -157,6 +160,15 @@ fn test_args(args: &[String], session: &mut Session) -> Result<bool, &'static st
         [first, rest @ ..] if first == "!" && args.len() <= 4 => {
             return Ok(!test_args(rest, session)?);
         }
+        [open, value, close] if open == "(" && close == ")" => return Ok(!value.is_empty()),
+        [_, op, _] => return Err(format!("{op}: binary operator expected").into()),
+        [open, a, b, close] if open == "(" && close == ")" => {
+            return if a == "!" {
+                Ok(b.is_empty())
+            } else {
+                unary(a, b, session)
+            };
+        }
         _ => {}
     }
     // test's legacy expression grammar groups parentheses and binds -a more
@@ -166,11 +178,14 @@ fn test_args(args: &[String], session: &mut Session) -> Result<bool, &'static st
     if tokens.is_empty() {
         Ok(result)
     } else {
-        Err("unexpected argument")
+        Err("unexpected argument".into())
     }
 }
 
-fn disjunction(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
+fn disjunction(
+    tokens: &mut &[String],
+    session: &mut Session,
+) -> Result<bool, std::borrow::Cow<'static, str>> {
     let mut result = conjunction(tokens, session)?;
     while tokens.first().is_some_and(|s| s == "-o") {
         *tokens = &tokens[1..];
@@ -179,7 +194,10 @@ fn disjunction(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'
     Ok(result)
 }
 
-fn conjunction(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
+fn conjunction(
+    tokens: &mut &[String],
+    session: &mut Session,
+) -> Result<bool, std::borrow::Cow<'static, str>> {
     let mut result = primary(tokens, session)?;
     while tokens.first().is_some_and(|s| s == "-a") {
         *tokens = &tokens[1..];
@@ -188,7 +206,10 @@ fn conjunction(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'
     Ok(result)
 }
 
-fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
+fn primary(
+    tokens: &mut &[String],
+    session: &mut Session,
+) -> Result<bool, std::borrow::Cow<'static, str>> {
     let mut negate = false;
     while tokens.first().is_some_and(|word| word == "!") {
         *tokens = &tokens[1..];
@@ -197,7 +218,10 @@ fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'stat
     primary_operand(tokens, session).map(|value| value ^ negate)
 }
 
-fn primary_operand(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
+fn primary_operand(
+    tokens: &mut &[String],
+    session: &mut Session,
+) -> Result<bool, std::borrow::Cow<'static, str>> {
     let (first, rest) = tokens.split_first().ok_or("argument expected")?;
     *tokens = rest;
     if let [op, right, tail @ ..] = rest
@@ -210,21 +234,21 @@ fn primary_operand(tokens: &mut &[String], session: &mut Session) -> Result<bool
     }
     if first == "(" {
         if crate::stack_budget_exceeded() {
-            return Err("conditional expression nested too deeply");
+            return Err("conditional expression nested too deeply".into());
         }
         // Bash 5.3 applies the POSIX small-arity rules inside parentheses.
         // Stop scanning as soon as the group cannot qualify.
         let mut level = 1;
         let close = (session.shopt.compat > 52)
             .then(|| {
-                rest.iter().take(5).position(|word| {
+                rest.iter().skip(1).take(4).position(|word| {
                     match word.as_str() {
                         "(" => level += 1,
                         ")" => level -= 1,
                         _ => (),
                     }
                     level == 0
-                })
+                }).map(|n| n + 1)
             })
             .flatten();
         let value = if let Some(n @ 1..=4) = close {
@@ -234,17 +258,20 @@ fn primary_operand(tokens: &mut &[String], session: &mut Session) -> Result<bool
             disjunction(tokens, session)?
         };
         if tokens.first().is_none_or(|v| v != ")") {
-            return Err("missing )");
+            return Err("missing )".into());
         }
         *tokens = &tokens[1..];
         return Ok(value);
     }
-    if first.starts_with('-')
-        && first.len() == 2
+    if let Some(op) = crate::parser::unary_test_operator(Some(first))
         && let Some((arg, tail)) = rest.split_first()
     {
+        if op == "-t" && !session.posix && matches!(arg.as_str(), "-a" | "-o") {
+            // Legacy test expressions allow a bare -t before a boolean connector.
+            return unary(op, "1", session);
+        }
         *tokens = tail;
-        return unary(first, arg, session);
+        return unary(op, arg, session);
     }
     Ok(!first.is_empty())
 }
@@ -275,7 +302,11 @@ pub(crate) fn integer_operand(text: &str) -> Option<i64> {
         .ok()
 }
 
-pub(crate) fn binary(left: &str, op: &str, right: &str) -> Result<bool, &'static str> {
+pub(crate) fn binary(
+    left: &str,
+    op: &str,
+    right: &str,
+) -> Result<bool, std::borrow::Cow<'static, str>> {
     Ok(match op {
         "=" | "==" => left == right,
         "!=" => left != right,
@@ -293,8 +324,10 @@ pub(crate) fn binary(left: &str, op: &str, right: &str) -> Result<bool, &'static
             }
         }
         _ => {
-            let a = integer_operand(left).ok_or("integer expression expected")?;
-            let b = integer_operand(right).ok_or("integer expression expected")?;
+            let a = integer_operand(left)
+                .ok_or_else(|| format!("{left}: integer expression expected"))?;
+            let b = integer_operand(right)
+                .ok_or_else(|| format!("{right}: integer expression expected"))?;
             match op {
                 "-eq" => a == b,
                 "-ne" => a != b,
@@ -339,18 +372,24 @@ pub(crate) fn variable_set(
     Ok(session.get(arg).is_some())
 }
 
-pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, &'static str> {
+pub(crate) fn unary(
+    op: &str,
+    arg: &str,
+    session: &mut Session,
+) -> Result<bool, std::borrow::Cow<'static, str>> {
     match op {
         "-n" => return Ok(!arg.is_empty()),
         "-z" => return Ok(arg.is_empty()),
         "-R" => return Ok(session.is_nameref(arg)),
         "-o" => return Ok(session.set_option_enabled(arg)),
-        "-v" => return variable_set(session, arg, session.shopt.array_expand_once),
+        "-v" => {
+            return variable_set(session, arg, session.shopt.array_expand_once).map_err(Into::into);
+        }
         "-t" => {
             let number = match integer_operand(arg) {
                 Some(number) => number,
                 None if session.posix => return Ok(false),
-                None => return Err("integer expected"),
+                None => return Err(format!("{arg}: integer expected").into()),
             };
             return Ok(i32::try_from(number).is_ok_and(|fd| unsafe { libc::isatty(fd) == 1 }));
         }
@@ -368,7 +407,7 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
         }
         "-a" | "-e" | "-d" | "-f" | "-s" | "-b" | "-c" | "-p" | "-S" | "-O" | "-G" | "-u"
         | "-g" | "-k" | "-N" => {}
-        _ => return Err("unknown unary operator"),
+        _ => return Err(format!("{op}: unary operator expected").into()),
     }
     let Ok(meta) = fs::metadata(arg) else {
         return Ok(false);

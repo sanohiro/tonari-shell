@@ -77,7 +77,9 @@ pub(super) fn redirect(
         chars.next();
     }
     if chars.as_str().starts_with("\\\n") && chars.as_str().trim_start_matches("\\\n").is_empty() {
-        return Err(Error::incomplete_message("continued here-document operator"));
+        return Err(Error::incomplete_message(
+            "continued here-document operator",
+        ));
     }
     let (delimiter, quoted) = delimiter(chars)?;
     tokens.push(Token::Redirect(fd, Target::HereDoc { expand: !quoted }));
@@ -122,7 +124,9 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
             }
             _ if quote == Some(c) => quote = None,
             '\\' if quote != Some('\'') => {
-                let next = chars.next().ok_or(Error::incomplete_message("unfinished here-document delimiter"))?;
+                let next = chars.next().ok_or(Error::incomplete_message(
+                    "unfinished here-document delimiter",
+                ))?;
                 if next == '\n' {
                     continue;
                 }
@@ -153,12 +157,16 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
             '`' if quote.is_none() => {
                 text.push(c);
                 loop {
-                    let ch = chars.next().ok_or(Error::incomplete_message("unterminated backquote in here-document delimiter"))?;
+                    let ch = chars.next().ok_or(Error::incomplete_message(
+                        "unterminated backquote in here-document delimiter",
+                    ))?;
                     text.push(ch);
                     if ch == '`' {
                         break;
                     }
-                    if ch == '\\' && let Some(escaped) = chars.next() {
+                    if ch == '\\'
+                        && let Some(escaped) = chars.next()
+                    {
                         text.push(escaped);
                     }
                 }
@@ -168,7 +176,9 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
         started = true;
     }
     if quote.is_some() || depth != 0 {
-        return Err(Error::incomplete_message("unterminated here-document delimiter"));
+        return Err(Error::incomplete_message(
+            "unterminated here-document delimiter",
+        ));
     }
     if !started {
         return Err(Error::Invalid("expected a here-document delimiter"));
@@ -186,97 +196,132 @@ thread_local! {
 
 pub(super) struct Scan;
 impl Scan {
-    pub(super) fn enter() -> Self { SCANS.set(SCANS.get()+1); Self }
+    pub(super) fn enter() -> Self {
+        SCANS.set(SCANS.get() + 1);
+        Self
+    }
 }
 impl Drop for Scan {
     fn drop(&mut self) {
-        let depth=SCANS.get()-1;
+        let depth = SCANS.get() - 1;
         SCANS.set(depth);
-        if depth==0 { RANGES.with_borrow_mut(Vec::clear); }
+        if depth == 0 {
+            RANGES.with_borrow_mut(Vec::clear);
+        }
     }
 }
 
 pub(super) struct Ancestors(usize);
 pub(super) fn remember(earlier: &[Pending]) -> Ancestors {
-    ANCESTORS.with_borrow_mut(|v| {let start=v.len(); v.extend_from_slice(earlier); Ancestors(start)})
+    ANCESTORS.with_borrow_mut(|v| {
+        let start = v.len();
+        v.extend_from_slice(earlier);
+        Ancestors(start)
+    })
 }
 impl Drop for Ancestors {
-    fn drop(&mut self) { ANCESTORS.with_borrow_mut(|v|v.truncate(self.0)); }
+    fn drop(&mut self) {
+        ANCESTORS.with_borrow_mut(|v| v.truncate(self.0));
+    }
 }
 
 pub(super) fn skip(chars: &mut Chars<'_>) {
-    RANGES.with_borrow(|ranges| while let Some(&(_,len))=ranges.iter().find(|&&(addr,n)| addr==chars.as_str().as_ptr().addr() && n<=chars.as_str().len()) {
-        *chars=chars.as_str()[len..].chars();
+    RANGES.with_borrow(|ranges| {
+        while let Some(&(_, len)) = ranges
+            .iter()
+            .find(|&&(addr, n)| addr == chars.as_str().as_ptr().addr() && n <= chars.as_str().len())
+        {
+            *chars = chars.as_str()[len..].chars();
+        }
     });
 }
 
-pub(super) fn after_closer(source: &str, after: &str, tokens: &mut [Token], pending: &mut Vec<Pending>) -> Result<(),Error> {
-    if pending.is_empty() {return Ok(());}
-    let tail=after.split_once('\n').map_or("", |(_,tail)|tail);
-    let mut cursor=tail.chars();
-    ANCESTORS.with_borrow(|earlier| -> Result<(),Error> {
-        for doc in earlier { skip(&mut cursor); body(&mut cursor,doc,false,false)?; }
+pub(super) fn after_closer(
+    source: &str,
+    after: &str,
+    tokens: &mut [Token],
+    pending: &mut Vec<Pending>,
+) -> Result<(), Error> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let tail = after.split_once('\n').map_or("", |(_, tail)| tail);
+    let mut cursor = tail.chars();
+    ANCESTORS.with_borrow(|earlier| -> Result<(), Error> {
+        for doc in earlier {
+            skip(&mut cursor);
+            body(&mut cursor, doc, false, false)?;
+        }
         Ok(())
     })?;
     skip(&mut cursor);
-    let start=cursor.as_str();
-    collect(source.len(),&mut cursor,tokens,pending,false)?;
-    let consumed=start.len()-cursor.as_str().len();
-    if consumed>0 { RANGES.with_borrow_mut(|ranges|ranges.push((start.as_ptr().addr(),consumed))); }
+    let start = cursor.as_str();
+    collect(source.len(), &mut cursor, tokens, pending, false)?;
+    let consumed = start.len() - cursor.as_str().len();
+    if consumed > 0 {
+        RANGES.with_borrow_mut(|ranges| ranges.push((start.as_ptr().addr(), consumed)));
+    }
     Ok(())
 }
 
-fn body(chars: &mut Chars<'_>, doc: &Pending, final_input: bool, capture: bool) -> Result<String,Error> {
-        let mut body = String::new();
-        let mut continued = String::new();
-        let mut was_continued = false;
-        loop {
-            let remaining = chars.as_str();
-            if remaining.is_empty() {
-                if !final_input {
-                    return Err(Error::HereDoc(HereDocHint {
-                        delimiter: doc.delimiter.clone(),
-                        quoted: doc.quoted,
-                        strip_tabs: doc.strip_tabs,
-                        continued: was_continued,
-                    }));
-                }
-                diagnostic!(
-                    "warning: here-document reached end of input (wanted '{}')",
-                    doc.delimiter
-                );
-                if !continued.is_empty() {
-                    body.push_str(&continued);
-                    body.push('\n');
-                }
-                break;
+fn body(
+    chars: &mut Chars<'_>,
+    doc: &Pending,
+    final_input: bool,
+    capture: bool,
+) -> Result<String, Error> {
+    let mut body = String::new();
+    let mut continued = String::new();
+    let mut was_continued = false;
+    loop {
+        let remaining = chars.as_str();
+        if remaining.is_empty() {
+            if !final_input {
+                return Err(Error::HereDoc(HereDocHint {
+                    delimiter: doc.delimiter.clone(),
+                    quoted: doc.quoted,
+                    strip_tabs: doc.strip_tabs,
+                    continued: was_continued,
+                }));
             }
-            let (physical, rest) = remaining.split_once('\n').unwrap_or((remaining, ""));
-            *chars = rest.chars();
-            let continuation =
-                !doc.quoted && remaining.len() > physical.len() && continues(physical);
-            was_continued = continuation;
-            if continuation {
-                continued.push_str(&physical[..physical.len() - 1]);
-                continue;
+            diagnostic!(
+                "warning: here-document reached end of input (wanted '{}')",
+                doc.delimiter
+            );
+            if !continued.is_empty() {
+                body.push_str(&continued);
+                body.push('\n');
             }
-            let line = if continued.is_empty() {
-                physical
-            } else {
-                continued.push_str(physical);
-                &continued
-            };
-            let line = if doc.strip_tabs {
-                line.trim_start_matches('\t')
-            } else {
-                line
-            };
-            if line == doc.delimiter {
-                break;
-            }
-            if capture { body.push_str(line); body.push('\n'); }
-            continued.clear();
+            break;
         }
+        let (physical, rest) = remaining.split_once('\n').unwrap_or((remaining, ""));
+        *chars = rest.chars();
+        let continuation = !doc.quoted && remaining.len() > physical.len() && continues(physical);
+        was_continued = continuation;
+        if continuation {
+            continued.push_str(&physical[..physical.len() - 1]);
+            continue;
+        }
+        let line = if continued.is_empty() {
+            physical
+        } else {
+            continued.push_str(physical);
+            &continued
+        };
+        let line = if doc.strip_tabs {
+            line.trim_start_matches('\t')
+        } else {
+            line
+        };
+        if line == doc.delimiter {
+            break;
+        }
+        if capture {
+            body.push_str(line);
+            body.push('\n');
+        }
+        continued.clear();
+    }
     Ok(body)
 }
 
@@ -290,8 +335,8 @@ pub(super) fn collect(
     for doc in pending.drain(..) {
         skip(chars);
         let start = source_len - chars.as_str().len();
-        let text = body(chars,&doc,final_input,true)?;
-        tokens[doc.index]=Token::HereBody(text,(start,source_len-chars.as_str().len()));
+        let text = body(chars, &doc, final_input, true)?;
+        tokens[doc.index] = Token::HereBody(text, (start, source_len - chars.as_str().len()));
     }
     skip(chars);
     Ok(())

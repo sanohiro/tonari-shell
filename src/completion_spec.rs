@@ -1164,7 +1164,7 @@ fn generate_for_tab(
         for word in &mut words {
             let directory = word
                 .strip_prefix("~/")
-                .and_then(|rest| session.get("HOME").map(|h| Path::new(&h).join(rest)));
+                .and_then(|rest| session.tilde_path(rest));
             if !word.ends_with('/')
                 && directory
                     .as_deref()

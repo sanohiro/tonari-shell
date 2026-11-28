@@ -451,12 +451,23 @@ impl Session {
         }
     }
 
+    pub(crate) fn tilde_home(&self) -> Option<Cow<'_, str>> {
+        self.scalar_setting("HOME")
+            .or_else(|| crate::word::account_home().map(Cow::Owned))
+    }
+
+    /// Preserve the slash from ~/ even when HOME is empty. Additional
+    /// slashes in the suffix are still relative to the expanded home.
+    pub(crate) fn tilde_path(&self, suffix: &str) -> Option<PathBuf> {
+        let home = self.tilde_home()?;
+        let parent = if home.is_empty() { "/" } else { home.as_ref() };
+        Some(Path::new(parent).join(suffix.trim_start_matches('/')))
+    }
+
     /// A personal configuration path must never become relative through an
     /// explicitly empty HOME. An unset HOME uses the account directory.
     pub(crate) fn personal_home(&self) -> Option<Cow<'_, str>> {
-        self.scalar_setting("HOME")
-            .or_else(|| crate::word::account_home().map(Cow::Owned))
-            .filter(|h| !h.is_empty())
+        self.tilde_home().filter(|h| !h.is_empty())
     }
 
     pub(crate) fn locale_category(&self, category: &str) -> Option<Cow<'_, str>> {

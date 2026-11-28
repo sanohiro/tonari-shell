@@ -23,7 +23,7 @@ pub(crate) fn match_ends(
     let ascii =
         text.is_ascii() && pattern.text.is_ascii() && pattern.fold != Some(CharacterLocale::Turkic);
     let parsed;
-    let group = if let Some(group) = &pattern.group {
+    let group = if let Some(group) = pattern.group.as_deref() {
         group
     } else {
         parsed = Pattern::parse(pattern.text, false);

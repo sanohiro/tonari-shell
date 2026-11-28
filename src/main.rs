@@ -230,7 +230,11 @@ fn thread_stack_floor() -> usize {
 
 fn stack_budget_exceeded() -> bool {
     let marker = 0u8;
-    let here = std::ptr::from_ref(&marker).addr();
+    stack_budget_exceeded_at(std::ptr::from_ref(&marker).addr())
+}
+
+#[inline]
+fn stack_budget_exceeded_at(here: usize) -> bool {
     let origin = MAIN_STACK_ORIGIN.get();
     if origin == 0 {
         return WORKER_STACK_FLOOR.with(|floor| here <= *floor.get_or_init(thread_stack_floor));
@@ -253,8 +257,12 @@ fn recursion_guard_uses_the_worker_stack_bounds() {
             let marker = 0u8;
             let here = std::ptr::from_ref(&marker).addr();
             let floor = thread_stack_floor();
-            assert!(floor < here && here - floor < 512 * 1024);
+            // An OS can reuse a larger cached thread stack. Test the actual
+            // boundary, including both sides, rather than the requested size.
+            assert!(floor > 0 && floor < here);
             assert!(!stack_budget_exceeded());
+            assert!(stack_budget_exceeded_at(floor));
+            assert!(!stack_budget_exceeded_at(floor + 1));
         })
         .unwrap()
         .join()

@@ -46,8 +46,11 @@ impl<'a> Options<'a> {
                 match flag {
                     'd' => result.delimiter = super::read::Delimiter::first(value),
                     'O' => {
-                        result.origin =
-                            Some(value.parse().map_err(|_| (1, format!("{value}: invalid array origin")))?)
+                        result.origin = Some(
+                            value
+                                .parse()
+                                .map_err(|_| (1, format!("{value}: invalid array origin")))?,
+                        )
                     }
                     'n' => {
                         result.limit = value

@@ -473,8 +473,19 @@ fn read_history_file(
     timestamped: bool,
 ) -> io::Result<()> {
     let mut file = match File::open(&path) {
+        Ok(file) => file,
         Err(e) if private && e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        other => other?,
+        Err(e) => {
+            // A write-only history file also has unread contents to preserve.
+            if let Ok(meta) = std::fs::metadata(&path)
+                && meta.is_file()
+            {
+                session
+                    .history_mut()
+                    .mark_incomplete((meta.dev(), meta.ino()));
+            }
+            return Err(e);
+        }
     };
     let meta = file.metadata()?;
     let identity = (meta.dev(), meta.ino());
@@ -607,9 +618,7 @@ fn read_history_file(
     }
     h.trim_to(limit);
     if result.is_err() {
-        if !h.incomplete_files.contains(&identity) {
-            h.incomplete_files.push(identity);
-        }
+        h.mark_incomplete(identity);
     } else if op == 'r' {
         h.incomplete_files.retain(|id| *id != identity);
     }

@@ -24,8 +24,11 @@ pub(crate) fn shell_error(
 
 pub(crate) trait Variables {
     fn get(&self, name: &str) -> Option<String>;
-    fn decimal(&self, _name: &str) -> Option<i64> {
+    fn scalar_text(&self, _name: &str) -> Option<&str> {
         None
+    }
+    fn decimal(&self, name: &str) -> Option<i64> {
+        self.scalar_text(name).and_then(Session::plain_decimal)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<()>;
     fn indexed_decimal(&self, _name: &str, _index: i64) -> Option<i64> {
@@ -43,6 +46,9 @@ pub(crate) trait Variables {
 }
 
 impl Variables for Session {
+    fn scalar_text(&self, name: &str) -> Option<&str> {
+        self.stored_scalar(name)
+    }
     fn decimal(&self, name: &str) -> Option<i64> {
         self.scalar_decimal(name)
     }
@@ -787,10 +793,15 @@ impl Value<'_> {
                 let text = match target {
                     Target::Unavailable => return Ok(0),
                     Target::Name(name) => {
-                        if let Some(n) = variables.decimal(name) {
-                            return Ok(n);
+                        if let Some(raw) = variables.scalar_text(name) {
+                            if let Some(n) = Session::plain_decimal(raw) {
+                                return Ok(n);
+                            }
+                            // Recursive arithmetic evaluation can mutate this variable.
+                            Some(raw.to_owned())
+                        } else {
+                            variables.get(name)
                         }
-                        variables.get(name)
                     }
                     Target::Indexed(name, index) => {
                         if let Some(n) = variables.indexed_decimal(name, *index) {
@@ -852,8 +863,7 @@ fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<
         variables.set(name, old.wrapping_add(delta))?;
         return Ok(old);
     }
-    Parser::new(source)
-    .evaluate(variables, depth)
+    Parser::new(source).evaluate(variables, depth)
 }
 
 impl Parser<'_> {
@@ -894,7 +904,28 @@ fn precedence(op: &str) -> Option<(u8, bool)> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Binary { Comma, LogicalOr, LogicalAnd, Or, And, Xor, Equal, Unequal, Less, Greater, LessEqual, GreaterEqual, ShiftLeft, ShiftRight, Add, Subtract, Multiply, Divide, Remainder, Power }
+enum Binary {
+    Comma,
+    LogicalOr,
+    LogicalAnd,
+    Or,
+    And,
+    Xor,
+    Equal,
+    Unequal,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+    ShiftLeft,
+    ShiftRight,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Power,
+}
 
 impl Binary {
     fn parse(op: &str) -> Option<Self> {
@@ -924,46 +955,50 @@ impl Binary {
     }
 
     fn apply(self, a: i64, b: i64) -> Result<i64> {
-    Ok(match self {
-        Self::Comma => b,
-        Self::LogicalOr => i64::from(a != 0 || b != 0),
-        Self::LogicalAnd => i64::from(a != 0 && b != 0),
-        Self::Or => a | b,
-        Self::And => a & b,
-        Self::Xor => a ^ b,
-        Self::Equal => i64::from(a == b),
-        Self::Unequal => i64::from(a != b),
-        Self::Less => i64::from(a < b),
-        Self::Greater => i64::from(a > b),
-        Self::LessEqual => i64::from(a <= b),
-        Self::GreaterEqual => i64::from(a >= b),
-        Self::ShiftLeft => a.wrapping_shl(b as u32),
-        Self::ShiftRight => a.wrapping_shr(b as u32),
-        Self::Add => a.wrapping_add(b),
-        Self::Subtract => a.wrapping_sub(b),
-        Self::Multiply => a.wrapping_mul(b),
-        Self::Divide | Self::Remainder if b == 0 => return Err("division by zero"),
-        Self::Divide => a.wrapping_div(b),
-        Self::Remainder => a.wrapping_rem(b),
-        Self::Power if b < 0 => return Err("negative arithmetic exponent"),
-        Self::Power => {
-            let mut power = b as u64;
-            let mut base = a;
-            let mut result = 1i64;
-            while power != 0 {
-                if power & 1 != 0 {
-                    result = result.wrapping_mul(base);
+        Ok(match self {
+            Self::Comma => b,
+            Self::LogicalOr => i64::from(a != 0 || b != 0),
+            Self::LogicalAnd => i64::from(a != 0 && b != 0),
+            Self::Or => a | b,
+            Self::And => a & b,
+            Self::Xor => a ^ b,
+            Self::Equal => i64::from(a == b),
+            Self::Unequal => i64::from(a != b),
+            Self::Less => i64::from(a < b),
+            Self::Greater => i64::from(a > b),
+            Self::LessEqual => i64::from(a <= b),
+            Self::GreaterEqual => i64::from(a >= b),
+            Self::ShiftLeft => a.wrapping_shl(b as u32),
+            Self::ShiftRight => a.wrapping_shr(b as u32),
+            Self::Add => a.wrapping_add(b),
+            Self::Subtract => a.wrapping_sub(b),
+            Self::Multiply => a.wrapping_mul(b),
+            Self::Divide | Self::Remainder if b == 0 => return Err("division by zero"),
+            Self::Divide => a.wrapping_div(b),
+            Self::Remainder => a.wrapping_rem(b),
+            Self::Power if b < 0 => return Err("negative arithmetic exponent"),
+            Self::Power => {
+                let mut power = b as u64;
+                let mut base = a;
+                let mut result = 1i64;
+                while power != 0 {
+                    if power & 1 != 0 {
+                        result = result.wrapping_mul(base);
+                    }
+                    base = base.wrapping_mul(base);
+                    power >>= 1;
                 }
-                base = base.wrapping_mul(base);
-                power >>= 1;
+                result
             }
-            result
-        }
-    })
-}
+        })
+    }
 }
 
-fn binary(op: &str, a:i64,b:i64)->Result<i64> { Binary::parse(op).ok_or("unknown arithmetic operator")?.apply(a,b) }
+fn binary(op: &str, a: i64, b: i64) -> Result<i64> {
+    Binary::parse(op)
+        .ok_or("unknown arithmetic operator")?
+        .apply(a, b)
+}
 
 fn number(s: &str) -> Result<i64> {
     let (base, digits) = if let Some((base, digits)) = s.split_once('#') {

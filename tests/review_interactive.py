@@ -59,6 +59,19 @@ def main():
         contents = seed.read_bytes()
         assert contents.startswith(original + b"\n") and b": annotation\n" in contents
 
+        # The owner may write an existing history file without being able to
+        # import it. Preserve its earlier records on exit in that case too.
+        seed.write_bytes(b"existing command\n")
+        seed.chmod(0o200)
+        try:
+            if not os.access(seed, os.R_OK):
+                subprocess.run([tonari, "--noprofile", "--norc", "-i"], input=b": added\nexit 0\n",
+                               cwd=home, capture_output=True, timeout=5,
+                               env={"HOME": tmp, "HISTFILE": str(seed), "PATH": "/usr/bin:/bin"})
+        finally:
+            seed.chmod(0o600)
+        assert seed.read_bytes().startswith(b"existing command\n")
+
         # A program appended after a bulk-parsed group has the correct LINENO.
         growing = home / "growing.sh"
         initial = "{\n" + "# long physical line\n" * 1800 + "printf 'echo $LINENO\\n' >> \"$0\"\n}\n"

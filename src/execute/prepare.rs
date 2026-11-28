@@ -234,20 +234,28 @@ pub(super) fn borrowed_arguments(
         words,
         session,
         status,
-        true,
+        CommandContext::Shell,
         &captured,
     )
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum CommandContext {
+    Shell,
+    BackgroundJobSpec,
+    Child,
+    Pipeline,
 }
 
 pub(super) fn prepare(
     mut raw: SimpleCommand<Word>,
     session: &mut Session,
     last_status: u8,
-    standalone: bool,
+    context: CommandContext,
 ) -> Result<PreparedCommand, crate::expansion::Error> {
     let captured = Cell::new(None);
     let words = expand_command_words(&mut raw, session, last_status, &captured)?;
-    prepare_expanded(raw, words, session, last_status, standalone, &captured)
+    prepare_expanded(raw, words, session, last_status, context, &captured)
 }
 
 // The option is evaluated at execution: a previously parsed function may
@@ -275,7 +283,9 @@ pub(super) fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
                 return false;
             }
             let key = key.to_owned();
-            if word.remove_assignment_prefix(key.len() + 1).is_none() { return true; }
+            if word.remove_assignment_prefix(key.len() + 1).is_none() {
+                return true;
+            }
             let value = std::mem::take(word);
             raw.assignments.push((key, Assignment::Scalar(value)));
             false
@@ -337,9 +347,10 @@ pub(super) fn prepare_expanded(
     words: Vec<String>,
     session: &mut Session,
     last_status: u8,
-    standalone: bool,
+    context: CommandContext,
     captured: &Cell<Option<u8>>,
 ) -> Result<PreparedCommand, crate::expansion::Error> {
+    let standalone = context != CommandContext::Pipeline;
     // A lone assignment has no following word, redirect or trace that needs a copy.
     let direct_assignment = standalone
         && words.is_empty()
@@ -532,11 +543,9 @@ pub(super) fn prepare_expanded(
                     } else {
                         exp.arithmetic(subscript)?
                     };
-                    Some(
-                        exp.session
-                            .relative_index(base, n)
-                            .map_err(|_| crate::expansion::Error::discard(format!("{key}: bad array subscript")))?,
-                    )
+                    Some(exp.session.relative_index(base, n).map_err(|_| {
+                        crate::expansion::Error::discard(format!("{key}: bad array subscript"))
+                    })?)
                 } else {
                     None
                 };
@@ -610,6 +619,21 @@ pub(super) fn prepare_expanded(
         });
     }
     lookup::command_prefix(&mut cmd, session);
+    if matches!(
+        context,
+        CommandContext::Shell | CommandContext::BackgroundJobSpec
+    ) && cmd.search != lookup::Search::BuiltinsOnly
+        && cmd.words.first().is_some_and(|word| word.starts_with('%'))
+    {
+        let builtin = if context == CommandContext::BackgroundJobSpec {
+            "bg"
+        } else {
+            "fg"
+        };
+        cmd.words.insert(0, builtin.into());
+        cmd.search = lookup::Search::JobSpec;
+        return Ok(cmd);
+    }
     expand_prepared_redirects(
         &mut cmd,
         raw.redirects,
@@ -641,8 +665,8 @@ fn expand_prepared_redirects(
         // Clone only if an expansion can change a variable in that context.
         let child = assignment_only || builtin(cmd, last_status, session).is_none();
         let process_scope = session.substitutions.scope();
-        let mut isolated =
-            (child && redirects.iter().any(|r| redirection_observable(r, session))).then(|| session.clone());
+        let mut isolated = (child && redirects.iter().any(|r| redirection_observable(r, session)))
+            .then(|| session.clone());
         let mut exp = Expansion::with_assignments(
             isolated.as_mut().unwrap_or(session),
             last_status,

@@ -74,7 +74,14 @@ impl Program {
                         {
                             return None;
                         }
-                        target = Some((name, if op == "=" { None } else { Some(Binary::parse(op.strip_suffix('=')?)?) }));
+                        target = Some((
+                            name,
+                            if op == "=" {
+                                None
+                            } else {
+                                Some(Binary::parse(op.strip_suffix('=')?)?)
+                            },
+                        ));
                         stack = 0;
                     } else {
                         while let Some(&top) = operators.last() {

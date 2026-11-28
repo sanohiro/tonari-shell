@@ -8,6 +8,8 @@ Check file and process effects at shell boundaries. Assignment-only commands upd
 
 For editing and history, check both the text buffer and its display across a pasted UTF-8 sequence, undo, and suspension for a caught signal. Edit cursor positions use Unicode grapheme boundaries. Test persisted history using concurrent sessions and a pre-existing file, including a final line without a newline. A successful write to a new file alone cannot detect loss of earlier entries. [PTY and history tests](../tests/review_interactive.py)
 
+GNU Bash 5.3 では `test` の括弧内にある空文字列を誤って真とする場合があります。Tonari はそのグループの値を参照して偽を返します。
+
 標準入力から複合コマンドを読むときは、全体を再解析する箇所と、子コマンドが共有する入力の位置を別々に検証します。通常ファイルでは未消費分を戻せますが、パイプでは読んだバイトを戻せません。履歴は既存ファイルへの保存、複数セッション、末尾の改行、終了トラップが変更した保存先まで確認します。日本語・絵文字の編集では、バイト列の正しさに加えて、打鍵からエコーまでの p95 を計測します。
 
 ## Scaling of input, shell patterns and mutable state / 入力・パターン・状態更新の計算量

@@ -127,6 +127,15 @@ pub(crate) fn trailing_escape(text: &str) -> bool {
     text.ends_with('\\') && text.bytes().rev().take_while(|&b| b == b'\\').count() % 2 != 0
 }
 
+fn needs_pattern_matcher(text: &str) -> bool {
+    text.bytes()
+        .any(|byte| matches!(byte, b'?' | b'[' | b'\\' | 0))
+}
+
+fn plain_pattern_segment(text: &str) -> bool {
+    !text.contains('*') && !needs_pattern_matcher(text)
+}
+
 impl<T: AsRef<str>> Matcher<T> {
     pub(crate) fn new(pattern: T) -> Self {
         Self::compile(pattern, false)
@@ -134,7 +143,7 @@ impl<T: AsRef<str>> Matcher<T> {
 
     fn compile(pattern: T, pathname: bool) -> Self {
         let text = pattern.as_ref();
-        if !text.bytes().any(|b| matches!(b, b'?' | b'[' | b'\\' | 0)) {
+        if !needs_pattern_matcher(text) {
             match text.split_once('*') {
                 None => return Self::Literal(pattern),
                 Some((left, right)) => {
@@ -406,7 +415,7 @@ pub(crate) struct ParameterPattern<'a> {
     starts: std::cell::OnceCell<Matcher<String>>,
     pub(crate) extended: bool,
     pub(crate) fold: Option<crate::session::CharacterLocale>,
-    pub(crate) group: Option<crate::pattern::extended::Pattern>,
+    pub(crate) group: Option<std::rc::Rc<extended::Pattern>>,
 }
 
 impl<'a> ParameterPattern<'a> {
@@ -415,17 +424,42 @@ impl<'a> ParameterPattern<'a> {
         extended: bool,
         fold: Option<crate::session::CharacterLocale>,
     ) -> Self {
-        use crate::pattern::extended::Pattern;
-        let group = match fold {
-            Some(locale)
-                if !text.is_empty()
-                    && (crate::pattern::has_magic(text, false)
-                        || extended && crate::pattern::extended::has_group(text)) =>
-            {
-                Some(Pattern::insensitive(text, extended, locale))
+        let group = if extended && extended::has_group(text)
+            || fold.is_some() && !text.is_empty() && has_magic(text, false)
+        {
+            let compile = || {
+                std::rc::Rc::new(match fold {
+                    Some(fold) => extended::Pattern::insensitive(text, extended, fold),
+                    None => extended::Pattern::parse(text, extended),
+                })
+            };
+            // Bracket atoms can retain locale-specific answers. Reuse only
+            // locale-independent operators across separate expansions.
+            if text.len() <= 4096 && !text.contains('[') {
+                type RecentGroup = (
+                    Box<str>,
+                    bool,
+                    Option<CharacterLocale>,
+                    std::rc::Rc<extended::Pattern>,
+                );
+                thread_local! {static RECENT: std::cell::RefCell<Option<RecentGroup>> = const {std::cell::RefCell::new(None)};}
+                Some(RECENT.with_borrow_mut(|slot| {
+                    if let Some((previous, was_extended, was_fold, pattern)) = slot
+                        && previous.as_ref() == text
+                        && *was_extended == extended
+                        && *was_fold == fold
+                    {
+                        return pattern.clone();
+                    }
+                    let pattern = compile();
+                    *slot = Some((text.into(), extended, fold, pattern.clone()));
+                    pattern
+                }))
+            } else {
+                Some(compile())
             }
-            _ if extended => Pattern::new(text),
-            _ => None,
+        } else {
+            None
         };
         Self {
             text,
@@ -501,9 +535,7 @@ pub(crate) fn trim_boundary(
     };
     let literal = star.unwrap_or(pattern);
     let plain = group.is_none()
-        && !literal
-            .bytes()
-            .any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | 0))
+        && plain_pattern_segment(literal)
         && memchr::memchr(0, value.as_bytes()).is_none();
     if plain {
         if star.is_some() {
@@ -528,8 +560,8 @@ pub(crate) fn trim_boundary(
         && let Some((head, tail)) = pattern.split_once('*')
         && !head.is_empty()
         && !tail.is_empty()
-        && !head.contains(['?', '[', '\\', '\0'])
-        && !tail.contains(['*', '?', '[', '\\', '\0'])
+        && !needs_pattern_matcher(head)
+        && plain_pattern_segment(tail)
         && memchr::memchr(0, value.as_bytes()).is_none()
     {
         if prefix {

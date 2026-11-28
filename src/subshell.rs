@@ -1088,9 +1088,7 @@ fn launch_list(
         vec![Ok(pid)],
         session.current_command.as_ref().map_or_else(
             || "command list".into(),
-            |location| {
-                crate::execute::job_command(location.text()).into()
-            },
+            |location| crate::execute::job_command(location.text()).into(),
         ),
         false,
         &mut session.pipe_status,

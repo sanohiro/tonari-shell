@@ -175,6 +175,15 @@ fn prepare_classes_and_case(atoms: &mut [Atom], fold: Option<super::CharacterLoc
 }
 
 fn one_character<const PATHNAME: bool>(atom: &Atom, value: &str, pos: usize) -> Option<usize> {
+    one_character_in_range::<PATHNAME>(atom, value, pos, !super::glob_locale::collated_ranges())
+}
+
+fn one_character_in_range<const PATHNAME: bool>(
+    atom: &Atom,
+    value: &str,
+    pos: usize,
+    cache_ascii: bool,
+) -> Option<usize> {
     let c = value[pos..].chars().next()?;
     if PATHNAME && c == '/' {
         return None;
@@ -185,7 +194,7 @@ fn one_character<const PATHNAME: bool>(atom: &Atom, value: &str, pos: usize) -> 
     }
     if let Atom::Class(class, cache) = atom {
         let (known, matched) = cache.get();
-        let bit = if c.is_ascii() && !super::glob_locale::collated_ranges() {
+        let bit = if c.is_ascii() && cache_ascii {
             1u128 << (c as u32)
         } else {
             0
@@ -623,8 +632,9 @@ impl Pattern {
             return Some(false);
         }
         let mut pos = 0;
+        let cache_ascii = !super::glob_locale::collated_ranges();
         while pos < rest.len() {
-            let Some(end) = one_character::<PATHNAME>(unit, rest, pos) else {
+            let Some(end) = one_character_in_range::<PATHNAME>(unit, rest, pos, cache_ascii) else {
                 return Some(false);
             };
             pos = end;
@@ -674,9 +684,10 @@ impl Pattern {
                 return None;
             }
         }
+        let cache_ascii = !super::glob_locale::collated_ranges();
         let advance = |pos| {
             if let Some(unit) = unit {
-                one_character::<false>(unit, value, pos)
+                one_character_in_range::<false>(unit, value, pos, cache_ascii)
             } else {
                 alternatives.iter().find_map(|seq| match &seq[0] {
                     Atom::Text(s) if value[pos..].starts_with(&**s) => Some(pos + s.len()),

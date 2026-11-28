@@ -17,6 +17,8 @@ Release executables were timed in interleaved order on a native Apple M1 and a n
 
 PTY latency uses an already running shell and measures from input to the corresponding visible response. With 10,000 records or directory entries on M1, median / p95 for the review build were 0.107 / 0.111 ms for Ctrl-R and 3.651 / 3.724 ms for Tab. GNU Bash measured 0.281 / 0.299 and 7.360 / 7.768 ms. A 16 KiB bracketed paste measured 2.409 / 2.435 ms for Tonari and 17.080 / 17.480 ms for Bash across interleaved trials. [Input harness](../tools/bench_editor_input.py)
 
+Linux PTY measurements (current Tonari median / p95) were 0.049 / 0.070 ms for one committed scalar, 1.462 / 1.510 ms for a 16 KiB paste and 0.098 / 0.154 ms for Ctrl-R with 10,000 entries. Filename completion over 10,000 files took 1.426 / 1.435 ms versus Bash at 1.590 / 1.632 ms; this workload still exceeds the two-thirds target. A separate M1 run measured 3.61 ms from exec to the clean first prompt, versus 3.68 ms for #54 and 9.57 ms for GNU Bash. [Native Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/46139408556) · [Startup harness](../tools/bench_startup.py)
+
 4,000 行の関数では、M1 のファイル起動は 14.19 ms、リダイレクトは 14.27 ms、共有パイプ経由は 65.28 ms でした。Bash は同順に 30.47、30.70、81.30 ms です。パイプ入力では子が次に読む文字を残す必要があり、この条件では 2/3 目標に届いていません。シェル操作・ジョブ制御を測る別の23ケースでは、M1 の Tonari は Bash より全件速く、21件が 2/3 以内でした。残る2件はリダイレクト付き PATH 探索（51.962 → 39.118 ms）と EXIT トラップ付きサブシェル（38.263 → 29.082 ms）です。
 
 <a id="shell-scaling"></a>

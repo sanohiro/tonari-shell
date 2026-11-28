@@ -4,6 +4,7 @@ import argparse
 import os
 import random
 import statistics
+import sys
 import time
 from pathlib import Path
 import subprocess
@@ -20,11 +21,18 @@ def benchmarks(programs, env, scratch):
         "dynamic-extglob": 'v=apple; w="@(apple|pear)"; for ((i=0;i<10000;i++)); do [[ $v == $w ]]; done',
         "prefix-capture": 'for ((i=0;i<2000;i++)); do declare "x$i=entry"; done; for ((i=0;i<100;i++)); do a=1 b=$(echo "$a") :; done',
         "shell-locale": 'LC_ALL=C; v=one; for ((i=0;i<5000;i++)); do [[ $v == [[:alpha:]]* ]]; done',
+        "posix-literal-aliases": 'set -o posix\n' + ''.join(f'alias a{i}=word\n' for i in range(800)),
+        "compiled-arithmetic": 'for ((i=0;i<10000;i++)); do ((x=(i*5+3)^(i>>1))); done; :',
+        "substitution-body": 'for ((i=0;i<3000;i++)); do v=$(printf "%s" "$i"); done',
+        "static-trim": 'shopt -s extglob; x=wordending; for ((i=0;i<4000;i++)); do v=${x%%@(ending|ed)}; done',
+        "repeated-bracket": 'v=ABCABCABC; p="+([[:upper:]])"; for ((i=0;i<4000;i++)); do [[ $v == $p ]]; done',
+        "utf8-boundaries": 'v=$(printf "あ%.0s" {1..1200}); for ((i=0;i<1000;i++)); do x=${v:800:100}; done; echo "${#x}"',
         "brace-literal": ": '" + "z" * 100 + "' " + "a{" * 1000,
     }
     rng = random.Random(42)
     print("name," + ",".join(programs))
     for name, script in workloads.items():
+        case_env = env if name != "utf8-boundaries" else dict(env, LC_ALL="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8")
         samples = {k: [] for k in programs}
         for run in range(8):
             order = list(programs)
@@ -32,8 +40,10 @@ def benchmarks(programs, env, scratch):
             for k in order:
                 start = time.perf_counter_ns()
                 sub = subprocess.run([programs[k], "--noprofile", "--norc", "-c", script],
-                                     env=env, cwd=scratch, capture_output=True, timeout=30)
+                                     env=case_env, cwd=scratch, capture_output=True, timeout=30)
                 elapsed = (time.perf_counter_ns() - start) / 1e6
+                if name == "utf8-boundaries" and sub.stdout != b"100\n":
+                    raise RuntimeError(f"{k}: unexpected UTF-8 slice length {sub.stdout!r}")
                 if sub.returncode:
                     raise RuntimeError(f"{name}/{k}: {sub.stderr!r}")
                 if run: samples[k].append(elapsed)
@@ -56,6 +66,8 @@ def main():
         "nounset let": "set -u; let 'absent+1'; echo unexpected",
         "nounset loop": 'set -u; for ((i=0; i<absent; ++i)); do :; done; echo unexpected',
         "nounset parameter in command": '(( ${absent?required} )); echo unexpected',
+        "quoted array separator order": 'a=(a "b c" 雪); IFS=; printf "<%s>" "${a[*]}${IFS:=:}${a[*]}"',
+        "posix literal aliases and deferred subscripts": 'set -o posix\nalias index=\'printf 1\'\nalias other=index\na=(x y); printf \'%s\' "${a[$(other)]}"',
         "array expansion order": 'a=(1 2); printf "<%s>" "${a[@]}$((a[2]=9))"',
         "slice expansion order": 's=abcdef; echo "${s:s=2}"',
         "literal arithmetic": "n='$k'; k=42; let 'v=n' 2>/dev/null; echo $?/$v",

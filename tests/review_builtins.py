@@ -31,6 +31,14 @@ def main():
             assert (result.returncode, result.stdout) == expected, (shell, argv, result)
             return result
 
+        (root / "tonari-review-completion").mkdir()
+        for prefix in ("~/", "~//"):
+            for shell in (reference, candidate):
+                checked(shell, ["-c", "compgen -d \"$1\"", "sh", prefix + "tonari-review-comp"],
+                        (0, (prefix + "tonari-review-completion\n").encode()))
+        for shell in (reference, candidate):
+            checked(shell, ["-c", "compgen -d '~/us'"], (0, b"~/usr\n"), {"HOME": ""})
+
         where = root / "scripts"
         where.mkdir()
         sample = where / "input.sh"
@@ -139,6 +147,16 @@ def main():
             for shell in (reference, candidate):
                 result = run(shell, "-c", cmd)
                 assert result.returncode and operand in result.stderr, (cmd, result)
+        for command in ("test '(' '(' ')'", "test = -o -1 -o -z", "test z -a -t -o x"):
+            checked(candidate, ["-c", command], (0, b""))
+        for command, word in [("test invalid -eq 1", b"invalid"), ("test 1 -eq invalid", b"invalid"),
+                              ("test -t badfd", b"badfd"), ("[[ -t badfd ]]", b"badfd")]:
+            failure = checked(candidate, ["-c", command], (2, b""))
+            assert word in failure.stderr, failure
+        # GNU Bash 5.3 tests argv[1] even inside a later one-argument group.
+        # An empty string has false truth value wherever the group appears.
+        checked(candidate, ["-c", "test '(' '' ')' -a '(' x ')'"], (1, b""))
+
         checked(candidate, ["-c", "printf '%(%8s)T' 42"], (0, b"      42"), {"TZ": "UTC0"})
         checked(candidate, ["-c", "printf '%(%Es|%Os)T' 42"], (0, b"42|42"), {"TZ": "JST-9"})
         print("Startup, directory, shared-descriptor and builtin contracts passed", flush=True)

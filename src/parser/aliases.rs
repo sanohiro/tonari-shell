@@ -149,7 +149,7 @@ impl Expanded {
         super::Location {
             start: 0,
             end: text.len(),
-            subscript_aliases: reader.subscript_aliases(&text),
+            subscript_aliases: reader.subscript_aliases(),
             source: text,
             line: reader.first_line + lines,
         }

@@ -655,6 +655,12 @@ impl Session {
 }
 
 impl Entries {
+    fn mark_incomplete(&mut self, identity: (u64, u64)) {
+        if !self.incomplete_files.contains(&identity) {
+            self.incomplete_files.push(identity);
+        }
+    }
+
     fn incomplete(&self, path: &std::path::Path) -> bool {
         !self.incomplete_files.is_empty()
             && fs::metadata(path).is_ok_and(|m| self.incomplete_files.contains(&(m.dev(), m.ino())))

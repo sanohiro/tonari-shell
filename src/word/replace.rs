@@ -17,6 +17,20 @@ fn write_replacement(out: &mut String, template: &str, matched: &str, expand_amp
     }
 }
 
+fn literal_replacement<'a>(
+    template: &'a str,
+    needle: &str,
+    amp: bool,
+) -> std::borrow::Cow<'a, str> {
+    if amp && template.contains(['\\', '&']) {
+        let mut rendered = String::new();
+        write_replacement(&mut rendered, template, needle, true);
+        rendered.into()
+    } else {
+        template.into()
+    }
+}
+
 pub(super) fn literal(
     text: &str,
     needle: &str,
@@ -25,14 +39,9 @@ pub(super) fn literal(
     amp: bool,
 ) -> String {
     use ReplaceMode::*;
-    let mut rendered = String::new();
-    let replacement = if amp && template.contains(['\\', '&']) {
-        write_replacement(&mut rendered, template, needle, true);
-        &rendered
-    } else {
-        template
-    };
-    if needle == replacement {
+    let replacement = literal_replacement(template, needle, amp);
+    let replacement = replacement.as_ref();
+    if needle == replacement || needle.is_empty() && matches!(mode, First | All) {
         return text.to_owned();
     }
     let finder =
@@ -182,13 +191,11 @@ pub(super) fn substitute(
     if group.is_none() && !crate::pattern::has_magic(pattern, false) {
         let literal = crate::pattern::unescape(pattern);
         let needle = literal.as_ref();
-        let mut rendered = String::new();
-        let replacement = if expand_amp {
-            write_replacement(&mut rendered, template, needle, expand_amp);
-            rendered.as_str()
-        } else {
-            template
-        };
+        if mode == All && !needle.is_empty() {
+            return self::literal(&text, needle, template, mode, expand_amp);
+        }
+        let replacement = literal_replacement(template, needle, expand_amp);
+        let replacement = replacement.as_ref();
         if needle.is_empty() && !matches!(mode, Prefix | Suffix) {
             return text;
         }
@@ -199,7 +206,7 @@ pub(super) fn substitute(
                 }
                 text
             }
-            All => text.replace(needle, replacement),
+            All => text,
             Prefix if text.starts_with(needle) => {
                 text.replace_range(..needle.len(), replacement);
                 text

@@ -611,7 +611,13 @@ fn expanded_path(
         && (head.starts_with('$') || head == "~" && session.shopt.direxpand)
     {
         let value = if head == "~" {
-            session.get("HOME")
+            session.tilde_home().map(|home| {
+                if home.is_empty() {
+                    "/".into()
+                } else {
+                    home.into_owned()
+                }
+            })
         } else {
             let name = &head[1..];
             let name = name
@@ -1148,10 +1154,10 @@ impl<'a> Directory<'a> {
             .rfind('/')
             .map_or(("", prefix), |i| prefix.split_at(i + 1));
         let path = match dir.strip_prefix("~/") {
-            Some(rest) => Path::new(&session.get("HOME")?).join(rest),
+            Some(rest) => session.tilde_path(rest)?,
             None if let Some(name) = dir.strip_prefix('~') => {
                 let (name, rest) = name.split_once('/')?;
-                Path::new(&crate::word::named_home(name)?).join(rest)
+                Path::new(&crate::word::named_home(name)?).join(rest.trim_start_matches('/'))
             }
             None => Path::new(if dir.is_empty() { "." } else { dir }).to_owned(),
         };

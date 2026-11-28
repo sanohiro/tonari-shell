@@ -104,8 +104,13 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, String)> {
                 }
                 'd' => opts.delimiter = Delimiter::first(value),
                 'n' | 'N' => {
-                    opts.max_chars =
-                        Some(crate::builtins::integer_operand(value).and_then(|v| i32::try_from(v).ok()).filter(|v| *v >= 0).ok_or_else(|| (1, format!("{value}: invalid number")))? as usize);
+                    opts.max_chars = Some(
+                        crate::builtins::integer_operand(value)
+                            .and_then(|v| i32::try_from(v).ok())
+                            .filter(|v| *v >= 0)
+                            .ok_or_else(|| (1, format!("{value}: invalid number")))?
+                            as usize,
+                    );
                     opts.exact = flag == 'N';
                 }
                 'u' => {

@@ -31,9 +31,10 @@ pub(crate) fn format<'a>(source: &'a str, session: &crate::Session) -> Result<Co
                 after_separator = true;
                 continue;
             }
-            let word = token
-                .keyword()
-                .filter(|word| lexer::command_position(&tokens[..i]) || *word == "do" && i > 0 && matches!(tokens[i-1],Token::Arithmetic(_)));
+            let word = token.keyword().filter(|word| {
+                lexer::command_position(&tokens[..i])
+                    || *word == "do" && i > 0 && matches!(tokens[i - 1], Token::Arithmetic(_))
+            });
             let closing = matches!(word, Some("fi" | "done" | "elif" | "else"));
             if closing {
                 depth = depth.saturating_sub(1);

@@ -221,13 +221,20 @@ impl Word {
                 _ => return None,
             },
         };
-        (text.as_bytes().get(length.get()) == Some(&b'=')).then(|| text.get(..length.get())).flatten()
+        (text.as_bytes().get(length.get()) == Some(&b'='))
+            .then(|| text.get(..length.get()))
+            .flatten()
     }
 
-    pub(crate) fn take_assignment_name(&mut self, length: std::num::NonZeroUsize) -> Option<String> {
+    pub(crate) fn take_assignment_name(
+        &mut self,
+        length: std::num::NonZeroUsize,
+    ) -> Option<String> {
         if let Self::Expanded(parts) = self
             && let Some(Part::Text(prefix)) = parts.first_mut()
-            && prefix.len() == length.get() + 1 && prefix.ends_with('=') {
+            && prefix.len() == length.get() + 1
+            && prefix.ends_with('=')
+        {
             let mut name = std::mem::take(prefix);
             name.pop();
             return Some(name);
@@ -245,7 +252,9 @@ impl Word {
                 _ => return None,
             },
         };
-        if length == 0 || text.as_bytes().get(length - 1) != Some(&b'=') { return None; }
+        if length == 0 || text.as_bytes().get(length - 1) != Some(&b'=') {
+            return None;
+        }
         text.drain(..length);
         Some(())
     }
@@ -674,8 +683,14 @@ impl Word {
         positional: &[String],
     ) -> Vec<String> {
         let mut words = Vec::new();
-        self.append_fields(lookup, positional, ||lookup("IFS").map(Into::into), Some(&Default::default()), &mut words)
-            .unwrap();
+        self.append_fields(
+            lookup,
+            positional,
+            || lookup("IFS").map(Into::into),
+            Some(&Default::default()),
+            &mut words,
+        )
+        .unwrap();
         words
     }
 

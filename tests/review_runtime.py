@@ -47,6 +47,18 @@ $x/${x}/$missing
 EOF
 """,
         "compound redirection": """f(){ { if [[ $1 == hi ]]; then echo "$2"; fi; } >result; }; f hi ok; cat result; f bye no; cat result;""",
+        "foreground job shorthand": """set -m; exec 3>&1 >/dev/null
+/bin/sh -c 'exit 9' & p=$!; j=%1; command "$j" >ignored
+echo "$?:$_:$((p==$!))" >&3; test ! -e ignored
+""",
+        "background job shorthand": """set -m; exec 3>&1 >/dev/null
+/bin/sh -c 'kill -STOP "$$"; exit 13' & p=$!
+wait "$p"; %1 &
+echo "$?:$_:$((p==$!))" >&3; wait "$p"; echo $? >&3
+""",
+        "quoted asynchronous job name": """set -m; sleep .05 & p=$!; '%1' 2>/dev/null &
+child=$!; echo $((child!=p)); wait "$child"; echo "$?"; wait "$p"
+""",
         "pipeline context": """a=(one); i=0; f(){ echo "$1/$2/$BASH_SUBSHELL"; }; f "$BASH_SUBSHELL" "${a[i++]}" | cat; echo "$i" """,
     })
     # Bash 5.3 retains background statuses for repeated wait -n and accepts a

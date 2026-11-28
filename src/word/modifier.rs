@@ -593,59 +593,59 @@ impl Modification {
 fn character_boundary(s: &str, n: i64) -> Option<usize> {
     // Positive bounds only need the requested prefix. Negative bounds
     // count from the far end, independent of the UTF-8 byte width.
-        let magnitude = n.unsigned_abs() as usize;
-        if magnitude > s.len() {
-            return None;
-        }
-        let bytes = s.as_bytes();
-        let part = if n < 0 {
-            &bytes[s.len() - magnitude..]
+    let magnitude = n.unsigned_abs() as usize;
+    if magnitude > s.len() {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let part = if n < 0 {
+        &bytes[s.len() - magnitude..]
+    } else {
+        &bytes[..magnitude]
+    };
+    if part.is_ascii() {
+        return Some(if n < 0 {
+            s.len() - magnitude
         } else {
-            &bytes[..magnitude]
-        };
-        if part.is_ascii() {
-            return Some(if n < 0 {
-                s.len() - magnitude
-            } else {
-                magnitude
-            });
-        }
-        let mut rest = s;
-        let mut left = magnitude;
-        // chars().count() counts UTF-8 lead bytes in machine words. Consume
-        // whole chunks before resolving the final character boundary.
-        const BLOCK: usize = 1024;
-        while left >= BLOCK && rest.len() >= BLOCK {
-            if n < 0 {
-                let mut cut = rest.len() - BLOCK;
-                while !rest.is_char_boundary(cut) {
-                    cut += 1;
-                }
-                left -= rest[cut..].chars().count();
-                rest = &rest[..cut];
-            } else {
-                let mut cut = BLOCK;
-                while !rest.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                left -= rest[..cut].chars().count();
-                rest = &rest[cut..];
-            }
-        }
-        if left == 0 {
-            return Some(if n < 0 {
-                rest.len()
-            } else {
-                s.len() - rest.len()
-            });
-        }
+            magnitude
+        });
+    }
+    let mut rest = s;
+    let mut left = magnitude;
+    // chars().count() counts UTF-8 lead bytes in machine words. Consume
+    // whole chunks before resolving the final character boundary.
+    const BLOCK: usize = 1024;
+    while left >= BLOCK && rest.len() >= BLOCK {
         if n < 0 {
-            rest.char_indices().rev().nth(left - 1).map(|(i, _)| i)
+            let mut cut = rest.len() - BLOCK;
+            while !rest.is_char_boundary(cut) {
+                cut += 1;
+            }
+            left -= rest[cut..].chars().count();
+            rest = &rest[..cut];
         } else {
-            rest.char_indices()
-                .nth(left - 1)
-                .map(|(i, c)| s.len() - rest.len() + i + c.len_utf8())
+            let mut cut = BLOCK;
+            while !rest.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            left -= rest[..cut].chars().count();
+            rest = &rest[cut..];
         }
+    }
+    if left == 0 {
+        return Some(if n < 0 {
+            rest.len()
+        } else {
+            s.len() - rest.len()
+        });
+    }
+    if n < 0 {
+        rest.char_indices().rev().nth(left - 1).map(|(i, _)| i)
+    } else {
+        rest.char_indices()
+            .nth(left - 1)
+            .map(|(i, c)| s.len() - rest.len() + i + c.len_utf8())
+    }
 }
 
 fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {

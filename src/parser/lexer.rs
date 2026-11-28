@@ -825,7 +825,6 @@ fn process_word(chars: &mut Chars<'_>, word: &mut WordBuilder, input: bool) -> R
     Ok(())
 }
 
-
 fn process_start(source: &str) -> bool {
     source.starts_with("<(") || source.starts_with(">(")
 }

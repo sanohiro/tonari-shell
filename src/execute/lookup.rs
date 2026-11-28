@@ -12,6 +12,7 @@ pub(super) enum Search {
     Normal,
     NoFunctions,
     BuiltinsOnly,
+    JobSpec,
 }
 
 fn default_system_path() -> &'static std::ffi::OsStr {

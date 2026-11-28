@@ -129,10 +129,10 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         }
         crate::eval::expand_case(s, word.clone(), status, false).map(std::borrow::Cow::Owned)
     }
-    let error = |message: &'static str| {
+    fn error(message: impl std::fmt::Display) -> Flow {
         diagnostic!("[[: {message}");
         Flow::Continue(2)
-    };
+    }
     if !session.xtrace {
         match expr {
             Word(w) | Unary("-n" | "-z", w) if let Some(v) = w.stored_parameter(session) => {

@@ -12,6 +12,7 @@ use crate::pattern::Matcher;
 use crate::test_expression::Expr;
 pub(crate) use array::quoted_initializer;
 pub use array::{Assignment, Subscript};
+pub(crate) use test_expr::unary_test_operator;
 mod ansi;
 pub(crate) use ansi::decode as ansi_string;
 pub(crate) mod completion_words;
@@ -450,30 +451,34 @@ thread_local! {
 
 // During recursive lexing, a nested AST can start after the first line of
 // the outer input. Store byte offsets only. No reference outlives the lex.
-fn retry_alias_quote(source: &str, final_input: bool,error: Error) -> Result<Vec<Statement>,Error> {
-
-            // An alias opening a quote can supply the missing left delimiter
-            // for the following source. Only retry a literal command name.
-            let aliases = aliases::current();
-            let trimmed = source.trim_start_matches([' ', '\t']);
-            let name = &trimmed[..lexer::plain_prefix(trimmed)];
-            let Some(value) = aliases.get(name).filter(|_| {
-                !name.is_empty() && trimmed[name.len()..].starts_with(lexer::separator)
-            }) else {
-                return Err(error);
-            };
-            let mut nested = aliases.clone();
-            Rc::make_mut(nested.0.as_mut().unwrap()).remove(name);
-            let replacement = aliases::with(nested.clone(), || lex(value, false, final_input));
-            if !matches!(replacement, Err(Error::Incomplete(_))) {
-                return Err(error);
-            }
-            let end = source.len() - trimmed.len() + name.len();
-            let (tokens, spans, _) = lex(&source[..end], false, true)?;
-            let mut reader = Reader::new(tokens, spans, source);
-            reader.final_input = final_input;
-            reader.joined_alias(name.into(), value, nested)?;
-            reader.list(&[])
+fn retry_alias_quote(
+    source: &str,
+    final_input: bool,
+    error: Error,
+) -> Result<Vec<Statement>, Error> {
+    // An alias opening a quote can supply the missing left delimiter
+    // for the following source. Only retry a literal command name.
+    let aliases = aliases::current();
+    let trimmed = source.trim_start_matches([' ', '\t']);
+    let name = &trimmed[..lexer::plain_prefix(trimmed)];
+    let Some(value) = aliases
+        .get(name)
+        .filter(|_| !name.is_empty() && trimmed[name.len()..].starts_with(lexer::separator))
+    else {
+        return Err(error);
+    };
+    let mut nested = aliases.clone();
+    Rc::make_mut(nested.0.as_mut().unwrap()).remove(name);
+    let replacement = aliases::with(nested.clone(), || lex(value, false, final_input));
+    if !matches!(replacement, Err(Error::Incomplete(_))) {
+        return Err(error);
+    }
+    let end = source.len() - trimmed.len() + name.len();
+    let (tokens, spans, _) = lex(&source[..end], false, true)?;
+    let mut reader = Reader::new(tokens, spans, source);
+    reader.final_input = final_input;
+    reader.joined_alias(name.into(), value, nested)?;
+    reader.list(&[])
 }
 
 struct SourceLines {
@@ -570,7 +575,8 @@ impl Drop for Reader {
 }
 
 fn scalar_assignment(name: String, mut word: Word) -> Result<(String, Assignment<Word>), Error> {
-    word.remove_assignment_prefix(name.len() + 1).ok_or(Error::Invalid("invalid assignment prefix"))?;
+    word.remove_assignment_prefix(name.len() + 1)
+        .ok_or(Error::Invalid("invalid assignment prefix"))?;
     Ok((name, Assignment::Scalar(word)))
 }
 
@@ -633,13 +639,8 @@ impl Reader {
             .map_or(self.spans.len(), |s| s.token_count(self.spans.len()));
         count - self.tokens.len()
     }
-    fn subscript_aliases(&self, source: &str) -> crate::alias::Aliases {
-        // A literal alias definition cannot evaluate a deferred subscript.
-        // Keeping its old alias map would force a copy on the next insertion.
-        if READ_OPTIONS.get().posix
-            && !(source.starts_with("alias ")
-                && !source.contains(['$', '`', '[', ';', '|', '&', '(', '\n']))
-        {
+    fn subscript_aliases(&self) -> crate::alias::Aliases {
+        if READ_OPTIONS.get().posix {
             self.aliases.clone()
         } else {
             Default::default()
@@ -669,7 +670,7 @@ impl Reader {
         self.line_index.set(line);
         Location {
             source: self.source.clone(),
-            subscript_aliases: self.subscript_aliases(&self.source[start..end]),
+            subscript_aliases: self.subscript_aliases(),
             start,
             end,
             line: self.first_line + line,
@@ -839,8 +840,27 @@ impl Reader {
                 });
                 statements.reserve_exact(if more { 3 } else { 1 });
             }
+            let mut location = self.location(start);
+            if location.subscript_aliases.0.is_some()
+                && let Command::Pipeline(stages) = &command
+                && let [stage] = stages.as_slice()
+                && stage.compound.is_none()
+                && stage.redirects.is_empty()
+                && stage.assignments.is_empty()
+                && let Some((first, args)) = stage.words.split_first()
+                && first.as_literal() == Some("alias")
+                && args.iter().all(|arg| {
+                    arg.as_literal()
+                        .and_then(|value| value.split_once('='))
+                        .is_some_and(|(key, value)| is_identifier(key) && is_identifier(value))
+                })
+            {
+                // Every operand is a literal name=value pair of identifiers.
+                // Such a command has no expansion that can parse a subscript.
+                location.subscript_aliases = Default::default();
+            }
             statements.push(Statement {
-                location: self.location(start),
+                location,
                 condition,
                 negated: inverted.unwrap_or(false),
                 command,
@@ -892,7 +912,9 @@ impl Reader {
                 return Ok(Command::LiteralAssignment(text, name));
             }
             let mut word = word;
-            let key = word.take_assignment_name(name).ok_or(Error::Invalid("invalid assignment prefix"))?;
+            let key = word
+                .take_assignment_name(name)
+                .ok_or(Error::Invalid("invalid assignment prefix"))?;
             return Ok(Command::Scalar(Box::new((key, word))));
         }
         let start = self.position();
@@ -1425,7 +1447,12 @@ impl Reader {
                     protected,
                     assignment,
                 }) => {
-                    let assignment = assignment.map(|len| word.assignment_name(len).ok_or(Error::Invalid("invalid assignment prefix"))).transpose()?;
+                    let assignment = assignment
+                        .map(|len| {
+                            word.assignment_name(len)
+                                .ok_or(Error::Invalid("invalid assignment prefix"))
+                        })
+                        .transpose()?;
                     let declaration = assignment.is_some()
                         && matches!(
                             cmd.words
@@ -1519,6 +1546,24 @@ impl Reader {
                             && word.as_literal().is_some_and(reserved)
                         {
                             return Err(Error::Invalid("unexpected reserved word"));
+                        }
+                        let prefix = match &word {
+                            Word::Literal(text) => Some(text),
+                            Word::Expanded(parts) => match parts.first() {
+                                Some(crate::word::Part::Text(text)) => Some(text),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        // A lone asynchronous command resumes a job only if
+                        // its unexpanded first word begins with a bare percent.
+                        if cmd.assignments.is_empty()
+                            && prefix.is_some_and(|text| text.starts_with('%'))
+                        {
+                            let location = self.location(self.position() - 1);
+                            if location.text().starts_with('%') {
+                                cmd.location = Some(Box::new(location));
+                            }
                         }
                         // A bounded lookahead sizes the argument vector for short commands.
                         let args = self

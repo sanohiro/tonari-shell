@@ -298,7 +298,7 @@ fn start_raw(
                 }
         });
     if !observable {
-        return match prepare(raw, session, last_status, false) {
+        return match prepare(raw, session, last_status, CommandContext::Pipeline) {
             Ok(mut cmd) => start(
                 &mut cmd,
                 input,
@@ -337,7 +337,7 @@ fn start_raw(
             // caller's BASH_SUBSHELL depth, then enters its execution frame.
             let result = if raw.compound.is_none() && !needs_ordered_redirects(&raw, session) {
                 session.subshell_depth -= 1;
-                let prepared = prepare(raw, session, last_status, true);
+                let prepared = prepare(raw, session, last_status, CommandContext::Child);
                 session.subshell_depth += 1;
                 match prepared {
                     Ok(cmd) => run_prepared(cmd, None, last_status, true, session),
@@ -646,7 +646,7 @@ pub(super) fn capture_with_writer(
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
     use std::io::Write;
-    let cmd = prepare(writer.clone(), session, last, true).ok()?;
+    let cmd = prepare(writer.clone(), session, last, CommandContext::Child).ok()?;
     let output = PlainOutput::new(builtin(&cmd, last, session)?, &cmd, 512)?;
     let (input, write) = pipe().ok()?;
     let (bytes, status) = output.render(session);
@@ -673,7 +673,7 @@ pub(super) fn capture_external(
     last: u8,
     input: Option<OwnedFd>,
 ) -> Result<(String, u8), &'static str> {
-    let mut cmd = match prepare(raw, session, last, true) {
+    let mut cmd = match prepare(raw, session, last, CommandContext::Child) {
         Ok(cmd) => cmd,
         Err(error) => {
             diagnostic!("{error}");
@@ -896,6 +896,11 @@ fn run_ordered(
             return Ok(e.flow(session));
         }
     };
+    let (skip, search, _) = lookup::scan_prefix(&words, lookup::Search::Normal, session);
+    if search != lookup::Search::BuiltinsOnly && words.get(skip).is_some_and(|w| w.starts_with('%'))
+    {
+        raw.redirects.clear();
+    }
     let redirects = if words.first().is_some_and(|w| !special_builtin(w)) {
         std::mem::take(&mut raw.redirects)
     } else {
@@ -914,7 +919,14 @@ fn run_ordered(
             .is_none()
         };
     named_fd::with_redirects(redirects, session, status, child_redirects, |session| {
-        let cmd = match prepare_expanded(raw, words, session, status, true, &captured) {
+        let cmd = match prepare_expanded(
+            raw,
+            words,
+            session,
+            status,
+            CommandContext::Shell,
+            &captured,
+        ) {
             Ok(cmd) => cmd,
             Err(e) => {
                 e.report("");
@@ -935,6 +947,11 @@ fn run_prepared(
     replace: bool,
     session: &mut Session,
 ) -> io::Result<Flow> {
+    if cmd.search == lookup::Search::JobSpec {
+        let flow = crate::jobs::dispatch(&cmd.words, session, last_status);
+        session.last_argument = cmd.words.pop();
+        return Ok(flow);
+    }
     let simple = cmd.compound.is_none();
     if !cmd.named_redirects.is_empty() {
         let last = simple.then(|| cmd.words.last().cloned().unwrap_or_default());
@@ -1081,7 +1098,12 @@ fn prepared_foreground(
         {
             prepare::borrowed_arguments(&stage.words, session, last_status)
         }
-        _ => prepare(raw.into_owned(), session, last_status, true),
+        _ => prepare(
+            raw.into_owned(),
+            session,
+            last_status,
+            CommandContext::Shell,
+        ),
     };
     let cmd = match prepared {
         Ok(cmd) => cmd,
@@ -1236,6 +1258,27 @@ pub fn run_pipeline(
             replace,
             session,
         );
+    }
+    // Only an unquoted percent at the start of the original command word can
+    // resume an existing job in the parent for an asynchronous command.
+    if background
+        && let [stage] = pipeline.as_slice()
+        && stage
+            .location
+            .as_ref()
+            .is_some_and(|loc| loc.text().starts_with('%'))
+    {
+        if let Some(flow) = crate::traps::debug(session, last_status) {
+            return Ok(flow);
+        }
+        let raw = pipeline.pop().unwrap();
+        return match prepare(raw, session, last_status, CommandContext::BackgroundJobSpec) {
+            Ok(cmd) => run_prepared(cmd, None, last_status, false, session),
+            Err(error) => {
+                error.report("");
+                Ok(error.flow(session))
+            }
+        };
     }
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();

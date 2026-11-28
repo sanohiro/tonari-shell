@@ -598,8 +598,8 @@ impl<'a> Expansion<'a> {
 }
 
 impl Variables for Expansion<'_> {
-    fn decimal(&self, name: &str) -> Option<i64> {
-        self.borrowed_scalar(name).and_then(Session::plain_decimal)
+    fn scalar_text(&self, name: &str) -> Option<&str> {
+        self.borrowed_scalar(name)
     }
     fn get(&self, name: &str) -> Option<String> {
         self.lookup(name)

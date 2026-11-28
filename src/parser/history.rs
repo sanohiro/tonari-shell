@@ -19,9 +19,10 @@ pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
         return Cow::Borrowed(text);
     }
     with_tokens(text, |tokens, spans| {
-        if tokens.iter().any(|t| {
-            t.preserve_layout() || t.keyword()==Some("function")
-        }) {
+        if tokens
+            .iter()
+            .any(|t| t.preserve_layout() || t.keyword() == Some("function"))
+        {
             return Cow::Borrowed(text);
         }
         let mut result = String::new();
