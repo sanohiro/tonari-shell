@@ -663,12 +663,7 @@ pub fn text(
                 lookahead::function_run(text, &source.as_bytes()[end..], session, |size| {
                     parser::session_source_at(&source[start..end + size], false, session, base_line)
                 })
-                .map(|(p, n, lines)| {
-                    if !check && let parser::Command::Function { name, .. } = &p[0].command {
-                        session.functions.reserve_run(name, p.len());
-                    }
-                    (eval::Program::Fresh(p), n, lines)
-                })
+                .map(|(p, n, lines)| (eval::Program::Fresh(p), n, lines))
             } else {
                 None
             };

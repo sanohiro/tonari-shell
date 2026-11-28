@@ -20,13 +20,6 @@ impl std::ops::Deref for FunctionTable {
 }
 
 impl FunctionTable {
-    pub(crate) fn reserve_run(&mut self, first: &str, count: usize) {
-        if self.entries.capacity() - self.entries.len() < count && !self.entries.contains_key(first)
-        {
-            self.entries.reserve(count);
-        }
-    }
-
     fn insert(&mut self, name: String, function: Function) {
         if self.entries.insert(name, function).is_none() {
             self.names.take();
