@@ -334,7 +334,7 @@ pub(super) fn append(mut paths: Vec<String>, fields: &mut Vec<String>, collation
 
 // Completion lists use byte order and do not retain names between Tab presses.
 pub(crate) fn sorted_names(mut names: Vec<String>) -> Vec<String> {
-    if names.len() < 1024 {
+    if names.len() < 512 {
         names.sort_unstable();
         return names;
     }

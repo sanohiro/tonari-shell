@@ -1,6 +1,6 @@
 mod eval;
 mod lookahead;
-pub(crate) use eval::{EvalCache, builtin as eval_builtin};
+pub(crate) use eval::{EvalCache, builtin as eval_builtin, trap_text};
 use lookahead::{buffered_compound, file_group, whole_group};
 
 use crate::execute::fd::PrivateFile;

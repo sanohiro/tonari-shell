@@ -675,6 +675,61 @@ pub(crate) fn insensitive_match(
     extended: bool,
     locale: super::CharacterLocale,
 ) -> bool {
+    insensitive_match_with(value, pattern, extended, locale, || {
+        Pattern::insensitive(pattern, extended, locale).accepts(value, false)
+    })
+}
+
+pub(crate) fn insensitive_session(
+    value: &str,
+    pattern: &str,
+    extended: bool,
+    session: &crate::Session,
+) -> bool {
+    struct Entry {
+        source: String,
+        extended: bool,
+        fold: super::CharacterLocale,
+        locale: Option<std::rc::Rc<super::PatternLocale>>,
+        matcher: Pattern,
+    }
+    thread_local! {static LAST: std::cell::RefCell<Option<Entry>> = const {std::cell::RefCell::new(None)};}
+    let fold = session.character_locale();
+    insensitive_match_with(value, pattern, extended, fold, || {
+        let locale = super::session_locale(session);
+        let _guard = locale.as_ref().and_then(|l| l.enter());
+        if !session.shopt.globasciiranges || pattern.len() > 4096 {
+            return Pattern::insensitive(pattern, extended, fold).accepts(value, false);
+        }
+        LAST.with_borrow_mut(|last| {
+            let matches = last.as_ref().is_some_and(|old| {
+                old.extended == extended
+                    && old.source == pattern
+                    && old.fold == fold
+                    && old.locale.as_ref().map(std::rc::Rc::as_ptr)
+                        == locale.as_ref().map(std::rc::Rc::as_ptr)
+            });
+            if !matches {
+                *last = Some(Entry {
+                    source: pattern.into(),
+                    extended,
+                    fold,
+                    locale,
+                    matcher: Pattern::insensitive(pattern, extended, fold),
+                });
+            }
+            last.as_ref().unwrap().matcher.accepts(value, false)
+        })
+    })
+}
+
+fn insensitive_match_with(
+    value: &str,
+    pattern: &str,
+    extended: bool,
+    locale: super::CharacterLocale,
+    complex_match: impl FnOnce() -> bool,
+) -> bool {
     let complex = pattern
         .bytes()
         .any(|b| matches!(b, b'?' | b'[' | b'\\' | 0))
@@ -691,5 +746,5 @@ pub(crate) fn insensitive_match(
             _ => {}
         }
     }
-    Pattern::insensitive(pattern, extended, locale).accepts(value, false)
+    complex_match()
 }

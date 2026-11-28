@@ -58,7 +58,14 @@ impl Listing {
             // SAFETY: push copies the complete CStr including its terminating NUL,
             // and records that exact range in the append-only byte buffer.
             let name = unsafe { CStr::from_bytes_with_nul_unchecked(bytes) };
-            visit(Some(name), entry.kind)?;
+            // A regular name from a cached listing may have become a directory
+            // within one filesystem timestamp tick. Recheck its type on lookup.
+            let kind = if cfg!(target_os = "linux") && entry.kind == libc::DT_REG {
+                libc::DT_UNKNOWN
+            } else {
+                entry.kind
+            };
+            visit(Some(name), kind)?;
         }
         ControlFlow::Continue(())
     }

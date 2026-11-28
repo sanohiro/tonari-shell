@@ -532,45 +532,63 @@ impl Session {
         }
     }
 
+    pub(crate) fn join_array(&self, name: &str, separator: &str) -> Option<String> {
+        let name = self.reference_name(name).ok()?;
+        if name == "PIPESTATUS" || self.live_table(&name) {
+            return None;
+        }
+        Some(
+            match self.variables.get(name.as_ref())?.elements.as_deref()? {
+                Elements::Dense(values) => values.join(separator),
+                Elements::Records(records) if separator.is_empty() => records.text.clone(),
+                Elements::Records(records) => records.values().collect::<Vec<_>>().join(separator),
+                Elements::Sparse(values) => values
+                    .values()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(separator),
+                Elements::Associative(map) => map
+                    .ordered()
+                    .map(|(_, v)| v)
+                    .collect::<Vec<_>>()
+                    .join(separator),
+            },
+        )
+    }
+
     pub fn append_array_fields(&self, name: &str, keys: bool, fields: &mut Vec<String>) -> bool {
         let Ok(resolved) = self.reference_name(name) else {
             return false;
         };
         let name = resolved.as_ref();
-        if !self.live_table(name)
-            && let Some(map) = self.variables.get(name).and_then(Variable::associative)
-        {
-            if keys {
-                fields.extend_from_slice(map.ordered_keys());
-            } else {
-                fields.extend(map.ordered().map(|(_, v)| v.to_owned()));
-            }
-            return true;
-        }
-        if keys {
-            if !self.stored_array(name) || self.is_associative(name) {
-                return false;
-            }
-            let mut decimal = itoa::Buffer::new();
-            fields.extend(
-                self.indices(name)
-                    .into_iter()
-                    .map(|i| decimal.format(i).to_owned()),
-            );
-            return true;
-        }
-        if self.active_groups(name) && !self.variables.contains_key(name) {
+        if !keys && self.active_groups(name) && !self.variables.contains_key(name) {
             fields.extend_from_slice(Self::group_ids());
             return true;
         }
-        if name == "PIPESTATUS" {
+        if name == "PIPESTATUS" || self.live_table(name) {
             return false;
         }
-        match self.variables.get(name).and_then(|v| v.elements.as_deref()) {
-            Some(Elements::Dense(values)) => fields.extend_from_slice(values),
-            Some(Elements::Sparse(values)) => fields.extend(values.values().cloned()),
-            Some(Elements::Records(records)) => fields.extend(records.values().map(str::to_owned)),
-            _ => return false,
+        let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref()) else {
+            return false;
+        };
+        let mut decimal = itoa::Buffer::new();
+        match (elements, keys) {
+            (Elements::Associative(map), true) => fields.extend_from_slice(map.ordered_keys()),
+            (Elements::Associative(map), false) => {
+                fields.extend(map.ordered().map(|(_, v)| v.to_owned()))
+            }
+            (Elements::Sparse(values), true) => {
+                fields.extend(values.keys().map(|&i| decimal.format(i).to_owned()))
+            }
+            (Elements::Sparse(values), false) => fields.extend(values.values().cloned()),
+            (Elements::Dense(values), false) => fields.extend_from_slice(values),
+            (Elements::Records(records), false) => {
+                fields.extend(records.values().map(str::to_owned))
+            }
+            (Elements::Dense(_) | Elements::Records(_), true) => {
+                let count = elements.last_index().map_or(0, |last| last as usize + 1);
+                fields.extend((0..count).map(|i| decimal.format(i).to_owned()));
+            }
         }
         true
     }

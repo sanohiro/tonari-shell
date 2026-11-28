@@ -8,6 +8,10 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == shell-paths ]]; then
+  REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k shell_paths
+  exec bash tools/ci/shell-paths.sh "$current" "$bin/baseline" "$ref" "$out"
+fi
 if [[ $SUITE == runtime-review ]]; then
   REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k runtime_review
   bash tools/ci/runtime-review.sh "$current" "$bin/baseline" "$ref" "$out"

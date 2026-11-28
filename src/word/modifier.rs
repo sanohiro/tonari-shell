@@ -278,7 +278,10 @@ impl Modification {
                 replacement,
                 mode,
             } => {
-                let values = Values::read(name, env)?;
+                // Dynamic operands may change the subject while expanding.
+                let snapshot = (!(pattern.fixed_parts() && replacement.fixed_parts()))
+                    .then(|| Values::read(name, env))
+                    .transpose()?;
                 let pattern = env.pattern(std::mem::take(pattern))?;
                 replacement.resolve(env)?;
                 let replacement = std::mem::take(replacement);
@@ -297,6 +300,25 @@ impl Modification {
                         .nocasematch
                         .then(|| env.session.character_locale()),
                 );
+                if snapshot.is_none()
+                    && compiled.fold.is_none()
+                    && compiled.group.is_none()
+                    && !pattern.is_empty()
+                    && !crate::pattern::has_magic(&pattern, false)
+                    && let Some(text) = env.borrowed_scalar(name)
+                {
+                    return Ok(scalar(super::replace::literal(
+                        text,
+                        &crate::pattern::unescape(&pattern),
+                        &replacement,
+                        *mode,
+                        env.session.shopt.patsub_replacement,
+                    )));
+                }
+                let values = match snapshot {
+                    Some(values) => values,
+                    None => Values::read(name, env)?,
+                };
                 Ok(values.map(quoted, |v| {
                     super::replace::substitute(
                         v,
@@ -554,17 +576,41 @@ fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
                 magnitude
             });
         }
+        let mut rest = s;
+        let mut left = magnitude;
+        // chars().count() counts UTF-8 lead bytes in machine words. Consume
+        // whole chunks before resolving the final character boundary.
+        const BLOCK: usize = 1024;
+        while left >= BLOCK && rest.len() >= BLOCK {
+            if n < 0 {
+                let mut cut = rest.len() - BLOCK;
+                while !rest.is_char_boundary(cut) {
+                    cut += 1;
+                }
+                left -= rest[cut..].chars().count();
+                rest = &rest[..cut];
+            } else {
+                let mut cut = BLOCK;
+                while !rest.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                left -= rest[..cut].chars().count();
+                rest = &rest[cut..];
+            }
+        }
+        if left == 0 {
+            return Some(if n < 0 {
+                rest.len()
+            } else {
+                s.len() - rest.len()
+            });
+        }
         if n < 0 {
-            s.char_indices()
-                .rev()
-                .nth((n.unsigned_abs() - 1) as usize)
-                .map(|(i, _)| i)
-        } else if n == 0 {
-            Some(0)
+            rest.char_indices().rev().nth(left - 1).map(|(i, _)| i)
         } else {
-            s.char_indices()
-                .nth((n - 1) as usize)
-                .map(|(i, c)| i + c.len_utf8())
+            rest.char_indices()
+                .nth(left - 1)
+                .map(|(i, c)| s.len() - rest.len() + i + c.len_utf8())
         }
     };
     let Some(start) = boundary(v, start) else {

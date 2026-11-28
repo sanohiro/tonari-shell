@@ -390,6 +390,16 @@ impl Session {
         self.logical_directory_ref().map(Path::to_owned)
     }
 
+    pub(crate) fn capture_pwd(&mut self, physical: bool, out: &mut dyn Write) -> io::Result<()> {
+        let initialized = self.logical_cwd.get().is_some();
+        let result = self.write_pwd(physical, out);
+        // A substitution must not establish the parent's logical directory.
+        if !initialized {
+            self.logical_cwd.take();
+        }
+        result
+    }
+
     pub(crate) fn write_pwd(&mut self, physical: bool, out: &mut dyn Write) -> io::Result<()> {
         if !physical && !self.posix {
             return write_path(self.logical_directory_ref()?, out);

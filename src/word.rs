@@ -184,6 +184,19 @@ impl Word {
         }
     }
 
+    fn fixed_parts(&self) -> bool {
+        matches!(self, Self::Literal(_))
+            || matches!(self, Self::Expanded(parts) if parts.iter().all(|p| matches!(p, Part::Text(_) | Part::Unquoted(_) | Part::Pattern(_))))
+    }
+
+    fn fixed_pattern(self, extended: bool) -> String {
+        if extended {
+            self.extended_pattern(&|_| None, &[])
+        } else {
+            self.pattern(&|_| None, &[])
+        }
+    }
+
     pub fn declaration(self) -> Self {
         match self {
             Self::Expanded(parts) => Self::Declaration(parts),
@@ -383,6 +396,22 @@ impl Word {
                     longest,
                     quoted,
                 } => {
+                    if pattern.fixed_parts()
+                        && let Some(text) = env.borrowed_scalar(name)
+                    {
+                        let extended = env.session.shopt.glob.extglob;
+                        let source = std::mem::take(pattern.as_mut()).fixed_pattern(extended);
+                        let compiled =
+                            crate::pattern::ParameterPattern::new(&source, extended, None);
+                        let cut = crate::pattern::trim_boundary(text, &compiled, *prefix, *longest);
+                        let result = match cut {
+                            Some(index) if *prefix => &text[index..],
+                            Some(index) => &text[..index],
+                            None => text,
+                        };
+                        *part = literal(result.to_owned(), *quoted);
+                        continue;
+                    }
                     let values = modifier::Values::read(name, env)?;
                     let pattern = env.pattern(std::mem::take(pattern.as_mut()))?;
                     let compiled = crate::pattern::ParameterPattern::new(
@@ -534,11 +563,19 @@ impl Word {
                 Part::Parameter { name, quoted: true }
                     if name.ends_with("[*]") && array_elements_name(name).is_some() =>
                 {
+                    let separator = ifs_separator(&|k| env.lookup(k));
+                    if let Some((base, _, false)) = array_elements_name(name)
+                        && !env.shadows(base)
+                        && let Some(joined) = env.session.join_array(base, &separator)
+                    {
+                        *part = Part::Text(joined);
+                        continue;
+                    }
                     let modifier::Values::Elements(values, _) = modifier::Values::read(name, env)?
                     else {
                         unreachable!()
                     };
-                    *part = Part::Text(values.join(&ifs_separator(&|k| env.lookup(k))));
+                    *part = Part::Text(values.join(&separator));
                 }
                 Part::Parameter { name, quoted }
                     if !matches!(name.as_ref(), "@" | "*")

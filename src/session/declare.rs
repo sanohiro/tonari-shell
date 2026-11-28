@@ -281,6 +281,31 @@ fn print_variables(
     } else {
         operands
     };
+    const INLINE_OUTPUT: usize = 256;
+    if let [name] = operands
+        && name != "-"
+        && local_scope.is_none_or(|s| s.variables.contains_key(name))
+        && !matches!(name.as_str(), "BASHOPTS" | "SHELLOPTS")
+        && let Some(var) = session.scoped_variable(name, flags.global)
+        && var.declared
+        && !var.dynamic
+        && var.elements.is_none()
+        && name.len() + var.value.as_ref().map_or(0, String::len) < INLINE_OUTPUT
+    {
+        let mut buf = [0; INLINE_OUTPUT];
+        let mut dest = &mut buf[..];
+        if print_attribute(
+            &mut dest,
+            name,
+            var,
+            (attribute && session.posix).then_some(command),
+        )
+        .is_ok()
+        {
+            let used = INLINE_OUTPUT - dest.len();
+            return crate::Flow::Continue(crate::builtins::write_stdout_for(command, &buf[..used]));
+        }
+    }
     let mut out = crate::builtins::listing_stdout(command);
     let mut status = 0;
     if local

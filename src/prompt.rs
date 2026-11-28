@@ -173,8 +173,10 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
         }
         c @ ('w' | 'W') => {
             let start = output.len();
-            let path = session.get("PWD").unwrap_or_default();
-            let home = session.get("HOME").filter(|h| !h.is_empty() && h != "/");
+            let path = session.scalar_setting("PWD").unwrap_or_default();
+            let home = session
+                .scalar_setting("HOME")
+                .filter(|h| !h.is_empty() && h.as_ref() != "/");
             if home.as_ref() == Some(&path) {
                 output.push('~');
             } else if c == 'W' {
@@ -187,7 +189,7 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
                 );
             } else if let Some(rest) = home
                 .as_ref()
-                .and_then(|h| path.strip_prefix(h))
+                .and_then(|h| path.strip_prefix(h.as_ref()))
                 .filter(|s| s.starts_with('/'))
             {
                 output.push('~');
@@ -197,7 +199,7 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
             }
             if c == 'w'
                 && let Some(limit) = session
-                    .get("PROMPT_DIRTRIM")
+                    .scalar_setting("PROMPT_DIRTRIM")
                     .and_then(|s| s.parse::<usize>().ok())
                     .filter(|n| *n > 0)
             {

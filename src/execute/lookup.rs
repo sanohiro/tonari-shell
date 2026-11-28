@@ -124,7 +124,18 @@ enum Format {
 }
 
 pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
-    let command = cmd.words[0] == "command";
+    describe_words(&cmd.words, cmd.default_path, session, |out| {
+        crate::builtins::write_stdout_for(&cmd.words[0], out)
+    })
+}
+
+pub(crate) fn describe_words(
+    words: &[String],
+    use_default_path: bool,
+    session: &Session,
+    mut flush: impl FnMut(&mut Vec<u8>) -> u8,
+) -> u8 {
+    let command = words[0] == "command";
     let mut format = if command {
         Format::Name
     } else {
@@ -133,8 +144,8 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
     let mut search_all = false;
     let mut force_path = false;
     let mut skip_functions = false;
-    let mut default_path = cmd.default_path;
-    let mut operands = &cmd.words[1..];
+    let mut default_path = use_default_path;
+    let mut operands = &words[1..];
     while let Some(opt) = crate::builtins::flags::next(&mut operands) {
         for flag in opt[1..].chars() {
             match (command, flag) {
@@ -150,7 +161,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 }
                 (false, 'p') => format = Format::Path,
                 _ => {
-                    diagnostic!("{}: unsupported option {opt}", cmd.words[0]);
+                    diagnostic!("{}: unsupported option {opt}", words[0]);
                     return 2;
                 }
             }
@@ -313,16 +324,16 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             }
         }
         if !found && format == Format::Verbose {
-            if crate::builtins::write_stdout_for(&cmd.words[0], &out) != 0 {
+            if flush(&mut out) != 0 {
                 return 1;
             }
             out.clear();
-            diagnostic!("{}: {name}: not found", cmd.words[0]);
+            diagnostic!("{}: {name}: not found", words[0]);
         }
         any |= found;
         all &= found;
     }
-    if crate::builtins::write_stdout_for(&cmd.words[0], &out) != 0 {
+    if flush(&mut out) != 0 {
         return 1;
     }
     u8::from(

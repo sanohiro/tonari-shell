@@ -1,5 +1,15 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## File offsets during read and process substitution status / read のファイル位置とプロセス置換の終了値
+
+When `read -r` assigns to an associative-array key that reads the next record from the same descriptor, GNU Bash and Tonari both consume the records in order. The regression test verifies the value, the key and the third record left for the caller. For an indexed array, a command substitution supplied inside a destination **string** is outside Tonari's arithmetic subscript support. This distinction concerns the evaluation of an indirect destination. [Read comparison](../tests/shell.py)
+
+With file matches available and standard output closed, `compgen -f` diagnoses the failed write and returns 1 in Tonari. GNU Bash 5.3.20 returns 0 on the same fixture. Tonari keeps the output error visible. The completion comparison also checks candidate order at 511, 512, 1,000, 1,023, 1,024 and 1,025 names. 標準出力を閉じた状態で補完候補を出力すると、Tonariは書き込み失敗を診断し、終了値1を返す。
+
+In a separate process-substitution test, the child writes a line and exits with status 7. After saving `$!` and consuming the line, `wait` reports 7 in Tonari and GNU Bash 5.2/5.3. The Apple Bash 3.2.57 bundled with macOS reports 127 for that PID. [Native comparison](benchmarks.md#round-seven-paths)
+
+連想配列を代入先にする `read -r` では、添字の計算が同じFDから次の行を読んでも、値・キー・呼び出し元に残る行がGNU Bashと一致する。数値添字の代入先を文字列として受け取った場合、その文字列に埋め込まれたコマンド置換は対応範囲外。プロセス置換では実際に子を作り、読み取り後にも `wait` で子の終了値を取得できる。
+
 ## Physical working directory and case-insensitive classes / 物理パスと大小文字を無視する文字クラス
 
 From an empty directory, run `mkdir a; cd a; mv ../a ../b; mkdir ../a; pwd -P`. The process remains in `b`, so Tonari prints a path ending in `/b`. Apple Bash 3.2.57 and GNU Bash 5.3.20 on macOS print `/a`, the path of a different directory. If the old name remains absent, all three print `/b`. Tonari also reports failure if the current directory itself has been removed. [Regression test](../tests/shell.py)

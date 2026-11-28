@@ -1,5 +1,94 @@
 # Startup and execution / 起動と実行性能
 
+<a id="round-seven-paths"></a>
+
+## November 28 · Command substitution, expansion and interactive history / コマンド置換・展開・対話履歴
+
+Cells show **previous Tonari / current Tonari / Bash** in milliseconds. Revisions were `fc6b21e` and `800e8fe`. Each script ran five warmups and 15 interleaved measured trials in an already-running shell, through exit, with output and status checked. The hosts were an Apple M1 on macOS 27.2.1 (arm64 GNU Bash 5.3.20) and an Intel Xeon 6975P-C running Ubuntu 24.04 on ext4 (x86-64 distribution Bash 5.2.21). The first eight workloads each execute 50 substitutions. [Native Linux timings and build](https://github.com/sanohiro/tonari-shell/actions/runs/46115555563) · [Reproduction driver](../tools/ci/shell-paths.sh)
+
+各欄は旧Tonari・今回のTonari・Bashの中央値（ms）。起動後に同一のスクリプトを実行し、終了までを測った。末尾に、関数を読み込んで呼び出し元へ戻るまでの時間と、履歴10万件での入力・ページ送りの時間を別に掲載した。
+
+| Audit | Workload | Apple M1 (ms) | Linux x86-64 (ms) |
+|---|---|---:|---:|
+| R7-1 | Logical pwd | 30.604 / 0.513 / 38.104 | 6.678 / 0.157 / 11.983 |
+| R7-1 | Physical pwd | 31.352 / 0.681 / 38.232 | 6.757 / 0.173 / 12.296 |
+| R7-1 | Command lookup | 30.974 / 0.541 / 37.874 | 6.731 / 0.170 / 12.109 |
+| R7-1 | Command type | 31.480 / 0.794 / 39.901 | 6.912 / 0.218 / 12.274 |
+| R7-2 | Local then echo | 33.073 / 0.561 / 38.902 | 7.690 / 0.187 / 12.753 |
+| R7-2 | Local with positional arithmetic | 32.641 / 0.575 / 38.226 | 7.785 / 0.212 / 12.818 |
+| R7-2 | Helper with binary test | 33.417 / 0.582 / 38.163 | 7.742 / 0.199 / 12.972 |
+| R7-2 | Helper with conditional glob | 30.865 / 0.565 / 37.535 | 7.197 / 0.186 / 12.749 |
+| R7-3 | Case-insensitive filenames | 6.623 / 6.232 / 1023.625 | 2.724 / 2.372 / 3.251 |
+| R7-3 | Case-sensitive prefix control | 6.189 / 6.262 / 1035.006 | 2.281 / 2.317 / 2.836 |
+| R7-4 | Load 200 functions | 0.690 / 0.675 / 1.120 | 0.401 / 0.408 / 0.611 |
+| R7-4 | Load 400 mixed functions | 1.482 / 1.430 / 2.807 | 1.511 / 1.494 / 2.267 |
+| R7-4 | Load 400 functions with case arms | 1.138 / 1.097 / 2.095 | 1.191 / 1.134 / 1.702 |
+| R7-5 | Complete executable names | 15.560 / 15.443 / 1459.263 | 17.876 / 17.592 / 77.249 |
+| R7-6 | Trim a 64 KiB scalar | 3.009 / 2.217 / 148.936 | 2.391 / 1.691 / 81.605 |
+| R7-6 | Replace repeated literal, hits | 3.832 / 2.920 / 711.643 | 12.017 / 11.316 / 214.004 |
+| R7-6 | Replace literal, no match | 7.394 / 4.745 / 137.605 | 6.181 / 2.713 / 93.787 |
+| R7-7 | Slice after a UTF-8 character | 22.428 / 2.490 / 104.355 | 12.303 / 1.443 / 240.652 |
+| R7-8 | Join 500 dense elements | 5.551 / 1.722 / 21.351 | 22.462 / 9.245 / 21.554 |
+| R7-8 | Join 500 sparse elements | 6.177 / 2.232 / 21.967 | 23.100 / 9.813 / 21.462 |
+| R7-8 | Join 500 associative elements | 7.633 / 3.822 / 23.322 | 27.070 / 10.838 / 22.486 |
+| R7-8 | Expand 500 indexed keys | 4.660 / 4.622 / 99.511 | 17.718 / 17.105 / 108.737 |
+| R7-10 | Case-insensitive case pattern | 6.013 / 3.785 / 9.234 | 7.442 / 4.927 / 7.681 |
+| R7-10 | Case-insensitive conditional pattern | 5.719 / 3.480 / 8.590 | 7.058 / 4.334 / 7.001 |
+| R7-11 | Print one scalar declaration | 7.329 / 6.950 / 16.662 | 2.999 / 3.009 / 8.681 |
+| R7-12 | Read 10,000 delimited records | 24.874 / 24.470 / 74.369 | 20.222 / 19.853 / 40.149 |
+| R7-13 | Run DEBUG trap | 3.054 / 2.847 / 18.776 | 3.434 / 3.266 / 13.907 |
+| R7-14 | Expand working-directory prompt | 5.496 / 4.968 / 451.323 | 4.645 / 3.652 / 8.477 |
+| R7-15 | Zero-padded decimal | 6.288 / 5.300 / 28.522 | 7.386 / 5.233 / 20.181 |
+| R7-15 | Zero-padded hexadecimal | 5.868 / 4.978 / 25.777 | 7.871 / 5.718 / 20.331 |
+| C | Source a tiny file | 3.068 / 3.051 / 4.029 | 0.462 / 0.458 / 0.966 |
+| C | Output to /dev/null | 23.841 / 24.822 / 33.551 | 2.958 / 2.948 / 7.564 |
+| C | Complete filenames | 10.334 / 9.486 / 1434.520 | 7.479 / 6.359 / 8.564 |
+| C | Observe process substitution and wait | 31.556 / 31.356 / 38.408 | 6.480 / 6.572 / 12.116 |
+| C | Expand names by prefix | 13.518 / 14.025 / 213.656 | 23.823 / 23.874 / 282.078 |
+| R7-4 | 200 functions, through return | 0.328 / 0.305 / 0.553 | 0.346 / 0.348 / 0.533 |
+| R7-4 | 400 mixed functions, through return | 1.064 / 1.036 / 2.181 | 1.427 / 1.421 / 2.141 |
+| R7-4 | 400 functions with case arms, through return | 0.798 / 0.777 / 1.661 | 1.113 / 1.071 / 1.597 |
+
+The history table gives **before → after** timings as median/p95 in milliseconds. Each PTY run uses 100,000 records. The first three rows time Down through a page of duplicate candidates. The following rows time typing while a search is active. Bash has no equivalent history picker.
+
+履歴は変更前 → 変更後、それぞれ中央値/p95（ms）。コマンドが同じでも時刻やディレクトリが異なる記録と、2種類のコマンドが交互に現れる記録を含む。
+
+| R7-9 · History operation | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| Identical records | 0.707/0.855 → 0.696/1.044 | 0.933/1.206 → 0.936/0.988 |
+| Same command, changing metadata | 6.053/6.382 → 5.103/5.760 | 1.730/1.758 → 1.428/1.471 |
+| Alternating commands, changing metadata | 8.683/9.468 → 4.919/5.498 | 5.378/5.547 → 1.806/1.886 |
+| Old search, query echo | 0.039/0.139 → 0.035/0.108 | 0.043/0.045 → 0.044/0.064 |
+| Old search, selected row visible | 0.630/2.614 → 0.625/1.561 | 0.137/0.141 → 0.140/0.165 |
+| Typeahead, query echo | 0.061/0.190 → 0.057/0.104 | 0.081/0.104 → 0.083/0.108 |
+
+The C controls below time the corresponding file operations on the same host. The filename-completion control counts prefix matches. Shells also produce the candidate list. The glob controls count matching names before sorting or materializing shell arguments. These are elapsed times for a different implementation and do not measure the fraction spent in the kernel.
+
+C対照は同じファイルを同じ回数処理した中央値（ms）。補完のC対照は候補数を数え、シェルは候補を出力する。この差引きからカーネル時間の比率は求められない。
+
+| Direct C workload | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| Source, file operations | 2.759 | 0.307 |
+| Open/write/close /dev/null | 21.382 | 1.693 |
+| Enumerate completion candidates | 7.909 | 2.770 |
+| Match filename prefix | 6.044 | 2.125 |
+| Match folded filename prefix | 6.140 | 2.159 |
+
+**Release and input.** On M1 the executable grew from 1,847,824 to 1,880,896 bytes. Its only dynamic dependency is libSystem. The stripped x86-64 Linux static PIE grew from 2,462,776 to 2,499,832 bytes. No new crates were required. In a separate 31-trial M1 PTY comparison with 5,000 history entries, one-character input took 0.045/0.108 ms (median/p95). A 16 KiB paste took 2.326/2.511 ms in Tonari and 17.626/18.471 ms in GNU Bash.
+
+**Executable completion on macOS.** System Apple Bash 3.2.57 and the arm64 GNU Bash 5.3.20 build gave substantially different absolute filename and command-completion times on the same host. In a second interleaved run against Apple Bash, Tonari / Apple Bash was 6.501 / 7.041 ms for the folded filename prefix, 15.553 / 20.636 ms for command names, and 9.569 / 32.153 ms for filenames. A separate permissions-only loop of 1,320 stat and eligible access checks on M1 took 12.318 ms. Cached command names still receive a live permission check. On Linux, the filename-counting C control omits sorting and emitting candidates. A follow-up trial removed a second stdout buffer and applied the existing byte-key sort to lists of 512 or more names. In the 35-trial M1 comparison against the first implementation, filename completion fell from 10.107 to 9.442 ms.
+
+**Function source and traps.** The mixed 400-function source has no case arms. The isolated M1 single-pattern AST trial measured 0.709 → 0.718 ms through return on the separate case-heavy fixture. The previous `Command::Call` trial measured 1.593 → 1.596 ms. The release retains the smaller cached conditional representation and preallocates case arm vectors. DEBUG, ERR and RETURN share trap dispatch. It reuses the option-sensitive parse cache for eligible single-line trap bodies. EUID is read live. Process substitution retains the child observed by `wait`. The GNU references and Tonari return 7 in the status fixture, while Apple Bash 3.2.57 returns 127.
+
+M1 script medians exceeded two thirds of Bash time for `null-builtin-out`, `r7-control-source`, `r7-control-process`.
+Linux x86-64 script medians exceeded two thirds of Bash time for `runtime-glob-nocase`, `runtime-glob-prefix`, `core-parse-functions`, `r7-control-files`.
+
+Both native releases ran all 399 shell tests (396 passed, three skipped on each). The M1 build passed 72 Rust tests and matched GNU Bash 5.3.20 on all 198 source-derived witnesses. An additional differential run matched 819 lines of output, stderr and exit status for substring boundaries, literal replacement, numeric formats and trap changes. The separate Linux replay also measured the preceding 33 script workloads. [Linux full shell tests and preceding workloads](https://github.com/sanohiro/tonari-shell/actions/runs/46115573032)
+
+On the Linux case-heavy source through return, Tonari used 1.071 ms and Bash 1.597 ms. This sits on the two-thirds boundary across native runs.
+
+2/3目標の判定は同じ機種のGNU Bashとの中央値で行った。macOS付属のApple Bashでは、同じファイル名展開と補完でも絶対時間が大きく異なる。ファイル名補完のC対照は候補を数えるところまでなので、Linuxで残る差にはソート・文字列化・出力も含まれる。単一パターン専用の構文木はM1の再試験で速くならず、case節の初期容量と条件式の配置を見直した。履歴の応答、OS別バイナリサイズ、プロセス置換の終了値をあわせて確認した。
+
 <a id="round-six-runtime"></a>
 
 ## November 28 · Expansion, function loading and history paging / 展開・関数読み込み・履歴のページ送り

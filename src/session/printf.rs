@@ -501,6 +501,64 @@ impl Spec {
             .expect("writing to Vec cannot fail");
             return Ok(());
         }
+        if self.width <= 4096
+            && self.precision.is_none()
+            && self.has(b'0')
+            && self.flags & !(flag_bit(b'0') | flag_bit(b'+')) == 0
+            && b"diuxXo".contains(&conversion)
+        {
+            let signed = matches!(conversion, b'd' | b'i');
+            let (value, sign) = if signed {
+                let value = args.signed();
+                (
+                    value.unsigned_abs(),
+                    if value < 0 {
+                        Some(b'-')
+                    } else if self.has(b'+') {
+                        Some(b'+')
+                    } else {
+                        None
+                    },
+                )
+            } else {
+                (args.unsigned(), None)
+            };
+            let mut decimal = itoa::Buffer::new();
+            let mut digits = [0; 22]; // ceil(64/3) octal digits
+            let number = if signed || conversion == b'u' {
+                decimal.format(value).as_bytes()
+            } else {
+                let alphabet = if conversion == b'X' {
+                    b"0123456789ABCDEF"
+                } else {
+                    b"0123456789abcdef"
+                };
+                let shift = if conversion == b'o' { 3 } else { 4 };
+                let mask = (1 << shift) - 1;
+                let mut n = value;
+                let mut i = digits.len();
+                loop {
+                    i -= 1;
+                    digits[i] = alphabet[(n & mask) as usize];
+                    n >>= shift;
+                    if n == 0 {
+                        break;
+                    }
+                }
+                &digits[i..]
+            };
+            let length = number.len() + usize::from(sign.is_some());
+            let padding = (self.width as usize).saturating_sub(length);
+            output
+                .try_reserve(length + padding)
+                .map_err(|_| "field too large")?;
+            if let Some(sign) = sign {
+                output.push(sign);
+            }
+            output.resize(output.len() + padding, b'0');
+            output.extend_from_slice(number);
+            return Ok(());
+        }
         // Only a validated numeric conversion reaches libc. Build its exact
         // argument type explicitly; user-provided C length modifiers are discarded.
         // Six distinct flags and two nonnegative i32 fields fit in 32 bytes,
@@ -722,7 +780,12 @@ fn render(
                     _ => return Err("unsupported conversion"),
                 }
             }
-            _ => out.push(byte),
+            _ => {
+                out.push(byte);
+                let n = memchr::memchr2(b'%', b'\\', input).unwrap_or(input.len());
+                out.extend_from_slice(&input[..n]);
+                input = &input[n..];
+            }
         }
     }
     Ok(true)

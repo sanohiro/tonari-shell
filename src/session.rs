@@ -718,18 +718,28 @@ impl Session {
             }
             None => {
                 // In-process script reentry changes only PATH and directory/level
-                // variables. These inherited history settings stay constant.
-                static HISTORY: [std::sync::OnceLock<Option<String>>; 4] =
-                    [const { std::sync::OnceLock::new() }; 4];
+                // variables. These inherited settings stay constant.
+                static INHERITED: [std::sync::OnceLock<Option<String>>; 6] =
+                    [const { std::sync::OnceLock::new() }; 6];
                 let slot = match name {
                     "HISTSIZE" => Some(0),
                     "HISTCONTROL" => Some(1),
                     "HISTIGNORE" => Some(2),
                     "histchars" => Some(3),
+                    "HOME" => Some(4),
+                    "PROMPT_DIRTRIM" => Some(5),
+                    "IFS" => return Some(Cow::Borrowed(crate::word::DEFAULT_IFS)),
+                    "PWD" => {
+                        return self
+                            .logical_directory_ref()
+                            .ok()?
+                            .to_str()
+                            .map(Cow::Borrowed);
+                    }
                     _ => None,
                 };
                 if let Some(i) = slot {
-                    return HISTORY[i]
+                    return INHERITED[i]
                         .get_or_init(|| std::env::var(name).ok())
                         .as_deref()
                         .map(Cow::Borrowed);

@@ -30,6 +30,47 @@ pub(crate) fn fragments(mut query: &str) -> impl Iterator<Item = &str> {
     })
 }
 
+// Find the preceding row boundary and count metadata delimiters together.
+// Work from the known end of a short header without decoding its timestamp,
+// PID or directory. Tabs in the command itself must never alias a shorter hit.
+fn duplicate_start(metadata: &[u8]) -> Option<usize> {
+    fn matches(word: u64, byte: u8) -> u64 {
+        const LOW: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+        let x = word ^ u64::from_ne_bytes([byte; 8]);
+        !(((x & LOW) + LOW) | x | LOW)
+    }
+    let mut end = metadata.len();
+    let mut tabs = 0;
+    let start = loop {
+        if end < 8 {
+            let prefix = &metadata[..end];
+            let start = prefix
+                .iter()
+                .rposition(|&b| b == b'\n')
+                .map_or(0, |i| i + 1);
+            tabs += prefix[start..].iter().filter(|&&b| b == b'\t').count() as u32;
+            break start;
+        }
+        let word = u64::from_le_bytes(metadata[end - 8..end].try_into().unwrap());
+        let newlines = matches(word, b'\n');
+        let delimiters = matches(word, b'\t');
+        if newlines != 0 {
+            let after = newlines.leading_zeros() / 8;
+            tabs += (delimiters & !u64::MAX.checked_shr(after * 8).unwrap_or(0)).count_ones();
+            break end - after as usize;
+        }
+        tabs += delimiters.count_ones();
+        if tabs > 4 {
+            return None;
+        }
+        end -= 8;
+    };
+    (metadata
+        .get(start..start + 2)
+        .is_some_and(|v| matches!((v, tabs), (b"1\t", 3) | (b"2\t", 4))))
+    .then_some(start)
+}
+
 // One picker owns a snapshot of the journal length. New pages resume from the
 // last examined record. A new query rewinds offsets and reuses the read buffer.
 pub(crate) struct Filter<'a> {
@@ -202,21 +243,14 @@ impl<'a> Filter<'a> {
                 // Duplicate commands also occur with different timestamps, PIDs and
                 // directories. Verify the delimiter count so a suffix of a command
                 // containing literal tabs cannot hide a distinct entry.
-                if !recent[0].is_empty()
-                    && let Some(metadata) = rows.strip_suffix(recent[0].as_bytes())
-                    && metadata.last() == Some(&b'\t')
+                if let Some(metadata) = recent
+                    .iter()
+                    .filter(|cmd| !cmd.is_empty())
+                    .find_map(|cmd| rows.strip_suffix(cmd.as_bytes())?.strip_suffix(b"\t"))
+                    && let Some(start) = duplicate_start(metadata)
                 {
-                    let start = memrchr(b'\n', metadata).map_or(0, |i| i + 1);
-                    let header = &metadata[start..];
-                    let fields = match header.first() {
-                        Some(b'1') => 4,
-                        Some(b'2') => 5,
-                        _ => 0,
-                    };
-                    if header.iter().filter(|&&c| c == b'\t').count() == fields {
-                        rows = &rows[..start.saturating_sub(1)];
-                        continue;
-                    }
+                    rows = &rows[..start.saturating_sub(1)];
+                    continue;
                 }
                 let pos = if anchor.is_empty() {
                     rows.len()
@@ -265,6 +299,32 @@ impl<'a> Filter<'a> {
                     self.end = base + begin as u64;
                     return;
                 }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::duplicate_start;
+
+    #[test]
+    fn duplicate_headers_require_the_exact_number_of_fields() {
+        for offset in 0..32 {
+            for header in [
+                "1\t7\t0\t/dir",
+                "2\t100\t7\t0\t/dir",
+                "1\t7\t0\t/dir\textra",
+                "0\t7\t0\t/dir",
+                "1\t0\t/dir",
+            ] {
+                let expected = matches!(header, "1\t7\t0\t/dir" | "2\t100\t7\t0\t/dir");
+                let input = format!("{}\n{header}", "x".repeat(offset));
+                assert_eq!(
+                    duplicate_start(input.as_bytes()),
+                    expected.then_some(offset + 1)
+                );
+                assert_eq!(duplicate_start(header.as_bytes()), expected.then_some(0));
             }
         }
     }

@@ -50,6 +50,44 @@ def listing_loop(command, count):
 
 
 CASES = {
+    **{f"r7-query-{label}": eval_loop(f'x=$({command})', check, expected, count=50)
+       for label, command, check, expected in [
+           ("pwd", "pwd", '[[ $x == "$PWD" ]] && echo yes', "yes"),
+           ("physical", "pwd -P", '[[ -d $x && $x -ef . ]] && echo yes', "yes"),
+           ("command", "command -v printf", 'echo "$x"', "printf"),
+           ("type", "type -t ls", 'echo "$x"', "file")]},
+    **{f"r7-helper-{label}": eval_loop('x=$(f "$i")', 'echo "$x"', expected, f'f() {{ {body}; }}', 50)
+       for label, body, expected in [
+           ("direct", 'local a=$1; echo "$a"', "49"),
+           ("math", 'local n=$(($1 + 1)); echo "$n"', "50"),
+           ("test", 'local a=$1; if [ "$a" = 49 ]; then echo yes; else echo no; fi', "yes"),
+           ("glob", 'if [[ $1 == 4* ]]; then echo yes; else echo no; fi', "yes")]},
+    "r7-source-case": ("".join(f"f{k}() {{\n case $1 in\n a) echo a;;\n b|c) echo bc;;\n esac\n}}\n" for k in range(400)) + "f399 c", "bc"),
+    "r7-control-source": eval_loop(". ./small.sh", 'echo "$v"', "ok", count=200),
+    "r7-control-files": ('cd brackets; for ((i=0;i<20;i++)); do compgen -f file_ >/dev/null || exit; done; echo "$i"', "20"),
+    "r7-control-process": ("for ((i=0;i<50;i++)); do exec 3< <(echo value; exit 7); p=$!; "
+                           'IFS= read -ru3 v; wait "$p"; rc=$?; exec 3<&-; done; echo "$v/$rc"', "value/7"),
+    "r7-control-names": eval_loop('a=("${!pvar_@}")', 'echo "${#a[@]}"', "1000",
+                                  'for ((i=0;i<1000;i++)); do printf -v "pvar_$i" %s x; done', 100),
+    "r7-trim": eval_loop('x=${s##*tail}', 'echo "$x"', "ok", "printf -v s '%65536s' ''; s+=tailok", 500),
+    "r7-replace": eval_loop('x=${s//0000/1111}', 'echo "${#x} ${x: -4}"', "65536 1111",
+                            "printf -v s '%065536d' 0", 20),
+    "r7-replace-miss": eval_loop('x=${s//ZZZZ/1111}', 'echo "${#x}"', "65536", "printf -v s '%65536s' ''", 500),
+    "r7-slice": eval_loop('x=${s:60000:10}', 'echo "${#x}"', "10", "export LC_ALL=C.UTF-8; printf -v s '%65536s' ''; s=雪$s", 500),
+    "r7-array-join": eval_loop('x="${a[*]}"', 'echo "${#x}"', "1889", "a=({0..499})", 500),
+    "r7-array-sparse": eval_loop('x="${a[*]}"', 'echo "${#x}"', "1889", 'for ((i=0;i<500;i++)); do a[i*2]=$i; done', 500),
+    "r7-array-assoc": eval_loop('x="${a[*]}"', 'echo "${#x}"', "1889", 'declare -A a; for ((i=0;i<500;i++)); do a[k$i]=$i; done', 500),
+    "r7-array-keys": eval_loop('set -- "${!a[@]}"', 'echo "$# ${500}"', "500 499", "a=({0..499})", 500),
+    "r7-case-fold": eval_loop('case $s in foo*[0-9]*bar) x=y;; *) exit 1;; esac', 'echo "$x"', "y",
+                              'shopt -s nocasematch; s=Foo_x7x_Bar', 5000),
+    "r7-test-fold": eval_loop('[[ $s == foo*[0-9]*bar ]] || exit 1', 'echo "$i"', "5000",
+                              'shopt -s nocasematch; s=Foo_x7x_Bar', 5000),
+    "r7-declare": ("v=abc; " + listing_loop("declare -p v", 5000)[0], "5000"),
+    "r7-read": ('printf "%s\\n" {1..10000}:x:y:z >records; n=0; while IFS=: read -r a b c; do ((++n)); done <records; echo "$n"', "10000"),
+    "r7-trap": eval_loop('x=$i', 'trap - DEBUG; echo "$x"', "1999", "trap ':' DEBUG", 2000),
+    "r7-prompt": eval_loop('x=${p@P}', '[[ -n $x ]] && echo yes', "yes", r"p='\w\$ '", 5000),
+    **{f"r7-printf-{label}": eval_loop(f'printf -v x "{fmt}" "$i"', 'echo "$x"', expected, count=10000)
+       for label, fmt, expected in [("decimal", "%08d", "00009999"), ("hex", "0x%08x", "0x0000270f")]},
     "runtime-current-echo": eval_loop('x=${ echo "v_$i"; }', 'echo "$x"', "v_199", count=200),
     "runtime-brace-comma": eval_loop('set -- {a,b,c,d,e}_{1,2,3,4,5}_{x,y,z,w}', 'echo "$# ${100}"', "100 e_5_w", count=100),
     "runtime-brace-range": eval_loop('set -- {1..5}_{1..5}_{1..4}', 'echo "$# ${100}"', "100 5_5_4", count=100),
@@ -724,12 +762,14 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+        if not args.case or "r7-control-source" in args.case:
+            (home / "small.sh").write_text("v=ok\n")
         if not args.case or "review-read-file" in args.case:
             (home / "short-records").write_bytes(b"0123456789" * 2000)
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
         if not args.case or "source-functions-repeat" in args.case:
             (home / "functions.sh").write_text(function_source())
-        if not args.case or {"glob-bracket-list", "glob-ignore-simple-class", "runtime-glob-prefix", "runtime-glob-nocase", "runtime-glob-ext"}.intersection(args.case):
+        if not args.case or {"r7-control-files", "glob-bracket-list", "glob-ignore-simple-class", "runtime-glob-prefix", "runtime-glob-nocase", "runtime-glob-ext"}.intersection(args.case):
             directory = home / "brackets"
             directory.mkdir()
             for i in range(1000):
@@ -812,6 +852,7 @@ def main():
                 print("cdable-vars: previous shell lacks the option", flush=True)
                 participants = [(name, shell) for name, shell in shells if name != "Previous"]
             if args.spawn_control and case in (
+                "null-builtin-out", "r7-control-source", "r7-control-files",
                 "external", "external-env", "redirect-stderr", "pipeline", "merged-pipeline",
                 "merged-pipeline-redirect", "builtin-merged-pipeline",
                 "background-subshell-wait", "descriptor-moves", "external-substitutions", "runtime-file",

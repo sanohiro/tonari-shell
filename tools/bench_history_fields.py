@@ -96,7 +96,10 @@ def main():
                    help="select the first new match beyond a long run of duplicate history")
     p.add_argument("--mixed-records", action="store_true",
                    help="vary journal version, timestamp, process and directory across duplicate commands")
+    p.add_argument("--alternating", action="store_true", help="alternate two repeated commands in a mixed journal")
     args = p.parse_args()
+    if args.alternating and not args.mixed_records:
+        p.error("--alternating requires --mixed-records")
     if args.mixed_records and not args.deep_page:
         p.error("--mixed-records requires --deep-page")
     shells = [s.resolve() for s in args.shell]
@@ -117,7 +120,7 @@ def main():
                     if args.mixed_records:
                         version = f"2\t{1800000000+i}\t" if i % 2 else "1\t"
                         prefix = f"{version}{i % 13}\t{i % 3}\t/dir{i % 5}\t".encode()
-                        out.write(prefix + deep_command(DEEP_ROW - 1) + b"\n")
+                        out.write(prefix + deep_command(DEEP_ROW - 1 - (i % 2 if args.alternating else 0)) + b"\n")
                     else:
                         out.write(duplicate)
                 for index in reversed(range(DEEP_ROW)):

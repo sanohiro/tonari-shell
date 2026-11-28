@@ -17,7 +17,7 @@ pub enum Expr {
 pub struct StaticGlob {
     word: Word,
     text: std::cell::OnceCell<String>,
-    compiled: std::cell::RefCell<Option<CompiledGlob>>,
+    compiled: std::cell::RefCell<Option<Box<CompiledGlob>>>,
 }
 
 #[derive(Debug)]
@@ -147,19 +147,14 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                 .text
                 .get_or_init(|| glob.word.clone().extended_pattern(&|_| None, &[]));
             trace(session, status, &[&left, op, source]);
-            let locale = source
-                .contains(['[', '?'])
-                .then(|| pattern::session_locale(session))
-                .flatten();
-            let _guard = locale.as_ref().and_then(|l| l.enter());
             let matched = if session.shopt.nocasematch {
-                pattern::extended::insensitive_match(
-                    &left,
-                    source,
-                    true,
-                    session.character_locale(),
-                )
+                pattern::extended::insensitive_session(&left, source, true, session)
             } else {
+                let locale = source
+                    .contains(['[', '?'])
+                    .then(|| pattern::session_locale(session))
+                    .flatten();
+                let _guard = locale.as_ref().and_then(|l| l.enter());
                 let mut entry = glob.compiled.borrow_mut();
                 // Bracket ranges and their per-character results belong to the
                 // active locale. Keep its handle alive until recompilation.
@@ -170,12 +165,12 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                             == locale.as_ref().map(std::rc::Rc::as_ptr)
                 });
                 if !current {
-                    *entry = Some(CompiledGlob {
+                    *entry = Some(Box::new(CompiledGlob {
                         matcher: pattern::Matcher::new(source.clone()),
                         group: pattern::extended::Pattern::new(source),
                         locale,
                         ascii_ranges,
-                    });
+                    }));
                 }
                 let compiled = entry.as_ref().unwrap();
                 compiled.group.as_ref().map_or_else(

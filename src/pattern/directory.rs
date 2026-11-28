@@ -3,11 +3,33 @@ use std::ops::ControlFlow;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
+#[derive(Clone, Copy)]
+pub(super) enum Prefix<'a> {
+    Exact(&'a [u8]),
+    Folded(&'a [u8]),
+}
+impl Prefix<'_> {
+    fn accepts(self, raw: &[u8]) -> bool {
+        match self {
+            Self::Exact(p) => raw.starts_with(p),
+            Self::Folded(p) => {
+                if let Some(head) = raw.get(..p.len())
+                    && head.is_ascii()
+                {
+                    head.eq_ignore_ascii_case(p)
+                } else {
+                    super::possible_folded_prefix(raw, p)
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn visit_names(
     dir: &str,
     directories_only: bool,
     skip_dots: bool,
-    prefix: &[u8],
+    prefix: Prefix<'_>,
     mut visit: impl FnMut(&CStr, u8),
 ) {
     let Ok(path) = CString::new(dir) else { return };
@@ -33,7 +55,8 @@ pub(crate) fn scan(
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return ControlFlow::Continue(());
     };
-    read_names::<false>(&path, true, prefix, visitor).unwrap_or(ControlFlow::Continue(()))
+    read_names::<false>(&path, true, Prefix::Exact(prefix), visitor)
+        .unwrap_or(ControlFlow::Continue(()))
 }
 
 // Only a complete, successful listing may populate a reusable directory cache.
@@ -43,14 +66,14 @@ pub(crate) fn scan_checked(
     visitor: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> Option<ControlFlow<()>> {
     let path = CString::new(path.as_os_str().as_bytes()).ok()?;
-    read_names::<true>(&path, true, prefix, visitor)
+    read_names::<true>(&path, true, Prefix::Exact(prefix), visitor)
 }
 
 #[cfg(not(target_os = "linux"))]
 fn read_names<const CHECK_END: bool>(
     path: &CStr,
     _interruptible: bool,
-    prefix: &[u8],
+    prefix: Prefix<'_>,
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> Option<ControlFlow<()>> {
     use std::ptr::NonNull;
@@ -85,10 +108,9 @@ fn read_names<const CHECK_END: bool>(
             );
             CStr::from_bytes_with_nul_unchecked(bytes)
         };
-        if visit(
-            name.to_bytes().starts_with(prefix).then_some(name),
-            unsafe { (*entry).d_type },
-        )
+        if visit(prefix.accepts(name.to_bytes()).then_some(name), unsafe {
+            (*entry).d_type
+        })
         .is_break()
         {
             return Some(ControlFlow::Break(()));
@@ -100,7 +122,7 @@ fn read_names<const CHECK_END: bool>(
 fn read_names<const CHECK_END: bool>(
     path: &CStr,
     interruptible: bool,
-    prefix: &[u8],
+    prefix: Prefix<'_>,
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> Option<ControlFlow<()>> {
     use std::mem::offset_of;
@@ -152,7 +174,7 @@ fn read_names<const CHECK_END: bool>(
             }
             let (record, rest) = batch.split_at(len);
             let raw = &record[NAME..];
-            let name = if raw.starts_with(prefix) {
+            let name = if prefix.accepts(raw) {
                 CStr::from_bytes_until_nul(raw).ok()
             } else {
                 None

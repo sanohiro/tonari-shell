@@ -965,7 +965,7 @@ impl Reader {
         self.expect("in")?;
         let header = self.location(start);
         self.newlines();
-        let mut arms = Vec::new();
+        let mut arms = Vec::with_capacity(2);
         loop {
             self.alias_newlines(&["esac"])?;
             if self.keyword() == Some("esac") {
@@ -974,7 +974,8 @@ impl Reader {
             if matches!(self.peek(), Some(Token::LeftParen)) {
                 self.tokens.pop_front();
             }
-            let mut patterns = Vec::new();
+            let alternatives = matches!(self.tokens.get(1), Some(Token::Pipe));
+            let mut patterns = Vec::with_capacity(if alternatives { 2 } else { 1 });
             loop {
                 self.alias_at(false, Some(&[]))?;
                 match self.operand() {
