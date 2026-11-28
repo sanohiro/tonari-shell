@@ -6,8 +6,8 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 pub(super) const MAX_DIRECTORIES: usize = 32;
-const MAX_ENTRIES: usize = 8192;
-const MAX_NAME_BYTES: usize = 256 * 1024;
+// Names and the index share a budget. Short names can fill more entries.
+const LISTING_BUDGET: usize = 256 * 1024 + 8192 * size_of::<Entry>();
 
 #[derive(PartialEq)]
 struct Stamp {
@@ -89,7 +89,9 @@ impl Listing {
         let Ok(len) = u16::try_from(bytes.len()) else {
             return false;
         };
-        if self.index.len() == MAX_ENTRIES || self.bytes.len() + bytes.len() > MAX_NAME_BYTES {
+        if self.bytes.len() + bytes.len() + (self.index.len() + 1) * size_of::<Entry>()
+            > LISTING_BUDGET
+        {
             return false;
         }
         // One-based links reserve zero for the end of a first-byte bucket.

@@ -83,12 +83,14 @@ fn pair_needs_source(index: Option<&str>, word: &Word) -> bool {
     if index.is_some_and(|s| s.contains(['$', '`', '"', '\'', '\\', '<', '>'])) {
         return true;
     }
-    let Word::Expanded(parts) = word else {
-        return false;
-    };
-    parts.iter().enumerate().any(|(i, part)| {
-        matches!(part, Part::Process { .. }) || i > 0 && matches!(part, Part::Tilde(_))
-    })
+    match word {
+        Word::Literal(s) => s.contains(":~") || s.starts_with('~') && s.contains(':'),
+        Word::Expanded(parts) | Word::Declaration(parts) => parts.iter().any(|part| match part {
+            Part::Process { .. } | Part::Tilde(_) => true,
+            Part::Text(text) | Part::Pattern(text) => text.contains('~'),
+            _ => false,
+        }),
+    }
 }
 
 impl Reader {

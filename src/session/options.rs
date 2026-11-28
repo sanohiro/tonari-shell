@@ -635,7 +635,8 @@ impl Session {
         if args.is_empty() {
             let mut out = io::BufWriter::new(crate::builtins::StdoutFd(Some("set")));
             let locale = self.character_locale();
-            for name in self.visible_names("") {
+            self.listed_environment();
+            for name in self.visible_names("", super::NameList::Declared) {
                 let stored = self.variables.get(name);
                 let snapshot;
                 let empty_snapshot = stored.is_none() && self.empty_array_listing(name);

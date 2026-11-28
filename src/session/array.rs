@@ -223,7 +223,8 @@ impl Session {
         )
     }
 
-    fn group_ids() -> &'static [String] {
+    fn group_ids(&self) -> &'static [String] {
+        self.dynamic.groups_read.set(true);
         static GROUPS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
         GROUPS.get_or_init(|| {
             let primary = unsafe { libc::getgid() };
@@ -355,10 +356,7 @@ impl Session {
         match name {
             "BASH_ARGV" => (0..self.debug_frames().map(Vec::len).sum::<usize>() as i64).collect(),
             "BASH_ARGC" => (0..self.debug_frames().count() as i64).collect(),
-            "GROUPS" => {
-                self.dynamic.groups_read.set(true);
-                (0..Self::group_ids().len() as i64).collect()
-            }
+            "GROUPS" => (0..self.group_ids().len() as i64).collect(),
             "BASH_VERSINFO" => (0..6).collect(),
             "DIRSTACK" => {
                 self.dynamic.stack_read.set(true);
@@ -409,10 +407,7 @@ impl Session {
                 .rev()
                 .nth(index as usize)
                 .map(|v| v.len().to_string()),
-            "GROUPS" => {
-                self.dynamic.groups_read.set(true);
-                Self::group_ids().get(usize::try_from(index).ok()?).cloned()
-            }
+            "GROUPS" => self.group_ids().get(usize::try_from(index).ok()?).cloned(),
             "BASH_VERSINFO" => match index {
                 5 => Some(Self::machine_type()),
                 i => super::BASH_VERSINFO
@@ -498,8 +493,7 @@ impl Session {
 
     pub(crate) fn stored_array_len(&self, name: &str) -> Option<usize> {
         if self.active_groups(name) && !self.variables.contains_key(name) {
-            self.dynamic.groups_read.set(true);
-            return Some(Self::group_ids().len());
+            return Some(self.group_ids().len());
         }
         if self.live_table(name) {
             return Some(if name == "BASH_ALIASES" {
@@ -585,13 +579,19 @@ impl Session {
         };
         let name = resolved.as_ref();
         if !keys && self.active_groups(name) && !self.variables.contains_key(name) {
-            fields.extend_from_slice(Self::group_ids());
+            fields.extend_from_slice(self.group_ids());
             return true;
         }
-        if name == "PIPESTATUS" || self.live_table(name) {
+        if name == "PIPESTATUS" {
             return false;
         }
-        let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref()) else {
+        let snapshot;
+        let elements = if self.live_table(name) {
+            snapshot = Elements::Associative(self.table_snapshot(name));
+            &snapshot
+        } else if let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref()) {
+            elements
+        } else {
             return false;
         };
         let mut decimal = itoa::Buffer::new();
@@ -622,8 +622,7 @@ impl Session {
         };
         let name = resolved.as_ref();
         if self.active_groups(name) && !self.variables.contains_key(name) {
-            self.dynamic.groups_read.set(true);
-            return Self::group_ids().to_vec();
+            return self.group_ids().to_vec();
         }
         if self.live_table(name) {
             return self
@@ -637,6 +636,25 @@ impl Session {
         }
         if let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref()) {
             return elements.iter().map(|(_, value)| value.to_owned()).collect();
+        }
+        if !self.variables.contains_key(name) {
+            match name {
+                "BASH_ARGV" => {
+                    return self
+                        .debug_frames()
+                        .rev()
+                        .flat_map(|args| args.iter().rev().cloned())
+                        .collect();
+                }
+                "BASH_ARGC" => {
+                    return self
+                        .debug_frames()
+                        .rev()
+                        .map(|args| args.len().to_string())
+                        .collect();
+                }
+                _ => {}
+            }
         }
         self.indices(name)
             .into_iter()

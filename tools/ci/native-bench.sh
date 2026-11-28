@@ -25,7 +25,10 @@ fi
 source tools/ci/bash-source.sh
 if [[ $SUITE == review-findings ]]; then
   reference=$ref
-  if [[ $RUNNER_OS == macOS ]]; then reference=$(brew --prefix bash)/bin/bash; fi
+  if [[ $RUNNER_OS == macOS ]]; then
+    reference=$(brew --prefix bash)/bin/bash
+    [[ -x $reference ]] || brew install bash
+  fi
   "$reference" --version > "$out/bash-version.txt"
   args=()
   while read -r name; do args+=(--case "$name"); done < <(

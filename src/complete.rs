@@ -440,6 +440,13 @@ impl Source {
                     (common?, Vec::new())
                 };
                 common.unmark_dirs = session.bindings.unmarked_dirs;
+                if common.unmark_dirs
+                    && !common.unique
+                    && common.text.len() > directory.dir.len()
+                    && common.text.ends_with('/')
+                {
+                    common.text.pop();
+                }
                 return Some((common, choices));
             }
         };
@@ -503,16 +510,19 @@ pub fn at(
                     .flatten()
             });
         if matches.is_some() || !generated.fallback {
-            let (mut common, choices) = matches?;
-            common.unmark_dirs |= generated.unmark_dirs;
-            return Some(context.completion(
+            let (common, choices) = matches?;
+            let mut completion = context.completion(
                 callback.start,
                 common,
                 choices,
                 generated.noquote,
                 !generated.nospace && cursor == line.len(),
                 0,
-            ));
+            );
+            if !generated.unmarked.is_empty() {
+                completion.unmarked = generated.unmarked;
+            }
+            return Some(completion);
         }
     }
     if !files_only {
@@ -756,7 +766,7 @@ fn variable_completion(context: &Context<'_>, session: &Session, list: bool) -> 
     let names = session.variable_names(prefix);
     let mut common = Common::endpoints(names.first()?, names.last()?, names.len() > 1, prefix);
     let close = |name: &mut String| {
-        if braced {
+        if braced && !context.line[cursor..].starts_with('}') {
             name.push('}');
         }
         if cursor == end

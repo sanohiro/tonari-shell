@@ -275,7 +275,7 @@ fn print_variables(
         && name != "-"
         && local_scope.is_none_or(|s| s.variables.contains_key(name))
         && !matches!(name.as_str(), "BASHOPTS" | "SHELLOPTS")
-        && let Some(var) = session.scoped_variable(name, flags.global)
+        && let Some(var) = session.variables.get(name)
         && var.declared
         && !var.dynamic
         && var.elements.is_none()
@@ -311,7 +311,7 @@ fn print_variables(
         names.sort_unstable();
         names
     } else {
-        session.visible_names("")
+        session.visible_names("", super::NameList::Declared)
     };
     let all = operands.is_empty().then_some(flags);
     for name in names.into_iter().chain(operands.iter().map(String::as_str)) {
@@ -331,7 +331,7 @@ fn print_variables(
         }
         let listed = local_scope.is_none_or(|scope| scope.variables.contains_key(name));
         let variable = listed
-            .then(|| session.declaration(name, flags.global, all))
+            .then(|| session.declaration(name, false, all))
             .flatten();
         if let Some(var) = variable.filter(|v| v.declared) {
             if print_attribute(
@@ -941,8 +941,13 @@ impl Session {
             return None;
         }
         if entry.is_none() && !array {
-            var.to_mut().exported =
-                matches!(name, "PWD" | "OLDPWD") || std::env::var_os(name).is_some();
+            var.to_mut().exported = matches!(name, "PWD" | "OLDPWD")
+                || if listing.is_some() {
+                    self.listed_environment()
+                        .contains_key(std::ffi::OsStr::new(name))
+                } else {
+                    std::env::var_os(name).is_some()
+                };
         }
         if listing.is_some_and(|flags| flags.exported.is_some()) && !var.exported {
             return None;

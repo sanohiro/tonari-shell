@@ -75,6 +75,7 @@ def main():
 RANDOM=23
 alias witness_alias=true
 readonly marker=ok
+declare -px > exports && grep -qx 'declare -x OLDPWD' exports || exit 9
 declare -pr > readonlys && grep -qx 'declare -r marker="ok"' readonlys || exit 1
 declare -pi > integers && declare -p > all || exit 2
 grep -qx 'declare -i RANDOM="23"' all || exit 3
@@ -93,8 +94,24 @@ for setting in on off; do
   set > values
   grep -Fqx "SHELLOPTS=$SHELLOPTS" values && grep -Fqx "BASHOPTS=$BASHOPTS" values || exit 1
   declare -p SHELLOPTS BASHOPTS > named || exit 2
+  grep -Fq "SHELLOPTS=\"$SHELLOPTS\"" named && grep -Fq "BASHOPTS=\"$BASHOPTS\"" named || exit 3
 done'''
+        scope = r'''x=outer
+f() {
+  local x=inner local_only=v
+  declare -gp x local_only || return
+  declare -gp > all && grep -qx 'declare -- x="inner"' all || return 1
+  grep -qx 'declare -- local_only="v"' all || return 1
+  declare -g x=updated
+}
+f && echo "$x"'''
+        names = r'''declare zzA; declare -a zzB; declare -A zzC; readonly zzD; export zzE
+zzF=""; zzG=(); declare -A zzH=(); declare -n zzI=zzA
+printf '<%s>' "${!zz@}"; echo; compgen -v zz
+declare -p zzA; zzA=now; compgen -v zzA'''
         for shell in (reference, candidate):
+            checked(shell, ["-c", scope], (0, b'declare -- x="inner"\ndeclare -- local_only="v"\nupdated\n'))
+            checked(shell, ["-c", names], (0, b'<zzF><zzG><zzH><zzI>\nzzF\nzzG\nzzH\nzzI\ndeclare -- zzA\nzzA\n'))
             checked(shell, ["-c", listings], (0, b""))
             checked(shell, ["-c", options], (0, b""))
 

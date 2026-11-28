@@ -333,10 +333,11 @@ impl<'a> Expansion<'a> {
                         .map(|(_, s)| s);
                     (word, source)
                 });
-                let mut expand = |(word, source): (Word, Option<std::rc::Rc<str>>), process| {
+                let mut expand = |(word, source): (Word, Option<std::rc::Rc<str>>),
+                                  assignment_value| {
                     let word = if let Some(source) = source {
                         crate::parser::with_subscript_aliases(self.session, &source, || {
-                            crate::parser::associative_pair_word(&source, process)
+                            crate::parser::associative_pair_word(&source, assignment_value)
                         })
                         .map_err(|e| e.message())?
                     } else {

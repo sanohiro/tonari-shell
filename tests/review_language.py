@@ -121,10 +121,32 @@ a=(k [<(printf x)]=<(printf y) [<(printf z)]=word done)
 case ${a[k]} in ('['/dev/fd/*']=/dev/fd/'*) printf '<direct>';; (*) printf '<unexpected>';; esac
 printf '<%s>' "${a['[<(printf z)]=word']}" """,
         "nameref array counts": r"""a=([2]=s [55]=last); declare -A m=([a]=first [b]=next)
-declare -n ref=a rr=ref mref=m none=absent elem='a[2]' all='a[@]'
-printf '<%s>' "${#ref[@]}" "${#ref[*]}" "${#rr[@]}" "${#mref[*]}" "${#none[@]}" "${#elem[@]}" "${#all}" """,
+declare -n ref=a rr=ref mref=m none=absent elem='a[2]'
+printf '<%s>' "${#ref[@]}" "${#ref[*]}" "${#rr[@]}" "${#mref[*]}" "${#none[@]}" "${#elem[@]}" """,
+        "whole-array target length": """a=([2]=s [55]=last); declare -n all='a[@]'; printf '%s' "${#all}" """,
         "count materializes dynamic group IDs": r"""declare -n ref=GROUPS; : "${#ref[@]}"
 set | grep -E '^GROUPS=\(\[0\]' >/dev/null; printf '%s' "$?" """,
+        "first expansion materializes group IDs": r"""seen() { set | grep -E '^GROUPS=\(\[0\]' >/dev/null; printf '%s' "$?"; }
+seen
+( : "${GROUPS[@]}"; seen )
+( : ${GROUPS[*]}; seen )
+( : "before${GROUPS[@]}after"; seen )
+( : "${!GROUPS[@]}"; seen )
+( : "${GROUPS[@]@Q}"; seen )
+( declare -n group_ref=GROUPS; : "${group_ref[@]}"; seen )
+( a=("${GROUPS[@]}"); seen )
+seen""",
+        "flat pair tilde contexts": r"""declare -A a=(key path=bin:~/tools start ~:~/b)
+printf '<%s>' "${a[key]}" "${a[start]}"
+a=(key path=bin:~/tools equals path=~/bin:~/tools slash bin:~/tools '~:~' 'literal:~' x:~/key data start ~:~/b esc x\:~/a q x:"~"/b)
+printf '<%s>' "${a[key]}" "${a[equals]}" "${a[slash]}" "${a['~:~']}" "${a['x:~/key']}" "${a[start]}" "${a[esc]}" "${a[q]}"
+declare -A 'b=(key path=bin:~/tools)'; printf '<%s>' "${b[key]}" """,
+        "dynamic associative field snapshots": r"""alias aa='OLD alias'
+printf '<%s>' "${BASH_ALIASES[@]}${BASH_ALIASES[bb]:=NEW}"
+unalias bb; printf '<%s>' "${!BASH_ALIASES[@]}${BASH_ALIASES[bb]:=NEW}"
+hash -r; hash -p /old/path aa
+printf '<%s>' "${BASH_CMDS[@]}${BASH_CMDS[bb]:=/new/path}"
+hash -d bb; printf '<%s>' "${!BASH_CMDS[@]}${BASH_CMDS[bb]:=/new/path}" """,
         "expanded array element append": r"""v=' : '; a=([4]=first); i=4; a[i++]+=$v
 declare -A m=([a]=x); key=a; m[$key]+=${v}; declare -n ref='a[4]'; ref+=Q
 (a[4]+=$v; printf '<%s>' "${a[4]}")
@@ -175,7 +197,7 @@ mapfile -t r <<< data; r+=("${src[@]}"); printf '<%s>' "${r[@]}" """,
             if name == "alias print with operands":
                 options = dict(env, BASH_COMPAT=version)
 
-            if name == "brace groups in current substitution" and tuple(map(int,version.split("."))) < (5,3):
+            if name in ("brace groups in current substitution", "whole-array target length") and tuple(map(int,version.split("."))) < (5,3):
                 continue
             observed = [
                 subprocess.run([exe, "--noprofile", "--norc", "-c", script],

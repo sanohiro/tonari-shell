@@ -439,7 +439,7 @@ impl Spec {
             _ => return None,
         };
         Some(Generated {
-            unmark_dirs: false,
+            unmarked: Vec::new(),
             source,
             noquote: self.options.contains(CompOption::Noquote),
             nospace: self.options.contains(CompOption::Nospace),
@@ -1005,7 +1005,7 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
 }
 
 pub struct Generated {
-    pub unmark_dirs: bool,
+    pub unmarked: Vec<usize>,
     pub source: complete::Source,
     pub fallback: bool,
     pub noquote: bool,
@@ -1133,7 +1133,12 @@ fn generate_for_tab(
     if spec.options.contains(CompOption::Plusdirs)
         || (words.is_empty() && spec.options.contains(CompOption::Dirnames))
     {
-        words.extend(complete::file_names(prefix, true, true, session));
+        words.extend(complete::file_names(
+            prefix,
+            true,
+            !session.bindings.unmarked_dirs,
+            session,
+        ));
     }
     if words.is_empty() && allows_default {
         return None;
@@ -1159,8 +1164,9 @@ fn generate_for_tab(
         words.sort_unstable();
         words.dedup();
     }
+    let mut unmarked = Vec::new();
     if filenames && (list || words.len() == 1 || words.iter().any(|w| w.contains('/'))) {
-        for word in &mut words {
+        for (index, word) in words.iter_mut().enumerate() {
             let directory = word
                 .strip_prefix("~/")
                 .and_then(|rest| session.tilde_path(rest));
@@ -1170,18 +1176,24 @@ fn generate_for_tab(
                     .unwrap_or_else(|| Path::new(word))
                     .is_dir()
             {
-                word.push('/');
+                if session.bindings.unmarked_dirs {
+                    unmarked.push(index);
+                } else {
+                    word.push('/');
+                }
             }
         }
     }
+    let nospace =
+        spec.options.contains(CompOption::Nospace) || words.len() == 1 && !unmarked.is_empty();
     Some(Generated {
-        unmark_dirs: filenames && session.bindings.unmarked_dirs,
+        unmarked,
         source: complete::Source::Words(words),
         fallback: false,
         // Bash callbacks may supply shell syntax, including their own trailing separator.
         noquote: spec.options.contains(CompOption::Noquote)
             || (!filenames && (spec.function.is_some() || spec.command.is_some())),
-        nospace: spec.options.contains(CompOption::Nospace),
+        nospace,
     })
 }
 

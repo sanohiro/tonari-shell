@@ -895,7 +895,12 @@ pub(crate) fn subscript_word(source: &str, associative: bool) -> Result<crate::w
     if !needs_scan {
         return Ok(Word::Literal(source.into()));
     }
-    scan_subscript(source, associative, false, |_, _| Ok(false))
+    let mode = if associative {
+        SubscriptMode::Associative
+    } else {
+        SubscriptMode::Arithmetic
+    };
+    scan_subscript(source, mode, |_, _| Ok(false))
 }
 
 // Keep an associative key as one shell word during arithmetic expansion. Its
@@ -905,7 +910,7 @@ pub(crate) fn arithmetic_segments(
     is_associative: impl Fn(&str) -> bool,
 ) -> Result<(Vec<(Word, Word)>, Word), Error> {
     let mut keys = Vec::new();
-    let tail = scan_subscript(source, false, false, |prefix, rest| {
+    let tail = scan_subscript(source, SubscriptMode::Arithmetic, |prefix, rest| {
         let start = source.len() - rest.len() - 1;
         let before = &source[..start];
         let name = before
@@ -931,32 +936,55 @@ pub(crate) fn arithmetic_segments(
     Ok((keys, tail))
 }
 
-pub(crate) fn associative_pair_word(source: &str, process: bool) -> Result<Word, Error> {
-    if process && (source.contains("<(") || source.contains(">(")) {
-        scan_subscript(source, true, true, |_, _| Ok(false))
+pub(crate) fn associative_pair_word(source: &str, assignment_value: bool) -> Result<Word, Error> {
+    let mode = if assignment_value {
+        SubscriptMode::PairValue
     } else {
-        subscript_word(source, true)
-    }
+        SubscriptMode::PairKey
+    };
+    scan_subscript(source, mode, |_, _| Ok(false))
+}
+
+enum SubscriptMode {
+    Arithmetic,
+    Associative,
+    PairKey,
+    PairValue,
+}
+
+fn tilde_prefix(source: &str, colon_delimits: bool) -> Option<(&str, &str)> {
+    let rest = source.strip_prefix('~')?;
+    let end = rest
+        .find(|c| c == '/' || colon_delimits && c == ':')
+        .unwrap_or(rest.len());
+    valid_tilde_user(&rest[..end]).then(|| source.split_at(end + 1))
 }
 
 fn scan_subscript<'a>(
     source: &'a str,
-    associative: bool,
-    process: bool,
+    mode: SubscriptMode,
     mut bracket: impl FnMut(&mut WordBuilder, &mut &'a str) -> Result<bool, Error>,
 ) -> Result<Word, Error> {
+    let associative = !matches!(mode, SubscriptMode::Arithmetic);
+    let pair = matches!(mode, SubscriptMode::PairKey | SubscriptMode::PairValue);
     let mut chars = source.chars();
     let mut word = WordBuilder::default();
-    if associative && let Some(rest) = source.strip_prefix('~') {
-        let end = rest.find('/').unwrap_or(rest.len());
-        if valid_tilde_user(&rest[..end]) {
-            word.part(Part::Tilde(source[..end + 1].to_owned()));
-            chars = rest[end..].chars();
-        }
+    if associative && let Some((prefix, rest)) = tilde_prefix(source, pair) {
+        word.part(Part::Tilde(prefix.to_owned()));
+        chars = rest.chars();
     }
     while let Some(c) = chars.next() {
         match c {
-            '<' | '>' if process && chars.as_str().starts_with('(') => {
+            ':' if matches!(mode, SubscriptMode::PairValue) => {
+                word.push(c);
+                if let Some((prefix, rest)) = tilde_prefix(joined(chars.as_str()), true) {
+                    word.part(Part::Tilde(prefix.to_owned()));
+                    chars = rest.chars();
+                }
+            }
+            '<' | '>'
+                if matches!(mode, SubscriptMode::PairValue) && chars.as_str().starts_with('(') =>
+            {
                 process_word(&mut chars, &mut word, c == '<')?;
             }
             '[' => {

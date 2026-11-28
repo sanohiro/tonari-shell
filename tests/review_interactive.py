@@ -29,6 +29,8 @@ def completion_witnesses(tonari, bash, home):
     (home / "zzmiddlelong").touch()
     (home / "zzlink").symlink_to("zzfile")
     (home / "zzdir/subdir").mkdir(parents=True)
+    for name in ("case-dir", "case_dir"):
+        (home / name).mkdir()
     for name in ("Fold-first", "Fold-second", "case-word", "case_file", "ignore-old.bak", "ignore-only"):
         (home / name).touch()
 
@@ -36,16 +38,24 @@ def completion_witnesses(tonari, bash, home):
     # query. Interactive picking still needs one row per distinct spelling.
     script = """PATH=./commands:./commands
 zzshadow() { :; }; alias zzshadow=:
-compgen -c zzsh; compgen -V results -c zzsh; printf '%s\\n' "${results[@]}"
+compgen -c zzsh; compgen -c zzsh
 compgen -c ./zz; compgen -c ./zzblocked; echo "status=$?" """
     expected = run(bash, home, script)
     assert expected.count(b"zzshadow\n") == 8, expected
     assert b"./zzfile\n" in expected and b"./zzlink\n" in expected and b"./zzblocked\n" not in expected
     assert run(tonari, home, script) == expected
 
+    # Bash 5.3 added -V. Earlier releases still provide the same reference rows
+    # through ordinary compgen output.
+    setup = script.split("compgen -c", 1)[0]
+    rows = run(bash, home, setup + "compgen -c zzsh")
+    store = setup + """compgen -V results -c zzsh && printf '%s\\n' "${results[@]}" """
+    assert run(tonari, home, store) == rows
+
     rc = home / "completion-rc"
     rc.write_text("""PS1='tonari$ '
 unset HISTFILE
+PROBEAA=correct
 bind 'set mark-directories off'
 bind 'set completion-ignore-case on'
 bind 'set completion-map-case on'
@@ -54,6 +64,8 @@ snapshot() { printf '\\n<draft>%s</draft>\\n' "$READLINE_LINE"; READLINE_LINE=; 
 bind -x '"\\C-t":snapshot'
 choose() { printf '%s\\n' "$1|$2|$3|$COMP_CWORD|$COMP_LINE|$COMP_POINT|${COMP_WORDS[*]}" >ctx; COMPREPLY=(selected); }
 complete -F choose abc
+remote_dir() { COMPREPLY=(remote/); }
+complete -o filenames -F remote_dir remote_cmd
 """)
     for shell in (bash, tonari):
         with terminal(shell, home, f"{bindir}:{bindir}", rc, prompt=PROMPT) as fd:
@@ -79,6 +91,10 @@ complete -F choose abc
             draft(": fold-", ": Fold-")
             # Tonari keeps the typed separator when both spellings match.
             draft(": case-", ": case-" if shell == tonari else ": case")
+            if shell == tonari:
+                draft(": case-d", ": case-dir")
+                draft(': "${PROBE}"', ': "${PROBEAA}"', 2)
+            draft("remote_cmd rem", "remote_cmd remote/")
             draft(": igno", ": ignore-only ")
 
 

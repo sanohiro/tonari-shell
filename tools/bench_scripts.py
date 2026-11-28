@@ -52,6 +52,8 @@ def listing_loop(command, count):
 CASES = {
     **{f"witness-declare-readonly-{n}": listing_loop("declare -pr", 256)
        for n in (0, 256, 512, 1024)},
+    **{f"witness-inherited-{cmd}-{n}": listing_loop("declare -p" if cmd == "declare" else "set", 40)
+       for cmd in ("declare", "set") for n in (256, 512, 1024)},
     "witness-set-exported-options": listing_loop("set", 256),
     "witness-declare-pairs": eval_loop("m=(first '[kept]=word' third value)",
                                        'echo "${m[first]}"', "[kept]=word", "declare -A m", 1000),
@@ -950,6 +952,9 @@ def main():
                 case_setup += 'for ((j=0;j<100;++j)); do eval "fn$j() { :; }"; export -f "fn$j"; done; '
             elif case in ("trap-list", "trap-list-named"):
                 case_setup += "trap : HUP USR1 USR2; "
+            if case.startswith("witness-inherited-"):
+                count = int(case.rsplit("-", 1)[1])
+                case_env = dict(case_env, **{f"BENCH_{i:04d}": "value" for i in range(count)})
             if case.startswith("witness-declare-readonly-"):
                 count = int(case.rsplit("-", 1)[1])
                 case_setup += f'readonly bench_ro=ok; for ((j=0;j<{count};j++)); do alias bench_$j=true; done; '
