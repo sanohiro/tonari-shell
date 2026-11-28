@@ -446,9 +446,6 @@ pub(crate) fn trim_boundary(
         pattern.strip_suffix('*')
     };
     let literal = star.unwrap_or(pattern);
-    if prefix && let Some(end) = group.and_then(|g| g.run_prefix(value, longest)) {
-        return end;
-    }
     let plain = group.is_none()
         && !literal
             .bytes()
@@ -502,6 +499,19 @@ pub(crate) fn trim_boundary(
         .char_indices()
         .map(|(i, _)| i)
         .chain(std::iter::once(value.len()));
+    if let Some(ends) = extended::spans::ascii_ends(compiled, value, !prefix, longest) {
+        let miss = extended::spans::MISS;
+        return if prefix {
+            (ends[0] != miss).then_some(ends[0])
+        } else if longest {
+            ends.iter().position(|&end| end != miss)
+        } else {
+            ends.iter().rposition(|&end| end != miss)
+        };
+    }
+    if prefix && let Some(end) = group.and_then(|g| g.run_prefix(value, longest)) {
+        return end;
+    }
     let basic = group.is_none().then(|| compiled.basic());
     if let Some(matcher) = &basic
         && let Some(fixed) = compiled.width()

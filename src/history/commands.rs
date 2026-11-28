@@ -329,14 +329,7 @@ fn imported_prefix(
 }
 
 fn import_entry(h: &mut Entries, value: String, time: i64, erase: bool, limit: usize) {
-    if erase {
-        for i in (0..h.lines.len()).rev() {
-            if h.lines[i] == value {
-                h.remove(i);
-            }
-        }
-    }
-    h.lines.push(value);
+    h.append_line(value, erase);
     h.timestamps.push(time);
     h.current = None;
     // Trim bounded batches while the intermediate window is unobservable.
@@ -510,10 +503,12 @@ fn read_history_file(
             }
             if multiline
                 && timestamp.is_none()
-                && let Some(last) = pending
-                    .as_mut()
-                    .map(|(text, _)| text)
-                    .or_else(|| previous.and_then(|i| h.lines.get_mut(i)))
+                && let Some(last) = pending.as_mut().map(|(text, _)| text).or_else(|| {
+                    previous.and_then(|i| {
+                        h.erase_counts = None;
+                        h.lines.get_mut(i)
+                    })
+                })
             {
                 let added = 1 + line.len();
                 if last.capacity() - last.len() < added {

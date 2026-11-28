@@ -411,9 +411,7 @@ fn assign_value(
     let index = if let Some(expr) = subscript
         && assoc_key.is_none()
     {
-        let index = session.declaration_index(name, expr, global, var)?;
-        var.make_array();
-        index
+        session.declaration_index(name, expr, global, var)?
     } else {
         0
     };
@@ -440,6 +438,12 @@ fn assign_value(
     }
     if name == "OPTIND" {
         session.opt_offset = 0;
+    }
+    // All fallible expansion and checks are complete. A subscript may have
+    // inspected or modified the live binding during evaluation.
+    session.detach_array(name, global, var);
+    if subscript.is_some() && assoc_key.is_none() && var.elements.is_none() {
+        var.make_array();
     }
     if let Some(key) = assoc_key {
         var.make_associative().unwrap().insert(key, text);

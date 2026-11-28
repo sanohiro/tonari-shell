@@ -234,9 +234,34 @@ fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut St
     session.assign_existing_literal(target, scratch)
 }
 
-// The lexer can finish a plain single-quoted string only at another apostrophe.
-fn continues_single_quote(previous: Option<char>, line: &[u8]) -> bool {
-    previous == Some('\'') && memchr::memchr2(b'\'', 0, line).is_none()
+// After the parser identifies an open delimiter, ordinary physical lines
+// cannot finish it. Retry on syntax, NUL, heredocs and history expansion.
+fn still_open(reason: Option<parser::Incomplete>, line: &[u8]) -> bool {
+    use parser::Incomplete::*;
+    let plain = |b: &u8| b.is_ascii_alphanumeric() || b" _-+:./=,\t\n".contains(b);
+    match reason {
+        Some(SingleQuote) => memchr::memchr2(b'\'', 0, line).is_none(),
+        Some(DoubleQuote) => !line.iter().any(|b| b"\"\x00\x24`\\".contains(b)),
+        Some(Message("line continuation")) => line
+            .strip_suffix(b"\\\n")
+            .is_some_and(|s| s.iter().all(plain)),
+        Some(
+            Message(
+                "unfinished array assignment"
+                | "unterminated arithmetic expression"
+                | "unterminated command substitution"
+                | "unterminated parameter expansion",
+            )
+            | Subshell,
+        ) => {
+            line.iter().all(plain)
+                && !matches!(
+                    line.trim_ascii().split(|b| b.is_ascii_whitespace()).next(),
+                    Some(b"then" | b"else" | b"elif" | b"fi" | b"do" | b"done" | b"esac" | b"in")
+                )
+        }
+        _ => false,
+    }
 }
 
 // An unaliased function header cannot execute before its compound body. Both
@@ -267,6 +292,7 @@ struct ScriptState {
     status: u8,
     ran: bool,
     history_quote: Option<char>,
+    incomplete: Option<parser::Incomplete>,
     here_doc: Option<parser::HereDocHint>,
 }
 
@@ -276,6 +302,7 @@ impl ScriptState {
             status,
             ran: false,
             history_quote: None,
+            incomplete: None,
             here_doc: None,
         }
     }
@@ -298,6 +325,10 @@ impl ScriptState {
         line: usize,
     ) -> Parsed<P> {
         self.history_quote = result.as_ref().err().and_then(parser::Error::pending_quote);
+        self.incomplete = match &result {
+            Err(parser::Error::Incomplete(reason)) => Some(*reason),
+            _ => None,
+        };
         match result {
             Ok(p) if !check && !p.as_ref().is_empty() => Parsed::Execute(p),
             Ok(_) => Parsed::Skip,
@@ -368,7 +399,8 @@ fn run(
             }
         }
         if n != 0
-            && continues_single_quote(state.history_quote, &input[line_start..])
+            && !(session.histexpand && session.history_enabled && session.source_depth == 0)
+            && still_open(state.incomplete, &input[line_start..])
             && !session.reads_aliases()
         {
             if std::str::from_utf8(&input[line_start..]).is_err() {
@@ -601,7 +633,7 @@ pub fn text(
         }
         if !last
             && !expand_history
-            && continues_single_quote(state.history_quote, line.as_bytes())
+            && still_open(state.incomplete, line.as_bytes())
             && !session.reads_aliases()
         {
             continue;

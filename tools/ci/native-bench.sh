@@ -8,6 +8,11 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == shell-scaling ]]; then
+  REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k scaling
+  PYTHONPATH=tools python3 tools/ci/shell-scaling.py "$bin/baseline" "$current" "$ref" > "$out/scaling.tsv"
+  exit
+fi
 if [[ $SUITE == array-evaluation ]]; then
   REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k array_evaluation
   exec bash tools/ci/array-evaluation.sh "$current" "$bin/baseline" "$ref" "$out"

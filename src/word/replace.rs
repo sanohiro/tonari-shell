@@ -247,6 +247,7 @@ pub(super) fn substitute(
         out.push_str(&text[copied..]);
         return out;
     }
+    let spans = crate::pattern::extended::spans::ascii_ends(compiled, &text, mode == Suffix, true);
     let bounds: Vec<_> = text
         .char_indices()
         .map(|(i, _)| i)
@@ -270,7 +271,9 @@ pub(super) fn substitute(
     }
     while i + 1 < bounds.len() {
         let start = bounds[i];
-        let end = if mode == Suffix {
+        let end = if let Some(ends) = &spans {
+            (ends[i] != crate::pattern::extended::spans::MISS).then_some(ends[i])
+        } else if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
         } else if let Some(end) = group.and_then(|g| g.run_prefix(&text[start..], true)) {
             end.map(|length| i + bounds[i..].partition_point(|&offset| offset < start + length))

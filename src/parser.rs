@@ -114,7 +114,7 @@ pub(crate) fn prompt_word(
     Ok(builder.finish())
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Incomplete {
     Message(&'static str),
     SingleQuote,

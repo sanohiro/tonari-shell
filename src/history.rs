@@ -304,6 +304,7 @@ impl<T: Default> HistoryWindow<T> {
 #[derive(Clone, Default)]
 pub(crate) struct Entries {
     lines: HistoryWindow<String>,
+    erase_counts: Option<foldhash::HashMap<u64, usize>>,
     timestamps: HistoryWindow<libc::time_t>,
     base: usize,
     current: Option<usize>,
@@ -370,6 +371,7 @@ impl InitialJournal {
         }
         let h = session.history_mut();
         let n = older.len();
+        h.erase_counts = None;
         h.lines.prepend(older);
         h.current = h.current.map(|index| index + n);
         h.timestamps.prepend(timestamps);
@@ -466,14 +468,7 @@ impl Session {
             .scalar_setting("HISTCONTROL")
             .is_some_and(|v| v.split(':').any(|w| w == "erasedups"));
         let h = self.history_mut();
-        if erase {
-            for i in (0..h.lines.len()).rev() {
-                if h.lines[i] == text {
-                    h.remove(i);
-                }
-            }
-        }
-        h.lines.push(text.into());
+        h.append_line(text.into(), erase);
         h.timestamps
             .push(unsafe { libc::time(std::ptr::null_mut()) });
         h.trim_to(limit);
@@ -555,9 +550,53 @@ impl Session {
 }
 
 impl Entries {
+    fn append_line(&mut self, line: String, erase: bool) {
+        use std::hash::BuildHasher;
+        if erase {
+            let counts = self.erase_counts.get_or_insert_with(|| {
+                let mut counts = foldhash::HashMap::default();
+                for entry in self.lines.iter() {
+                    let hash = counts.hasher().hash_one(entry);
+                    *counts.entry(hash).or_default() += 1;
+                }
+                counts
+            });
+            let hash = counts.hasher().hash_one(&line);
+            let mut remaining = counts.get(&hash).copied().unwrap_or(0);
+            let mut i = self.lines.len();
+            while remaining != 0 && i != 0 {
+                i -= 1;
+                if self.lines[i] == line {
+                    self.remove(i);
+                    remaining -= 1;
+                }
+            }
+            *self.erase_counts.as_mut().unwrap().entry(hash).or_default() += 1;
+        } else {
+            self.erase_counts = None;
+        }
+        self.lines.push(line);
+    }
+    fn forget_line(&mut self, i: usize) {
+        use std::hash::BuildHasher;
+        if let Some(counts) = &mut self.erase_counts {
+            let key = counts.hasher().hash_one(&self.lines[i]);
+            if let std::collections::hash_map::Entry::Occupied(mut entry) = counts.entry(key) {
+                *entry.get_mut() -= 1;
+                if *entry.get() == 0 {
+                    entry.remove();
+                }
+            }
+        }
+    }
     fn trim_to(&mut self, limit: usize) {
         if self.lines.len() > limit {
             let count = self.lines.len() - limit;
+            if self.erase_counts.is_some() {
+                for i in 0..count {
+                    self.forget_line(i);
+                }
+            }
             self.lines.discard(count);
             self.timestamps.discard(count);
             self.base += count;
@@ -567,6 +606,7 @@ impl Entries {
     }
 
     fn remove(&mut self, index: usize) {
+        self.forget_line(index);
         self.lines.remove(index);
         self.timestamps.remove(index);
         if index < self.written {

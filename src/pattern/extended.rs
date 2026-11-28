@@ -3,6 +3,8 @@
 // Evaluate each alternative as a set of reachable character boundaries.
 // Empty alternatives and nested repetition can reach the same boundary more
 // than once. Each repetition visits a reachable boundary only once.
+pub(crate) mod spans;
+
 use super::{Matcher, bracket};
 
 #[derive(Debug)]
@@ -179,6 +181,7 @@ fn endings<const PATHNAME: bool>(
     let mut next = Vec::new();
     for (i, atom) in atoms.iter().enumerate() {
         next.clear();
+        let mut holes: Option<Vec<usize>> = None;
         for &pos in &points {
             if period
                 && pos == 0
@@ -261,15 +264,35 @@ fn endings<const PATHNAME: bool>(
                             .flat_map(move |seq| endings::<PATHNAME>(seq, value, from, period))
                     };
                     if *op == b'!' {
+                        // The first start reaches every boundary except its
+                        // excluded ends. Later starts need only fill those holes.
+                        if holes
+                            .as_ref()
+                            .is_some_and(|v| v.last().is_none_or(|&end| end < pos))
+                        {
+                            break;
+                        }
                         let mut excluded = options(pos).collect::<Vec<_>>();
                         excluded.sort_unstable();
-                        next.extend(
-                            value[pos..]
-                                .char_indices()
-                                .map(|(i, _)| pos + i)
-                                .chain(std::iter::once(value.len()))
-                                .filter(|i| excluded.binary_search(i).is_err()),
-                        );
+                        if let Some(missing) = &mut holes {
+                            missing.retain(|&end| {
+                                let keep = end < pos || excluded.binary_search(&end).is_ok();
+                                if !keep {
+                                    next.push(end);
+                                }
+                                keep
+                            });
+                        } else {
+                            next.extend(
+                                value[pos..]
+                                    .char_indices()
+                                    .map(|(i, _)| pos + i)
+                                    .chain(std::iter::once(value.len()))
+                                    .filter(|i| excluded.binary_search(i).is_err()),
+                            );
+                            excluded.dedup();
+                            holes = Some(excluded);
+                        }
                     } else {
                         if matches!(op, b'?' | b'*') {
                             next.push(pos);
@@ -596,6 +619,12 @@ impl Pattern {
         let units = pathname_units(value, self.bytewise_path);
         let value = units.as_ref();
         let period = period && value.starts_with('.');
+        // A nullable group cannot consume the literal required after it.
+        if let Some(tail @ (Atom::Text(_) | Atom::FoldedText(..))) = self.atoms.last()
+            && matches!(literal_edge(tail, value, false), Ok(None))
+        {
+            return false;
+        }
         if let Some(result) = self.match_star::<PATHNAME>(value, period) {
             return result;
         }

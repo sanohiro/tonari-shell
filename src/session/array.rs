@@ -653,6 +653,49 @@ impl Session {
         Ok(())
     }
 
+    pub(crate) fn append_literal_element(&mut self, target: &str, suffix: &str) -> bool {
+        let Some((name, key)) = subscript(target) else {
+            return false;
+        };
+        if !Self::ordinary_assignment(name)
+            || self.live_table(name)
+            || self.protected_array(name)
+            || self.allexport
+        {
+            return false;
+        }
+        let Some(v) = self.variables.get_mut(name) else {
+            return false;
+        };
+        if v.dynamic || v.nameref || v.readonly || v.integer || v.letter_case.is_some() {
+            return false;
+        }
+        let Some(elements) = &mut v.elements else {
+            return false;
+        };
+        let element = match Rc::make_mut(elements) {
+            Elements::Associative(map)
+                if key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                    && !key.is_empty() =>
+            {
+                map.get_mut(key)
+            }
+            Elements::Dense(values) => Self::plain_decimal(key)
+                .and_then(|i| usize::try_from(i).ok())
+                .and_then(|i| values.get_mut(i)),
+            Elements::Sparse(values) => Self::plain_decimal(key)
+                .filter(|&i| i >= 0)
+                .and_then(|i| values.get_mut(&i)),
+            _ => None,
+        };
+        if let Some(value) = element {
+            value.push_str(suffix);
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn indexed_receiver<'a>(
         &mut self,
         name: &'a str,
@@ -827,6 +870,34 @@ impl Session {
         result
     }
 
+    // A completed write can take the table's reference when its working copy
+    // is the sole other owner. A saved local or another snapshot keeps it shared.
+    pub(super) fn detach_array(&mut self, name: &str, global: bool, var: &Variable) {
+        if let Some(elements) = &var.elements
+            && Rc::strong_count(elements) == 2
+        {
+            let saved = global
+                .then(|| {
+                    self.locals
+                        .iter_mut()
+                        .find_map(|scope| scope.variables.get_mut(name))
+                })
+                .flatten();
+            let active = match saved {
+                Some(v) => v.as_mut(),
+                None => self.variables.get_mut(name),
+            };
+            if let Some(active) = active
+                && active
+                    .elements
+                    .as_ref()
+                    .is_some_and(|old| Rc::ptr_eq(old, elements))
+            {
+                active.elements.take();
+            }
+        }
+    }
+
     pub(super) fn array_items(
         &mut self,
         name: &str,
@@ -849,34 +920,8 @@ impl Session {
             }
             return Ok(());
         }
-        // The declaration is committed on both success and initializer errors.
-        // Release the table's old reference only when this working copy is its
-        // sole other owner. Saved locals and integer expressions may need it.
-        if !var.dynamic
-            && !var.integer
-            && var.letter_case.is_none()
-            && let Some(elements) = &var.elements
-            && Rc::strong_count(elements) == 2
-        {
-            let saved = global
-                .then(|| {
-                    self.locals
-                        .iter_mut()
-                        .find_map(|scope| scope.variables.get_mut(name))
-                })
-                .flatten();
-            let active = match saved {
-                Some(v) => v.as_mut(),
-                None => self.variables.get_mut(name),
-            };
-            if let Some(active) = active
-                && active
-                    .elements
-                    .as_ref()
-                    .is_some_and(|old| Rc::ptr_eq(old, elements))
-            {
-                active.elements.take();
-            }
+        if !var.dynamic && !var.integer && var.letter_case.is_none() {
+            self.detach_array(name, global, var);
         }
         let items = match items {
             ArrayItems::Associative(items, _) => {
