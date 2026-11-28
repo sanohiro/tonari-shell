@@ -179,19 +179,20 @@ fn long_physical_path() -> io::Result<std::path::PathBuf> {
     Ok(path)
 }
 
-fn index(word: &str, len: usize) -> Option<usize> {
-    let n = word.get(1..)?.parse::<usize>().ok()?;
-    if n >= len {
-        return None;
-    }
-    match word.as_bytes()[0] {
-        b'+' => Some(n),
-        b'-' => Some(len - 1 - n),
-        _ => None,
-    }
-}
-
 impl Session {
+    pub(crate) fn stack_index(&self, word: &str) -> Option<usize> {
+        let digits = word.strip_prefix(['+', '-']).unwrap_or(word);
+        if !digits.as_bytes().first()?.is_ascii_digit() {
+            return None;
+        }
+        let n = digits.parse::<usize>().ok()?;
+        if word.starts_with('-') {
+            self.dir_stack.len().checked_sub(n)
+        } else {
+            (n <= self.dir_stack.len()).then_some(n)
+        }
+    }
+
     fn stack_path(&self, i: usize) -> Option<&str> {
         if i == 0 {
             return self.logical_directory_ref().ok()?.to_str();
@@ -202,7 +203,7 @@ impl Session {
             .map(|n| self.dir_stack[n].as_str())
     }
 
-    pub(super) fn stack_entry(&self, i: usize) -> Option<String> {
+    pub(crate) fn stack_entry(&self, i: usize) -> Option<String> {
         self.stack_path(i).map(str::to_owned)
     }
 
@@ -320,7 +321,7 @@ impl Session {
         }
         let len = 1 + self.dir_stack.len();
         let slot = match index_word {
-            Some(text) => match index(text, len) {
+            Some(text) => match self.stack_index(text) {
                 Some(i) => Some(i),
                 None => {
                     if self.dir_stack.is_empty() {
@@ -356,19 +357,26 @@ impl Session {
                     self.dir_stack.remove(len - 1 - i);
                 }
             } else if let Some(i) = slot {
-                let cwd = self
-                    .logical_directory()?
-                    .into_os_string()
-                    .into_string()
-                    .map_err(|_| io::Error::other("expected UTF-8 directory name"))?;
-                let mut paths: Vec<_> = std::iter::once(cwd)
-                    .chain(self.dir_stack.iter().rev().cloned())
-                    .collect();
-                paths.rotate_left(i);
-                if !no_cd {
-                    self.change_directory(Path::new(&paths[0]), self.physical, false, true)?;
+                if !no_cd || i != 0 {
+                    let cwd = self
+                        .stack_entry(0)
+                        .ok_or_else(|| io::Error::other("cannot read current directory"))?;
+                    if !no_cd {
+                        if i == 0 {
+                            self.change_directory(Path::new(&cwd), self.physical, false, true)?;
+                        } else {
+                            let target = self.dir_stack[len - 1 - i].clone();
+                            self.change_directory(Path::new(&target), self.physical, false, true)?;
+                        }
+                    }
+                    if i != 0 {
+                        // The cwd is the last element in bottom-to-top order.
+                        // Commit only after chdir succeeds so every entry survives a failure.
+                        self.dir_stack.push(cwd);
+                        self.dir_stack.rotate_right(i);
+                        self.dir_stack.pop();
+                    }
                 }
-                self.dir_stack = paths.into_iter().skip(1).rev().collect();
             } else if let Some(dir) = operand {
                 if no_cd {
                     self.dir_stack.push(dir.to_owned());
@@ -412,18 +420,32 @@ impl Session {
 }
 
 impl Session {
+    pub(crate) fn initialize_directory(&mut self, inherited: Option<&Path>) {
+        if let Some(path) = inherited
+            && path.is_absolute()
+            && !path
+                .as_os_str()
+                .as_bytes()
+                .split(|&b| b == b'/')
+                .any(|part| matches!(part, b"." | b".."))
+            && same_directory(path, Path::new("."))
+        {
+            // PWD already reaches children through the original environment.
+            self.logical_cwd = std::cell::OnceCell::from(path.to_owned());
+            return;
+        }
+        let cwd = physical_path().ok();
+        let value = cwd.as_deref().and_then(Path::to_str).map(str::to_owned);
+        if let Some(cwd) = cwd {
+            self.logical_cwd = std::cell::OnceCell::from(cwd);
+        }
+        self.variables
+            .insert("PWD".into(), super::Variable::scalar(value, true));
+    }
+
     pub(crate) fn logical_directory_ref(&self) -> io::Result<&Path> {
         if let Some(cwd) = self.logical_cwd.get() {
             return Ok(cwd);
-        }
-        if let Some(pwd) = std::env::var_os("PWD") {
-            let path = Path::new(&pwd);
-            if path.is_absolute()
-                && !path.components().any(|c| c == Component::ParentDir)
-                && same_directory(path, Path::new("."))
-            {
-                return Ok(self.logical_cwd.get_or_init(|| path.into()));
-            }
         }
         let cwd = physical_path()?;
         Ok(self.logical_cwd.get_or_init(|| cwd))
@@ -511,7 +533,7 @@ impl Session {
                 diagnostic!("cd: null directory");
                 return 1;
             }
-            if self.posix && physical {
+            if physical {
                 match self.try_change_directory(
                     Path::new(&target),
                     physical,
@@ -520,15 +542,14 @@ impl Session {
                 ) {
                     Ok(()) => return 0,
                     Err(DirectoryError::NoPath(e)) => {
-                        if require_pwd {
+                        if require_pwd || !self.posix {
                             diagnostic!("cd: {e}");
-                            return 1;
                         }
-                        return 0;
+                        return u8::from(require_pwd);
                     }
                     Err(DirectoryError::Other(e)) => {
                         diagnostic!("cd: {e}");
-                        return if require_pwd { 2 } else { 1 };
+                        return if self.posix && require_pwd { 2 } else { 1 };
                     }
                 }
             }
@@ -712,7 +733,11 @@ impl Session {
                         if let Some(old) = &old_pwd {
                             self.assign("OLDPWD", old);
                         }
+                        let exported = self.is_exported("PWD");
                         self.unset_variable("PWD");
+                        if let Some(pwd) = self.variables.get_mut("PWD") {
+                            pwd.exported = exported;
+                        }
                         return Err(DirectoryError::NoPath(e));
                     }
                 },

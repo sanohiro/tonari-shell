@@ -2977,6 +2977,82 @@ v=$(printf 'z\n' | ( read -r x; printf '%s:%s' "$BASH_SUBSHELL" "$x" )); echo "$
         self.compare("cd real && /bin/sh -c 'printf %s \"$PWD\"'", 0,
                      f"{physical}/real".encode())
 
+    def test_startup_exports_the_validated_working_directory(self):
+        real = self.cwd.resolve() / "real"
+        real.mkdir()
+        link = real.with_name("logical")
+        link.symlink_to(real)
+        witness = 'exec /usr/bin/printenv PWD'
+        for inherited, expected in ((None, real), ("", real), (".", real),
+                                    (real.parent, real), (real / "missing", real),
+                                    (real, real), (link, link)):
+            env = dict(self.env)
+            if inherited is not None:
+                env["PWD"] = str(inherited)
+            shells = (TONARI,) if inherited == "." and self.bash_before_53() else self.shells_for()
+            for shell in shells:
+                for source, output in (
+                    (witness, [expected]),
+                    (r'printf "%s\n" "$PWD"; pwd -L; /usr/bin/printenv PWD | cat; '
+                     r'printf "%s\n" "$(/usr/bin/printenv PWD)"', [expected] * 4),
+                ):
+                    with self.subTest(shell=shell, inherited=inherited, source=source):
+                        proc = subprocess.run([shell, "-c", source], cwd=real, env=env,
+                                              capture_output=True, timeout=5)
+                        self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                         (0, b"".join(os.fsencode(v) + b"\n" for v in output), b""))
+
+        # File, stdin, and executable text without a shebang all reach fresh shell setup.
+        script = real / "script"
+        script.write_text(witness + "\n")
+        script.chmod(0o700)
+        env = dict(self.env, PWD=str(real / "missing"))
+        for shell in self.shells_for():
+            for args, data in (([str(script)], b""), (["-s"], witness.encode()),
+                               (["-c", "./script"], b"")):
+                proc = subprocess.run([shell, *args], input=data, cwd=real, env=env,
+                                      capture_output=True, timeout=5)
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                 (0, os.fsencode(real) + b"\n", b""))
+            proc = subprocess.run([shell, "-c", witness], cwd="/", env=env,
+                                  capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"/\n", b""))
+
+    def test_startup_pwd_and_logical_cache_after_rename(self):
+        real = self.cwd.resolve() / "real"
+        link = real.with_name("link")
+        link.symlink_to(real)
+        for shell in self.shells_for():
+            real.mkdir()
+            env = dict(self.env, PWD=str(link))
+            proc = subprocess.run([shell, "-c", 'mv ../real ../renamed; pwd -L; '
+                                   'set -o posix; pwd -L; echo "$PWD"; /usr/bin/printenv PWD'],
+                                  cwd=real, env=env, capture_output=True, timeout=5)
+            renamed = real.with_name("renamed")
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                             (0, f"{link}\n{renamed}\n{link}\n{link}\n".encode(), b""))
+            renamed.rmdir()
+
+        # POSIX requires the physical path when PWD contains a dot or dot-dot component.
+        real.mkdir()
+        for inherited in (f"{link}/.", f"{link}/../link"):
+            env = dict(self.env, PWD=inherited)
+            proc = subprocess.run([TONARI, "-c", 'pwd; echo "$PWD"; /usr/bin/printenv PWD'],
+                                  cwd=real, env=env, capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                             (0, (os.fsencode(real) + b"\n") * 3, b""))
+
+    def test_pwd_export_edits_after_startup_repair(self):
+        self.env["PWD"] = str(self.cwd / "missing")
+        self.compare(r"""PWD=user; /usr/bin/printenv PWD
+PWD=prefix /usr/bin/printenv PWD
+export -n PWD; /usr/bin/printenv PWD || echo private
+cd /; echo "$PWD"; /usr/bin/printenv PWD || echo private
+export PWD; /usr/bin/printenv PWD
+unset PWD; /usr/bin/printenv PWD || echo absent
+PWD=local; /usr/bin/printenv PWD || echo private; echo "$PWD" """,
+                     0, b"user\nprefix\nprivate\n/\nprivate\n/\nabsent\nprivate\nlocal\n")
+
     def test_script_source_eval_and_stdin(self):
         lib = self.cwd / "lib"
         lib.write_text('export G="from $1"\nreturn 7\nprintf unreachable\n')
@@ -3924,6 +4000,51 @@ for v in '' a b x aa; do [[ $v == $p ]] && printf 1 || printf 0; done; echo; don
 pushd +1; popd -0; popd; dirs -c; pushd -n c; echo "${DIRSTACK[1]}:${#DIRSTACK[@]}"
 DIRSTACK[1]=changed; dirs +1; pushd no-such-path 2>/dev/null; echo "$?"; dirs
 popd -n; dirs -p""", 0, b"~/a ~\n~/b ~/a ~\n 0  ~/b\n 1  ~/a\n 2  ~\n~/a ~ ~/b\n~/a ~\n~\n~ c\nc:2\nchanged\n1\n~ changed\n~\n~\n")
+
+    def test_directory_stack_tildes_use_saved_entries_and_pwd(self):
+        self.compare(r"""pushd -n 'saved path' >/dev/null
+unset DIRSTACK; DIRSTACK=(fake 'fake path')
+PWD=user; printf '<%s>\n' ~0 ~+1/file ~-0 ~-1 ~+2 ~--1 ~+99999999999999999999999
+printf '<%s>\n' "${DIRSTACK[@]}"
+unset PWD; printf '<%s>\n' ~0 ~1 ~-1
+PWD=prefix v=~0; echo "$v"
+dirs -c; printf '<%s>\n' ~-0 ~1 """, 0,
+                     b"<user>\n<saved path/file>\n<saved path>\n<user>\n<~+2>\n"
+                     b"<~--1>\n<~+99999999999999999999999>\n<fake>\n<fake path>\n"
+                     b"<~0>\n<saved path>\n<~-1>\nprefix\n<prefix>\n<~1>\n")
+
+    def test_directory_rotation_no_cd_and_failure_preserve_state(self):
+        script = r"""HOME=$PWD; OLDPWD=original
+pushd -n a >/dev/null; pushd -n b >/dev/null; pushd -n c >/dev/null
+pushd -n +0; pushd -n -3; echo "$OLDPWD"; dirs
+pushd -n +2; dirs; pushd -n -0; dirs
+pushd +0 >/dev/null; [[ $OLDPWD = "$PWD" ]] && echo refreshed"""
+        self.compare(script, 0, b"original\n~ c b a\n~ a ~ c\n~ ~ a ~\nrefreshed\n")
+        # A nonexistent destination leaves both the cwd and every saved entry recoverable.
+        proc = self.command(TONARI, "HOME=$PWD; pushd -n missing >/dev/null; "
+                            "pushd -n other >/dev/null; pushd +2 2>/dev/null; echo $?; dirs")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"1\n~ other missing\n", b""))
+
+    def test_stack_physical_mode_and_failed_cd_status_output(self):
+        (self.cwd / "real" / "child").mkdir(parents=True)
+        (self.cwd / "link").symlink_to("real/child")
+        self.compare(r"""start=$PWD; set -P; pushd link/.. >/dev/null || exit 9
+[[ $PWD = "$start/real" && $OLDPWD = "$start" ]] || exit 8; popd >/dev/null
+pushd -n link/.. >/dev/null; popd >/dev/null; [[ $PWD = "$start/real" ]] || exit 7
+cd "$start"; shopt -s cdable_vars; destination=real; cd destination >&- 2>/dev/null
+echo "$?"; [[ $PWD = "$start/real" && $OLDPWD = "$start" && $(pwd -P) = "$PWD" ]] && echo entered""",
+                     0, b"1\nentered\n", minimum=5)
+
+    def test_physical_cd_without_a_directory_name(self):
+        for flags, status in (("-P", 0), ("-Pe", 1)):
+            for mode in ("", "set -o posix; "):
+                proc = self.command(TONARI, mode + 'mkdir gone; cd gone; rmdir ../gone; '
+                                    + f'cd {flags} . 2>/dev/null; ' +
+                                    'echo "$?/${PWD-absent}/${OLDPWD##*/}"; '
+                                    '/usr/bin/printenv PWD || echo absent; '
+                                    'cd "$HOME" && [[ $(/usr/bin/printenv PWD) = "$PWD" ]] && echo recovered')
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                 (0, f"{status}/absent/gone\nabsent\nrecovered\n".encode(), b""))
 
     def test_local_inheritance_copies_attributes_and_sparse_indices(self):
         self.compare("""declare -i count=9; array=([2]=two [7]=seven)

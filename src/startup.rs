@@ -33,7 +33,6 @@ pub(crate) fn settle_credentials(privileged: bool) -> io::Result<bool> {
 
 #[derive(Default)]
 pub(crate) struct Environment {
-    pub pwd: bool,
     ssh: bool,
     skip_startup_files: bool,
     pub shell_level: i64,
@@ -54,6 +53,7 @@ impl Environment {
         };
         let import = !session.privileged && !changed_ids;
         let mut lower_eof = None;
+        let mut pwd = None;
         let mut entry = crate::execute::inherited_env();
 
         // SAFETY: the single interpreter thread is still in initialization.
@@ -73,8 +73,11 @@ impl Environment {
                 let value = &bytes[i + 1..];
                 let utf8 = || std::str::from_utf8(value).ok();
                 match key {
+                    b"PWD" => {
+                        use std::os::unix::ffi::OsStrExt;
+                        pwd = Some(Path::new(std::ffi::OsStr::from_bytes(value)));
+                    }
                     b"SSH_CLIENT" | b"SSH2_CLIENT" => settings.ssh = true,
-                    b"PWD" => settings.pwd = true,
                     b"SHLVL" => {
                         settings.shell_level =
                             utf8().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
@@ -93,6 +96,7 @@ impl Environment {
                 }
             }
         }
+        session.initialize_directory(pwd);
         settings.ignore_eof = settings.ignore_eof.or(lower_eof);
         settings
     }

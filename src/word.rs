@@ -431,6 +431,7 @@ impl Word {
                 continue;
             }
             match part {
+                Part::Tilde(s) => *part = Part::Text(tilde(s, env)),
                 Part::Modify {
                     name,
                     operation,
@@ -836,7 +837,8 @@ impl Word {
                 | Part::Substitution { .. }
                 | Part::Process { .. }
                 | Part::Arithmetic { .. }
-                | Part::Trim { .. } => {
+                | Part::Trim { .. }
+                | Part::Tilde(_) => {
                     unreachable!(
                         "command and arithmetic substitutions are resolved before field splitting"
                     )
@@ -850,7 +852,6 @@ impl Word {
                 },
                 Part::Nested(word) => word.expand_into(output, lookup, positional, ifs),
                 Part::Unquoted(s) => output.append(&s, false, ifs),
-                Part::Tilde(s) => output.append(&tilde(&s, lookup), true, ifs),
                 Part::Parameter { name, quoted }
                     if name == "@"
                         || (name == "*" && !quoted && matches!(output, Output::Fields(_))) =>

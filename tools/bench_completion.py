@@ -32,6 +32,30 @@ def completion(shell, home, bindir, rc, line, suffix=b"-0"):
         return elapsed
 
 
+def review_completion(shell, home, bindir, rc, metrics):
+    def settled(fd, label, line, expected):
+        os.write(fd, line)
+        read_until(fd, line)
+        # The bound key prints READLINE_LINE after Tab. This also settles an
+        # ambiguous completion whose first Tab produces no visible extension.
+        marker = b"<draft>" + expected + b"</draft>"
+        start = time.perf_counter_ns()
+        os.write(fd, b"\t\x14")
+        output = read_until(fd, marker)
+        metrics[label].append((time.perf_counter_ns() - start) / 1e6)
+        read_until(fd, PROMPT, initial=output.split(marker, 1)[1])
+
+    for count in (1, 4):
+        path = os.pathsep.join([str(bindir)] * count)
+        with terminal(shell, home, path, rc, prompt=PROMPT) as fd:
+            if count == 1:
+                line = b": files/mprobe"
+                settled(fd, "folded ambiguous", line, line)
+                settled(fd, "folded unique", b": files/zznee", b": files/zzneedleResolved ")
+            for i in (1, 2):
+                settled(fd, f"PATH x{count}, Tab {i}", b"zznee", b"zzneedleResolved ")
+
+
 def delayed_callback(shell, home, bindir, rc, metrics):
     with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
         os.write(fd, b"declared ma\t")
@@ -167,6 +191,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--reply-list", action="store_true", help="measure ordered callback replies")
     mode.add_argument("--word-list", action="store_true", help="measure a registered 10,000-word completion")
+    mode.add_argument("--review-completion", action="store_true", help="measure folded filenames and repeated PATH directories")
     mode.add_argument("--command-cache", action="store_true", help="time four command-name Tabs in a single session")
     mode.add_argument("--branches", action="store_true", help="complete one filename across 12 independent directories")
     mode.add_argument("--scan-key", action="store_true", help="distinguish scan completion from a key arriving 1 ms into it")
@@ -192,11 +217,20 @@ def main():
         home = Path(scratch)
         bindir = home / "files"
         bindir.mkdir()
-        if not (args.command_cache or args.reply_list or args.word_list or args.reuse_words or args.callback or args.long_line or args.branches):
+        if not (args.review_completion or args.command_cache or args.reply_list or args.word_list or args.reuse_words or args.callback or args.long_line or args.branches):
             digits = len(str(args.files))
             for i in range(args.files):
                 (bindir / f"item-{i:0{digits}d}.dat").touch(mode=0o755)
-        if args.command_cache:
+        if args.review_completion:
+            for i in range(args.files):
+                (bindir / f"mprobe{chr(65 + i % 26)}{i:05d}").touch()
+            (bindir / "zzneedleResolved").touch(mode=0o755)
+            rc = home / "rc"
+            rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTFILE=/dev/null\n"
+                          "bind 'set completion-ignore-case on'\n"
+                          'snapshot() { printf "\\n<draft>%s</draft>\\n" "$READLINE_LINE"; READLINE_LINE=; READLINE_POINT=0; }\n'
+                          "bind -x '\"\\C-t\":snapshot'\n")
+        elif args.command_cache:
             directories = [home / f"bin-{i}" for i in range(6)]
             for i, directory in enumerate(directories):
                 directory.mkdir()
@@ -303,6 +337,9 @@ def main():
             shift = i % len(shells)
             for shell in shells[shift:] + shells[:shift]:
                 metrics = results[shell] if i >= 3 else defaultdict(list)
+                if args.review_completion:
+                    review_completion(shell, home, bindir, rc, metrics)
+                    continue
                 if args.command_cache:
                     with terminal(shell, home, command_path, prompt=PROMPT) as fd:
                         for order, name in enumerate(commands, 1):

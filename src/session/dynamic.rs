@@ -1,6 +1,7 @@
 // Dynamic Bash integers. An ordinary local or an unset tombstone can shadow
 // the inherited binding; no entropy or timer state is initialized at startup.
-use super::Session;
+use super::{Session, Variable};
+use std::borrow::Cow;
 use std::cell::Cell;
 
 #[derive(Clone, Copy, Default)]
@@ -13,6 +14,7 @@ struct Random {
 #[derive(Clone, Default)]
 pub(super) struct Dynamic {
     seconds: Cell<Option<i64>>,
+    pub(super) seconds_read: Cell<bool>,
     random: Cell<Random>,
     listed: [Cell<Option<i64>>; 5],
     pub(super) lineno: Cell<Option<usize>>,
@@ -88,6 +90,45 @@ impl Session {
         }
     }
 
+    // Bulk listings observe the last value of a dynamic variable. Reading the
+    // variable by name is a separate operation and may advance RANDOM.
+    pub(super) fn listed_scalar<'a>(
+        &self,
+        name: &str,
+        stored: Option<&'a Variable>,
+    ) -> Option<Cow<'a, str>> {
+        if matches!(name, "BASHOPTS" | "SHELLOPTS") {
+            return Some(Cow::Owned(self.option_list(name == "SHELLOPTS")));
+        }
+        if let Some(var) = stored.filter(|v| !v.dynamic) {
+            return var.value.as_deref().map(Cow::Borrowed);
+        }
+        if is_dynamic(name) {
+            return self.listed_number(name).map(|n| Cow::Owned(n.to_string()));
+        }
+        if Self::listed_dynamic_text(name) {
+            self.listed_text(name).map(Cow::Owned)
+        } else if name == "_" {
+            self.get(name).map(Cow::Owned)
+        } else {
+            self.inherited_value(name).map(Cow::Owned)
+        }
+    }
+
+    pub(super) fn listed_dynamic_text(name: &str) -> bool {
+        matches!(
+            name,
+            "BASHPID"
+                | "BASH_ARGV0"
+                | "BASH_COMMAND"
+                | "BASH_SUBSHELL"
+                | "LINENO"
+                | "COMP_WORDBREAKS"
+                | "EPOCHSECONDS"
+                | "EPOCHREALTIME"
+        )
+    }
+
     pub(super) fn listed_number(&self, name: &str) -> Option<i64> {
         self.dynamic.listed[number_slot(name)?].get()
     }
@@ -95,6 +136,7 @@ impl Session {
     pub(super) fn dynamic_number(&self, name: &str) -> Option<i64> {
         let value = match name {
             "SECONDS" => {
+                self.dynamic.seconds_read.set(true);
                 let origin = self.dynamic.seconds.get().unwrap_or_else(|| {
                     let initial = std::env::var("SECONDS")
                         .ok()

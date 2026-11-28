@@ -800,13 +800,6 @@ impl Session {
                     "HOME" => Some(4),
                     "PROMPT_DIRTRIM" => Some(5),
                     "IFS" => return Some(Cow::Borrowed(crate::word::DEFAULT_IFS)),
-                    "PWD" => {
-                        return self
-                            .logical_directory_ref()
-                            .ok()?
-                            .to_str()
-                            .map(Cow::Borrowed);
-                    }
                     _ => None,
                 };
                 if let Some(i) = slot {
@@ -951,12 +944,6 @@ impl Session {
             "UID" => Some(unsafe { libc::getuid() }.to_string()),
             "PPID" => Some(self.shell_pid.1.to_string()),
             "BASHOPTS" | "SHELLOPTS" => Some(self.option_list(name == "SHELLOPTS")),
-            "PWD" => self
-                .logical_directory()
-                .ok()?
-                .into_os_string()
-                .into_string()
-                .ok(),
             "BASH_VERSION" => Some(BASH_VERSION.into()),
             "GROUPS" | "BASH_VERSINFO" => self.element(name, 0),
             "SHELL" => std::env::var(name).ok().or_else(crate::word::account_shell),
@@ -1019,11 +1006,6 @@ impl Session {
     }
 
     pub fn initialize_shell_level(&mut self, env: &crate::startup::Environment) {
-        if !env.pwd
-            && let Some(directory) = self.get("PWD")
-        {
-            self.assign("PWD", &directory);
-        }
         let level = env.shell_level.saturating_add(1);
         let level = if level >= 1000 {
             diagnostic!("warning: shell level ({level}) too high, resetting to 1");

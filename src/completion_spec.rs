@@ -6,8 +6,8 @@ use std::rc::Rc;
 use crate::{Session, complete, execute, parser, pattern};
 
 pub(crate) const KEYWORDS: &[&str] = &[
-    "!", "[[", "]]", "case", "coproc", "do", "done", "elif", "else", "esac", "fi", "for",
-    "function", "if", "in", "select", "then", "time", "until", "while", "{", "}",
+    "if", "then", "else", "elif", "fi", "case", "esac", "for", "select", "while", "until", "do",
+    "done", "in", "function", "time", "{", "}", "!", "[[", "]]", "coproc",
 ];
 macro_rules! actions {
     ($( $kind:ident => ($name:literal, $flag:literal $(, $short:literal)?) ),+ $(,)?) => {
@@ -439,6 +439,7 @@ impl Spec {
             _ => return None,
         };
         Some(Generated {
+            unmark_dirs: false,
             source,
             noquote: self.options.contains(CompOption::Noquote),
             nospace: self.options.contains(CompOption::Nospace),
@@ -539,7 +540,7 @@ impl Spec {
                 CompAction::Service => words.extend(complete::service_names(prefix)),
                 CompAction::Signal => words.extend(complete::signal_names(prefix)),
                 CompAction::Hostname => words.extend(complete::host_names(prefix, session)),
-                CompAction::Command => words.extend(complete::command_names(prefix, session)),
+                CompAction::Command => words.extend(complete::command_names(prefix, session, true)),
                 CompAction::Directory | CompAction::File => {
                     let files = complete::generated_files(
                         prefix,
@@ -1004,6 +1005,7 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
 }
 
 pub struct Generated {
+    pub unmark_dirs: bool,
     pub source: complete::Source,
     pub fallback: bool,
     pub noquote: bool,
@@ -1157,10 +1159,7 @@ fn generate_for_tab(
         words.sort_unstable();
         words.dedup();
     }
-    if filenames
-        && !session.bindings.unmarked_dirs
-        && (list || words.len() == 1 || words.iter().any(|w| w.contains('/')))
-    {
+    if filenames && (list || words.len() == 1 || words.iter().any(|w| w.contains('/'))) {
         for word in &mut words {
             let directory = word
                 .strip_prefix("~/")
@@ -1176,6 +1175,7 @@ fn generate_for_tab(
         }
     }
     Some(Generated {
+        unmark_dirs: filenames && session.bindings.unmarked_dirs,
         source: complete::Source::Words(words),
         fallback: false,
         // Bash callbacks may supply shell syntax, including their own trailing separator.

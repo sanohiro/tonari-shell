@@ -1,4 +1,4 @@
-use super::{Cow, dynamic, print_variable_value, set_value};
+use super::{print_variable_value, set_value};
 use std::io::{self, Write};
 
 use super::Session;
@@ -611,6 +611,25 @@ impl Session {
             .collect()
     }
 
+    pub(super) fn empty_array_listing(&self, name: &str) -> bool {
+        match name {
+            "BASH_ARGV" | "BASH_ARGC" => {
+                self.function_depth == 0 && self.debug_base.get().is_none()
+            }
+            "BASH_ALIASES" => self
+                .aliases
+                .0
+                .as_ref()
+                .is_none_or(|aliases| aliases.is_empty()),
+            "BASH_CMDS" => self.hashes.items().next().is_none(),
+            "BASH_SOURCE" => self.source_names.is_empty(),
+            "BASH_LINENO" => self.call_lines.is_empty(),
+            "GROUPS" => !self.dynamic.groups_read.get(),
+            "DIRSTACK" => !self.dynamic.stack_read.get(),
+            _ => false,
+        }
+    }
+
     pub fn set(&mut self, words: &mut Vec<String>) -> u8 {
         let args = words.get(1..).unwrap_or_default();
         if args.is_empty() {
@@ -619,23 +638,7 @@ impl Session {
             for name in self.visible_names("") {
                 let stored = self.variables.get(name);
                 let snapshot;
-                let empty_snapshot = stored.is_none()
-                    && match name {
-                        "BASH_ARGV" | "BASH_ARGC" => {
-                            self.function_depth == 0 && self.debug_base.get().is_none()
-                        }
-                        "BASH_ALIASES" => self
-                            .aliases
-                            .0
-                            .as_ref()
-                            .is_none_or(|aliases| aliases.is_empty()),
-                        "BASH_CMDS" => self.hashes.items().next().is_none(),
-                        "BASH_SOURCE" => self.source_names.is_empty(),
-                        "BASH_LINENO" => self.call_lines.is_empty(),
-                        "GROUPS" => !self.dynamic.groups_read.get(),
-                        "DIRSTACK" => !self.dynamic.stack_read.get(),
-                        _ => false,
-                    };
+                let empty_snapshot = stored.is_none() && self.empty_array_listing(name);
                 let result = if name == "BASH_VERSINFO" && stored.is_none() {
                     // The executable version is immutable across shell scopes.
                     static VERSION: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
@@ -661,26 +664,7 @@ impl Session {
                     }
                     write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
                 } else {
-                    let value = if dynamic::is_dynamic(name) && stored.is_none_or(|v| v.dynamic) {
-                        // A listing must not advance RANDOM or consume fresh entropy.
-                        self.listed_number(name).map(|v| Cow::Owned(v.to_string()))
-                    } else if let Some(var) = stored {
-                        var.value.as_deref().map(Cow::Borrowed)
-                    } else if matches!(
-                        name,
-                        "BASHPID"
-                            | "BASH_ARGV0"
-                            | "BASH_COMMAND"
-                            | "BASH_SUBSHELL"
-                            | "LINENO"
-                            | "COMP_WORDBREAKS"
-                            | "EPOCHSECONDS"
-                            | "EPOCHREALTIME"
-                    ) {
-                        self.listed_text(name).map(Cow::Owned)
-                    } else {
-                        self.get(name).map(Cow::Owned)
-                    };
+                    let value = self.listed_scalar(name, stored);
                     let Some(value) = value else { continue };
                     writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
                 };

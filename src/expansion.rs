@@ -315,49 +315,76 @@ impl<'a> Expansion<'a> {
 
     pub fn array_items(
         &mut self,
-        parts: Vec<(Option<crate::parser::Subscript<String>>, Word)>,
+        parts: crate::parser::ArrayItems<Word>,
         associative: bool,
+        declaration_operand: bool,
     ) -> Result<crate::session::array::ArrayItems, Error> {
         use crate::session::array::{ArrayItems, Index};
         if associative {
-            let pairs = parts.first().is_some_and(|(index, _)| index.is_none());
-            let mut items = Vec::with_capacity(if pairs {
-                parts.len().div_ceil(2)
-            } else {
-                parts.len()
-            });
-            let mut error = None;
-            let mut parts = parts.into_iter();
-            while let Some((index, word)) = parts.next() {
-                let (key, value, append) = if pairs {
-                    let key = self.scalar(word)?;
-                    let value = match parts.next() {
-                        Some((_, word)) => self.scalar(word)?,
-                        None => String::new(),
+            let pairs = parts
+                .words
+                .first()
+                .is_some_and(|(index, _)| index.is_none());
+            if pairs {
+                let mut sources = parts.pair_sources.into_iter().peekable();
+                let mut words = parts.words.into_iter().enumerate().map(|(i, (_, word))| {
+                    let source = sources
+                        .next_if(|(position, _)| *position == i)
+                        .map(|(_, s)| s);
+                    (word, source)
+                });
+                let mut expand = |(word, source): (Word, Option<std::rc::Rc<str>>), process| {
+                    let word = if let Some(source) = source {
+                        crate::parser::with_subscript_aliases(self.session, &source, || {
+                            crate::parser::associative_pair_word(&source, process)
+                        })
+                        .map_err(|e| e.message())?
+                    } else {
+                        word
                     };
-                    (key, value, false)
-                } else {
-                    let Some(index) = index else {
-                        error = Some("missing associative array subscript");
-                        break;
-                    };
-                    let key = self.expanded_key(&index.index)?;
-                    (key, self.scalar(word)?, index.append)
+                    self.scalar(word)
                 };
-                if key.is_empty() {
-                    if pairs {
+                let mut items = Vec::with_capacity(words.len().div_ceil(2));
+                while let Some(key) = words.next() {
+                    let key = expand(key, false)?;
+                    let next = words.next();
+                    // A declaration expands its operands before the builtin runs.
+                    // A direct assignment expands a value only after a valid key.
+                    if key.is_empty() && !declaration_operand {
                         diagnostic!("bad array subscript");
                         continue;
                     }
+                    let value = next
+                        .map(|word| expand(word, !declaration_operand))
+                        .transpose()?
+                        .unwrap_or_default();
+                    if key.is_empty() {
+                        diagnostic!("bad array subscript");
+                    } else {
+                        items.push((key, value, false));
+                    }
+                }
+                return Ok(ArrayItems::Associative(items, None));
+            }
+            let mut items = Vec::with_capacity(parts.words.len());
+            let mut error = None;
+            for (index, word) in parts.words {
+                let Some(index) = index else {
+                    error = Some("missing associative array subscript");
+                    break;
+                };
+                let key = self.expanded_key(&index.index)?;
+                let value = self.scalar(word)?;
+                if key.is_empty() {
                     error = Some("bad array subscript");
                     break;
                 }
-                items.push((key, value, append));
+                items.push((key, value, index.append));
             }
             return Ok(ArrayItems::Associative(items, error));
         }
-        let mut items = Vec::with_capacity(parts.len());
-        for (index, word) in parts {
+        let mut items = Vec::with_capacity(parts.words.len());
+        for (index, word) in parts.indexed_words() {
             if let Some(crate::parser::Subscript { index, append }) = index {
                 // Shell expansions in a subscript precede its RHS, but arithmetic
                 // in the resulting text runs when the initialized array is written.

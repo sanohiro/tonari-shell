@@ -100,6 +100,39 @@ def main():
         "nounset parameter in command": '(( ${absent?required} )); echo unexpected',
         "quoted array separator order": 'a=(a "b c" 雪); IFS=; printf "<%s>" "${a[*]}${IFS:=:}${a[*]}"',
         "posix literal aliases and deferred subscripts": 'set -o posix\nalias index=\'printf 1\'\nalias other=index\na=(x y); printf \'%s\' "${a[$(other)]}"',
+        "flat associative pairs": r"""k='two words'; i=0
+declare -A a=(first [bracket]=word 'quoted' '[bracket]=word' dynamic ["$k"]+="$k" side [$((++i))]=$((++i)) [x]=named last odd)
+printf '<%s>' "${a[first]}" "${a[quoted]}" "${a[dynamic]}" "${a[side]}" "$i" "${a['[x]=named']}" "${a[odd]+set}:${a[odd]}"
+a+=(append [k]=~ tilde name=~)
+printf '<%s>' "${a[append]}" "${a[tilde]}"
+declare -A 'b=(key [abc]=word)'; printf '<%s>' "${b[key]}" """,
+        "array initializer syntax at each binding": r"""f() { a=(first [2]=two); }
+declare -a a; f; printf '<%s>' "${a[@]}"; unset a
+declare -A a; f; printf '<%s>' "${a[first]}"
+a=([first]=one [second]=two); a+=([first]+=two); printf '<%s>' "${a[first]}" "${a[second]}" """,
+        "flat pair expansion side effects": r"""i=0
+declare -A a=('' $((++i)) k [$((++i))]=$((++i))) 2>/dev/null
+printf '<%s>' "$i" "${a[k]}"
+a=('' $((++i)) k [$((++i))]=$((++i))) 2>/dev/null
+printf '<%s>' "$i" "${a[k]}" """,
+        "flat pair process substitution": r"""declare -A a=(k [<(printf x)]=<(printf y))
+printf '<%s>' "${a[k]}"
+a=(k [<(printf x)]=<(printf y) [<(printf z)]=word done)
+case ${a[k]} in ('['/dev/fd/*']=/dev/fd/'*) printf '<direct>';; (*) printf '<unexpected>';; esac
+printf '<%s>' "${a['[<(printf z)]=word']}" """,
+        "nameref array counts": r"""a=([2]=s [55]=last); declare -A m=([a]=first [b]=next)
+declare -n ref=a rr=ref mref=m none=absent elem='a[2]' all='a[@]'
+printf '<%s>' "${#ref[@]}" "${#ref[*]}" "${#rr[@]}" "${#mref[*]}" "${#none[@]}" "${#elem[@]}" "${#all}" """,
+        "count materializes dynamic group IDs": r"""declare -n ref=GROUPS; : "${#ref[@]}"
+set | grep -E '^GROUPS=\(\[0\]' >/dev/null; printf '%s' "$?" """,
+        "expanded array element append": r"""v=' : '; a=([4]=first); i=4; a[i++]+=$v
+declare -A m=([a]=x); key=a; m[$key]+=${v}; declare -n ref='a[4]'; ref+=Q
+(a[4]+=$v; printf '<%s>' "${a[4]}")
+printf '<%s>' "$i" "${a[4]}" "${m[a]}"
+declare -ai n=(6); n[0]+=2; declare -au u=(a); u[0]+=$key; printf '<%s>' "${n[0]}" "${u[0]}" """,
+        "bulk indexed append": r"""src=('a b' '' tail); a=([9]=old); a+=("${src[@]}"); printf '<%s>' "${!a[@]}" "${a[@]}"
+a=(); a+=("${src[@]}"); export a+=(end); printf '<%s>' "${a[@]}"
+mapfile -t r <<< data; r+=("${src[@]}"); printf '<%s>' "${r[@]}" """,
         "array expansion order": 'a=(1 2); printf "<%s>" "${a[@]}$((a[2]=9))"',
         "slice expansion order": 's=abcdef; echo "${s:s=2}"',
         "literal arithmetic": "n='$k'; k=42; let 'v=n' 2>/dev/null; echo $?/$v",
@@ -129,6 +162,13 @@ def main():
             benchmarks(programs, env, scratch)
             return
         pathname_separators(sh, bash, Path(scratch), env)
+        # A replacement's += must see the preceding write to the same key.
+        # Bash 5.3.20 appends to the old table while building its replacement.
+        script = 'declare -A a=([k]=old); a=([k]=one [k]+=two); printf "%s" "${a[k]}"'
+        result = subprocess.run([sh, "--noprofile", "--norc", "-c", script], cwd=scratch,
+                                env=env, capture_output=True, check=True)
+        assert result.stdout == b"onetwo", result
+        print("ok associative replacement appends to the preceding write")
         version = subprocess.check_output([bash, "-c", 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"'], env=env, text=True)
         for name, script in cases.items():
             options = env

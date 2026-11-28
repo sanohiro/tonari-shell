@@ -69,6 +69,35 @@ def main():
             for shell in (reference, candidate):
                 checked(shell, argv, expected, extra)
 
+        # A bulk declaration observes dynamic variables. Looking one up by name
+        # evaluates it. Compare subsequent state in the same shell process.
+        listings = r'''RANDOM=23; first=$RANDOM; second=$RANDOM
+RANDOM=23
+alias witness_alias=true
+readonly marker=ok
+declare -pr > readonlys && grep -qx 'declare -r marker="ok"' readonlys || exit 1
+declare -pi > integers && declare -p > all || exit 2
+grep -qx 'declare -i RANDOM="23"' all || exit 3
+grep -qx 'declare -- SECONDS' all || exit 7
+: "$SECONDS"; declare -pi > integers && grep -q '^declare -i SECONDS=' integers || exit 8
+[[ $RANDOM == "$first" ]] || exit 4
+RANDOM=23
+declare -p RANDOM > named && [[ $RANDOM == "$second" ]] || exit 5
+grep -qx "declare -i RANDOM=\"$first\"" named || exit 6
+unset RANDOM; RANDOM=literal
+declare -p > all && grep -qx 'declare -- RANDOM="literal"' all'''
+        options = r'''export SHELLOPTS BASHOPTS
+for setting in on off; do
+  if [[ $setting == on ]]; then set -o pipefail; shopt -s nullglob
+  else set +o pipefail; shopt -u nullglob; fi
+  set > values
+  grep -Fqx "SHELLOPTS=$SHELLOPTS" values && grep -Fqx "BASHOPTS=$BASHOPTS" values || exit 1
+  declare -p SHELLOPTS BASHOPTS > named || exit 2
+done'''
+        for shell in (reference, candidate):
+            checked(shell, ["-c", listings], (0, b""))
+            checked(shell, ["-c", options], (0, b""))
+
         # Bash 5.3 reports a saturated conversion as an error. Its predecessor
         # returns success for the same bytes. Check the reference version's contract.
         version = run(reference, "-c", 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')

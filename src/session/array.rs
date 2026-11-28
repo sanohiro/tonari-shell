@@ -17,6 +17,11 @@ pub(crate) fn absolute_index(offset: i64, last: impl FnOnce() -> Option<i64>) ->
     }
 }
 
+pub(crate) enum Element<'a> {
+    Indexed(i64),
+    Key(&'a str),
+}
+
 pub(crate) enum Index {
     Literal(i64),
     Expression(String),
@@ -194,24 +199,26 @@ impl Session {
         self.active_groups(name) || name == "FUNCNAME" && !self.funcname_unset
     }
 
+    pub(super) fn builtin_array_parameter(name: &str) -> bool {
+        matches!(
+            name,
+            "BASH_ALIASES"
+                | "BASH_CMDS"
+                | "BASH_ARGC"
+                | "BASH_ARGV"
+                | "BASH_LINENO"
+                | "BASH_SOURCE"
+                | "BASH_VERSINFO"
+                | "DIRSTACK"
+                | "FUNCNAME"
+                | "GROUPS"
+                | "PIPESTATUS"
+        )
+    }
+
     pub(crate) fn array_parameter(&self, name: &str) -> bool {
         self.variables.get(name).map_or_else(
-            || {
-                matches!(
-                    name,
-                    "BASH_ALIASES"
-                        | "BASH_CMDS"
-                        | "BASH_ARGC"
-                        | "BASH_ARGV"
-                        | "BASH_LINENO"
-                        | "BASH_SOURCE"
-                        | "BASH_VERSINFO"
-                        | "DIRSTACK"
-                        | "FUNCNAME"
-                        | "GROUPS"
-                        | "PIPESTATUS"
-                )
-            },
+            || Self::builtin_array_parameter(name),
             |var| var.elements.is_some(),
         )
     }
@@ -480,8 +487,18 @@ impl Session {
         names
     }
 
+    pub(crate) fn referenced_array_len(&self, name: &str) -> Option<usize> {
+        let target = if self.is_nameref(name) {
+            self.scalar_reference_target(name)?
+        } else {
+            name
+        };
+        self.stored_array_len(target)
+    }
+
     pub(crate) fn stored_array_len(&self, name: &str) -> Option<usize> {
         if self.active_groups(name) && !self.variables.contains_key(name) {
+            self.dynamic.groups_read.set(true);
             return Some(Self::group_ids().len());
         }
         if self.live_table(name) {
@@ -666,6 +683,25 @@ impl Session {
         let Some((name, key)) = subscript(target) else {
             return false;
         };
+        let element = if self.is_associative(name) {
+            if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+                return false;
+            }
+            Element::Key(key)
+        } else if let Some(index) = Self::plain_decimal(key) {
+            Element::Indexed(index)
+        } else {
+            return false;
+        };
+        self.append_element_text(name, element, suffix)
+    }
+
+    pub(crate) fn append_element_text(
+        &mut self,
+        name: &str,
+        element: Element<'_>,
+        suffix: &str,
+    ) -> bool {
         if !Self::ordinary_assignment(name)
             || self.live_table(name)
             || self.protected_array(name)
@@ -682,19 +718,12 @@ impl Session {
         let Some(elements) = &mut v.elements else {
             return false;
         };
-        let element = match Rc::make_mut(elements) {
-            Elements::Associative(map)
-                if key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                    && !key.is_empty() =>
-            {
-                map.get_mut(key)
+        let element = match (Rc::make_mut(elements), element) {
+            (Elements::Associative(map), Element::Key(key)) => map.get_mut(key),
+            (Elements::Dense(values), Element::Indexed(i)) => {
+                usize::try_from(i).ok().and_then(|i| values.get_mut(i))
             }
-            Elements::Dense(values) => Self::plain_decimal(key)
-                .and_then(|i| usize::try_from(i).ok())
-                .and_then(|i| values.get_mut(i)),
-            Elements::Sparse(values) => Self::plain_decimal(key)
-                .filter(|&i| i >= 0)
-                .and_then(|i| values.get_mut(&i)),
+            (Elements::Sparse(values), Element::Indexed(i)) => values.get_mut(&i),
             _ => None,
         };
         if let Some(value) = element {
@@ -787,14 +816,14 @@ impl Session {
             self.store_elements(name, Elements::Dense(values), false);
             return Ok(());
         }
-        self.assign_array(name, append, &items, false)
+        self.assign_array(name, append, items, false)
     }
 
     pub fn assign_array(
         &mut self,
         name: &str,
         append: bool,
-        items: &ArrayItems,
+        items: ArrayItems,
         global: bool,
     ) -> Result<(), &'static str> {
         let resolved = self.reference_name(name)?;
@@ -809,7 +838,7 @@ impl Session {
         // Check the last index before writing so an overflowing append is atomic.
         if append
             && !global
-            && let ArrayItems::Indexed(words) = items
+            && let ArrayItems::Indexed(words) = &items
             && let Some(var) = self.variables.value_mut(name, false)
             && !var.dynamic
             && !var.readonly
@@ -827,8 +856,16 @@ impl Session {
             last.checked_add(words.len() as i64)
                 .ok_or(crate::session::SUBSCRIPT_RANGE)?;
             let array = var.make_array();
-            for (offset, (_, word)) in words.iter().enumerate() {
-                array.insert(last + (offset as i64 + 1), word.clone());
+            let ArrayItems::Indexed(words) = items else {
+                unreachable!()
+            };
+            let words = words.into_iter().map(|(_, word)| word);
+            if let Elements::Dense(values) = array {
+                values.extend(words);
+            } else {
+                for (offset, word) in words.enumerate() {
+                    array.insert(last + (offset as i64 + 1), word);
+                }
             }
             var.declared = true;
             var.array_assigned = true;
@@ -839,7 +876,7 @@ impl Session {
             return Err(crate::session::READONLY);
         }
         var.nameref = false;
-        let result = self.array_items(name, global, &mut var, append, items);
+        let result = self.array_items(name, global, &mut var, append, &items);
         self.store_variable(name, var, global);
         result
     }
@@ -1243,7 +1280,7 @@ mod tests {
             .assign_array(
                 "a",
                 false,
-                &ArrayItems::Indexed(vec![
+                ArrayItems::Indexed(vec![
                     (
                         Some(Subscript {
                             index: Index::Literal(3),
