@@ -69,6 +69,74 @@ def main():
             for shell in (reference, candidate):
                 checked(shell, argv, expected, extra)
 
+        # A bulk declaration observes dynamic variables. Looking one up by name
+        # evaluates it. Compare subsequent state in the same shell process.
+        listings = r'''RANDOM=23; first=$RANDOM; second=$RANDOM
+RANDOM=23
+alias witness_alias=true
+readonly marker=ok
+declare -px > exports && grep -qx 'declare -x OLDPWD' exports || exit 9
+declare -pr > readonlys && grep -qx 'declare -r marker="ok"' readonlys || exit 1
+declare -pi > integers && declare -p > all || exit 2
+grep -qx 'declare -i RANDOM="23"' all || exit 3
+grep -qx 'declare -- SECONDS' all || exit 7
+: "$SECONDS"; declare -pi > integers && grep -q '^declare -i SECONDS=' integers || exit 8
+[[ $RANDOM == "$first" ]] || exit 4
+RANDOM=23
+declare -p RANDOM > named && [[ $RANDOM == "$second" ]] || exit 5
+grep -qx "declare -i RANDOM=\"$first\"" named || exit 6
+unset RANDOM; RANDOM=literal
+declare -p > all && grep -qx 'declare -- RANDOM="literal"' all'''
+        options = r'''export SHELLOPTS BASHOPTS
+for setting in on off; do
+  if [[ $setting == on ]]; then set -o pipefail; shopt -s nullglob
+  else set +o pipefail; shopt -u nullglob; fi
+  set > values
+  grep -Fqx "SHELLOPTS=$SHELLOPTS" values && grep -Fqx "BASHOPTS=$BASHOPTS" values || exit 1
+  declare -p SHELLOPTS BASHOPTS > named || exit 2
+  grep -Fq "SHELLOPTS=\"$SHELLOPTS\"" named && grep -Fq "BASHOPTS=\"$BASHOPTS\"" named || exit 3
+done'''
+        scope = r'''x=outer
+f() {
+  local x=inner local_only=v
+  declare -gp x local_only || return
+  declare -gp > all && grep -qx 'declare -- x="inner"' all || return 1
+  grep -qx 'declare -- local_only="v"' all || return 1
+  declare -g x=updated
+}
+f && echo "$x"'''
+        names = r'''declare zzA; declare -a zzB; declare -A zzC; readonly zzD; export zzE
+zzF=""; zzG=(); declare -A zzH=(); declare -n zzI=zzA
+printf '<%s>' "${!zz@}"; echo; compgen -v zz
+declare -p zzA; zzA=now; compgen -v zzA'''
+        selectors = r'''export zz_env=1; readonly zz_ro=2; declare -rx zz_both=3
+declare -i zz_int=4; declare -ax zz_array=(five); declare -t zz_trace=6
+for selector in prx pri pxa pt; do
+    declare -"$selector" | sed -n 's/^declare -[a-zA-Z]* \(zz_[a-z]*\)=.*/\1/p'
+    echo .
+done
+for attr in t i x r c l u n; do
+  unset mutation; declare +"$attr" -"$attr" mutation=value
+  declare -p mutation | grep -qx 'declare -- mutation="value"' || exit 3
+done
+declare +t | grep -qx 'zz_int=4' || exit 1
+declare -px +x > exports && grep -q ' zz_env=' exports && ! grep -q ' zz_int=' exports || exit 2
+f(){ local zz_env=v zz_local=v; local -r zz_const=v; local -rp | sed -n 's/^declare [-a-z]* \(zz_[a-z]*\)=.*/\1/p'; }
+f'''
+        frames = """shopt -s extdebug
+outer() { inner x 'y z'; }
+inner() { declare -p BASH_ARGV BASH_ARGC; }
+outer a b"""
+        for shell in (reference, candidate):
+            checked(shell, ["-c", selectors], (0, b"zz_array\nzz_both\nzz_env\nzz_ro\n.\nzz_both\nzz_int\nzz_ro\n.\n"
+                                                     b"zz_array\n.\nzz_trace\n.\nzz_const\nzz_env\nzz_local\n"))
+            checked(shell, ["-c", frames], (0, b'declare -a BASH_ARGV=([0]="y z" [1]="x" [2]="b" [3]="a")\n'
+                                               b'declare -a BASH_ARGC=([0]="2" [1]="2" [2]="0")\n'))
+            checked(shell, ["-c", scope], (0, b'declare -- x="inner"\ndeclare -- local_only="v"\nupdated\n'))
+            checked(shell, ["-c", names], (0, b'<zzF><zzG><zzH><zzI>\nzzF\nzzG\nzzH\nzzI\ndeclare -- zzA\nzzA\n'))
+            checked(shell, ["-c", listings], (0, b""))
+            checked(shell, ["-c", options], (0, b""))
+
         # Bash 5.3 reports a saturated conversion as an error. Its predecessor
         # returns success for the same bytes. Check the reference version's contract.
         version = run(reference, "-c", 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')

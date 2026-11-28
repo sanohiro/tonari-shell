@@ -34,9 +34,9 @@ When reviewing a benchmark suite, inspect the implementation reached by every pu
 
 ## Independent review / 独立レビュー
 
-Before merging every PR, use the [Tonari review skill](.agents/skills/tonari-review/SKILL.md) and delegate the merge-base diff and its impact to a fresh OpenAI `review-agent`. For critical parser, expansion, process/FD/signal, input, history or completion changes, and before closing any subsystem audit, also delegate related **unchanged** source to a separate reviewer without inherited conversation. Obtain source-derived hypotheses before disclosing prior findings. Verify actionable findings and record their disposition and evidence before closing.
+Before merging every PR, use the [Tonari review skill](.agents/skills/tonari-review/SKILL.md) and delegate the merge-base diff and its impact to a fresh OpenAI `review-agent`. For critical parser, expansion, process/FD/signal, input, history or completion changes, and before closing any subsystem audit, also delegate related **unchanged** source to a separate reviewer without inherited conversation. Obtain source-derived hypotheses before disclosing prior findings. Fix defects verified in the current shell, including those found during a tooling trial. Record the regression check, native timing and the rationale for any intentional difference before closing.
 
-各 PR のマージ前に差分と影響先を独立レビューする。構文解析・展開・プロセス・FD・シグナル・入力・履歴・補完の重要な変更時と、分野別監査を閉じる前には、未変更の関連コードも別のレビュアーに渡す。仮説を受け取ってから既知の所見と照合し、対応と検証結果を記録する。[日本語の運用手順](docs/review.ja.md)
+各 PR のマージ前に差分と影響先を独立レビューする。構文解析・展開・プロセス・FD・シグナル・入力・履歴・補完の重要な変更時と、分野別監査を閉じる前には、未変更の関連コードも別のレビュアーに渡す。仮説を受け取ってから既知の所見と照合する。試運転で見つけた場合も、現行版で確認した不具合は修正する。回帰試験・実機計測・意図して残す差の根拠を記録してから監査を閉じる。[日本語の運用手順](docs/review.ja.md)
 
 # Intentional differences from Bash
 

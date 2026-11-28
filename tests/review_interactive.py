@@ -19,6 +19,91 @@ def run(shell, work, script):
     return result.stdout
 
 
+def completion_witnesses(tonari, bash, home):
+    bindir = home / "commands"
+    bindir.mkdir()
+    for name in ("zzallowed", "zzshadow", "zzshape", "zzshave"):
+        (bindir / name).touch(mode=0o755)
+    (home / "zzblocked").touch(mode=0o600)
+    (home / "zzfile").touch(mode=0o755)
+    (home / "zzmiddlelong").touch()
+    (home / "zzlink").symlink_to("zzfile")
+    (home / "zzdir/subdir").mkdir(parents=True)
+    (home / "localdir").mkdir()
+    for name in ("case-dir", "case_dir"):
+        (home / name).mkdir()
+    for name in ("Fold-first", "Fold-second", "case-word", "case_file", "ignore-old.bak", "ignore-only"):
+        (home / name).touch()
+
+    # Check source order as well as multiplicity, on an initial and a cached
+    # query. Interactive picking still needs one row per distinct spelling.
+    script = """PATH=./commands:./commands
+zzshadow() { :; }; alias zzshadow=:
+compgen -c zzsh; compgen -c zzsh
+compgen -c ./zz; compgen -c ./zzblocked; echo "status=$?" """
+    expected = run(bash, home, script)
+    assert expected.count(b"zzshadow\n") == 8, expected
+    assert b"./zzfile\n" in expected and b"./zzlink\n" in expected and b"./zzblocked\n" not in expected
+    assert run(tonari, home, script) == expected
+
+    # Bash 5.3 added -V. Earlier releases still provide the same reference rows
+    # through ordinary compgen output.
+    setup = script.split("compgen -c", 1)[0]
+    rows = run(bash, home, setup + "compgen -c zzsh")
+    store = setup + """compgen -V results -c zzsh && printf '%s\\n' "${results[@]}" """
+    assert run(tonari, home, store) == rows
+
+    rc = home / "completion-rc"
+    rc.write_text("""PS1='tonari$ '
+unset HISTFILE
+PROBEAA=correct
+bind 'set mark-directories off'
+bind 'set completion-ignore-case on'
+bind 'set completion-map-case on'
+FIGNORE=.bak
+snapshot() { printf '\\n<draft>%s</draft>\\n' "$READLINE_LINE"; READLINE_LINE=; READLINE_POINT=0; }
+bind -x '"\\C-t":snapshot'
+choose() { printf '%s\\n' "$1|$2|$3|$COMP_CWORD|$COMP_LINE|$COMP_POINT|${COMP_WORDS[*]}" >ctx; COMPREPLY=(selected); }
+complete -F choose abc
+literal_directory() { COMPREPLY=(localdir/); }
+no_replies() { COMPREPLY=(); }
+complete -o filenames -F literal_directory literal_cmd
+complete -o plusdirs -F no_replies extra_cmd
+complete -o dirnames -F no_replies fallback_cmd
+""")
+    for shell in (bash, tonari):
+        with terminal(shell, home, f"{bindir}:{bindir}", rc, prompt=PROMPT) as fd:
+            def draft(line, expected, back=0):
+                os.write(fd, line.encode() + b"\x02" * back + b"\t\x14")
+                output = read_until(fd, b"</draft>")
+                result = output.split(b"<draft>")[-1].split(b"</draft>")[0]
+                assert result == expected.encode(), (shell, line, result, expected)
+                read_until(fd, PROMPT, initial=output.split(b"</draft>", 1)[1])
+
+            draft("./zzbloc", "./zzbloc")
+            draft("./zzfil", "./zzfile ")
+            draft("./zzlin", "./zzlink ")
+            draft("A='two words' B+=x zzallo", "A='two words' B+=x zzallowed ")
+            draft('A"B"=x zzallo', 'A"B"=x zzallo')
+            draft(": zzmidTAIL", ": zzmiddlelongTAIL", 4)
+            draft(': "zzmidTAIL"', ': "zzmiddlelongTAIL"', 5)
+            draft(": 'zzmidTAIL'", ": 'zzmiddlelongTAIL'", 5)
+            draft("A=x abc hiTAIL", "A=x abc selectedTAIL", 4)
+            assert (home / "ctx").read_text() == "abc|hi|abc|1|abc hiTAIL|6|abc hiTAIL\n"
+            draft(": zzdir/sub", ": zzdir/subdir")
+            draft(": zzd/sub", ": zzdir/subdir" if shell == tonari else ": zzd/sub")
+            draft(": fold-", ": Fold-")
+            # Tonari keeps the typed separator when both spellings match.
+            draft(": case-", ": case-" if shell == tonari else ": case")
+            if shell == tonari:
+                draft(": case-d", ": case-dir")
+                draft(': "${PROBE}"', ': "${PROBEAA}"', 2)
+            draft("literal_cmd loc", "literal_cmd localdir/")
+            draft("extra_cmd loc", "extra_cmd localdir")
+            draft("fallback_cmd loc", "fallback_cmd localdir")
+            draft(": igno", ": ignore-only ")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("tonari", type=Path)
@@ -79,6 +164,8 @@ def main():
             growing.write_text(initial)
             result = subprocess.check_output([executable, growing], cwd=home)
             assert result == f"{initial.count(chr(10)) + 1}\n".encode(), result
+
+        completion_witnesses(tonari, bash, home)
 
         bindir = home / "bin"
         bindir.mkdir()

@@ -293,6 +293,7 @@ fn start_raw(
                 || match value {
                     Assignment::Scalar(word) => stage_expansion(word, session),
                     Assignment::Array(_, items, _) => items
+                        .words
                         .iter()
                         .any(|(index, word)| index.is_some() || stage_expansion(word, session)),
                 }

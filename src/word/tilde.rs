@@ -1,36 +1,21 @@
-pub(super) fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
+pub(super) fn tilde(s: &str, env: &crate::expansion::Expansion<'_>) -> String {
     let prefix = s.strip_suffix('/').unwrap_or(s);
     let home = match prefix {
-        "~" => lookup("HOME").or_else(account_home),
-        "~+" => lookup("PWD"),
-        "~-" => lookup("OLDPWD"),
+        "~" => env.lookup("HOME").or_else(account_home),
+        "~+" => env.lookup("PWD"),
+        "~-" => env.lookup("OLDPWD"),
         numbered
             if numbered[1..]
                 .trim_start_matches(['+', '-'])
-                .bytes()
-                .next()
-                .is_some_and(|c| c.is_ascii_digit()) =>
+                .starts_with(|c: char| c.is_ascii_digit()) =>
         {
-            let digits = &numbered[1..];
-            let (reverse, digits) = if let Some(n) = digits.strip_prefix('-') {
-                (true, n)
-            } else {
-                (false, digits.strip_prefix('+').unwrap_or(digits))
-            };
-            digits
-                .as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_digit)
-                .then(|| digits.parse::<u32>().ok())
-                .flatten()
-                .and_then(|n| {
-                    let i = if reverse {
-                        -1 - i64::from(n)
-                    } else {
-                        i64::from(n)
-                    };
-                    lookup(&format!("DIRSTACK[{i}]"))
-                })
+            env.session.stack_index(&numbered[1..]).and_then(|i| {
+                if i == 0 {
+                    env.lookup("PWD")
+                } else {
+                    env.session.stack_entry(i)
+                }
+            })
         }
         _ => account_field(
             Some(prefix.strip_prefix('~').unwrap_or(prefix)),

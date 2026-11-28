@@ -530,7 +530,7 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
     }
 }
 
-fn apply_array_declarations(cmd: &PreparedCommand, status: u8, session: &mut Session) -> u8 {
+fn apply_array_declarations(cmd: &mut PreparedCommand, status: u8, session: &mut Session) -> u8 {
     if status != 0 || cmd.array_declarations.is_empty() {
         return status;
     }
@@ -540,8 +540,8 @@ fn apply_array_declarations(cmd: &PreparedCommand, status: u8, session: &mut Ses
         .skip(1)
         .take_while(|a| crate::builtins::flags::cluster(a))
         .any(|a| a.contains('g'));
-    for d in &cmd.array_declarations {
-        if let Err(e) = session.assign_array(&d.name, d.append, &d.items, global) {
+    for d in cmd.array_declarations.drain(..) {
+        if let Err(e) = session.assign_array(&d.name, d.append, d.items, global) {
             diagnostic!("{}: {e}", cmd.words[0]);
             return 1;
         }

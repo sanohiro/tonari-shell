@@ -8,7 +8,27 @@ pub struct Subscript<T> {
     pub append: bool,
 }
 
-type ArrayItems<W> = Vec<(Option<Subscript<String>>, W)>;
+#[derive(Debug, Clone, Default)]
+pub struct ArrayItems<W> {
+    pub words: Vec<(Option<Subscript<String>>, W)>,
+    // A bare first word can introduce either indexed entries or associative
+    // pairs. Only keep alternate spellings where those interpretations differ.
+    pub pair_sources: Vec<(usize, std::rc::Rc<str>)>,
+}
+
+impl ArrayItems<Word> {
+    pub(crate) fn indexed_words(self) -> impl Iterator<Item = (Option<Subscript<String>>, Word)> {
+        let possible_pairs = self.words.first().is_some_and(|(index, _)| index.is_none());
+        self.words.into_iter().map(move |(index, mut word)| {
+            if possible_pairs && let Some(index) = &index {
+                // The lexer retained the prefix for either interpretation.
+                word.remove_assignment_prefix(index.index.len() + 3 + usize::from(index.append))
+                    .expect("parsed array subscript");
+            }
+            (index, word)
+        })
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Assignment<W> {
@@ -36,10 +56,13 @@ pub(crate) fn quoted_initializer(source: &str) -> Result<ArrayItems<Word>, Error
             b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b'/' | b' ' | b'\t')
         })
     {
-        return Ok(body
-            .split_ascii_whitespace()
-            .map(|word| (None, Word::Literal(word.into())))
-            .collect());
+        return Ok(ArrayItems {
+            words: body
+                .split_ascii_whitespace()
+                .map(|word| (None, Word::Literal(word.into())))
+                .collect(),
+            pair_sources: Vec::new(),
+        });
     }
     let (tokens, spans, _) = super::lexer::lex_initializer(source)?;
     let mut reader = Reader::new(tokens, spans, source);
@@ -53,10 +76,28 @@ pub(crate) fn quoted_initializer(source: &str) -> Result<ArrayItems<Word>, Error
     Ok(items)
 }
 
+fn pair_needs_source(index: Option<&str>, word: &Word) -> bool {
+    use crate::word::Part;
+    // The lexer kept subscript syntax verbatim and recognized RHS tildes and
+    // process substitutions as assignment operands. Pair words use other rules.
+    if index.is_some_and(|s| s.contains(['$', '`', '"', '\'', '\\', '<', '>'])) {
+        return true;
+    }
+    match word {
+        Word::Literal(s) => s.contains(":~") || s.starts_with('~') && s.contains(':'),
+        Word::Expanded(parts) | Word::Declaration(parts) => parts.iter().any(|part| match part {
+            Part::Process { .. } | Part::Tilde(_) => true,
+            Part::Text(text) | Part::Pattern(text) => text.contains('~'),
+            _ => false,
+        }),
+    }
+}
+
 impl Reader {
     pub(super) fn array_items<const COLLECT: bool>(&mut self) -> Result<ArrayItems<Word>, Error> {
         self.tokens.pop_front();
-        let mut items = Vec::new();
+        let mut items = ArrayItems::default();
+        let mut possible_pairs = true;
         loop {
             match self.operand() {
                 Some(Token::RightParen) => return Ok(items),
@@ -77,11 +118,20 @@ impl Reader {
                         })
                         .transpose()?
                         .filter(|k| k.starts_with('[') && (k.ends_with(']') || k.ends_with("]+")));
-                    if let Some(name) = &index {
+                    if items.words.is_empty() {
+                        possible_pairs = index.is_none();
+                    }
+                    if possible_pairs && pair_needs_source(index.as_deref(), &word) {
+                        let source = self.location(self.position() - 1);
+                        items
+                            .pair_sources
+                            .push((items.words.len(), source.text().into()));
+                    }
+                    if !possible_pairs && let Some(name) = &index {
                         word.remove_assignment_prefix(name.len() + 1)
                             .ok_or(Error::Invalid("invalid assignment prefix"))?;
                     }
-                    items.push((
+                    items.words.push((
                         index.map(|s| {
                             let append = s.ends_with('+');
                             Subscript {

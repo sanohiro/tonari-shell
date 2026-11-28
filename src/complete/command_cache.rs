@@ -6,8 +6,8 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 pub(super) const MAX_DIRECTORIES: usize = 32;
-const MAX_ENTRIES: usize = 8192;
-const MAX_NAME_BYTES: usize = 256 * 1024;
+// Names and the index share a budget. Short names can fill more entries.
+const LISTING_BUDGET: usize = 256 * 1024 + 8192 * size_of::<Entry>();
 
 #[derive(PartialEq)]
 struct Stamp {
@@ -84,23 +84,31 @@ impl Listing {
         ControlFlow::Continue(())
     }
 
-    fn push(&mut self, name: &CStr, kind: u8) -> bool {
+    fn push(&mut self, name: &CStr, kind: u8, tails: &mut [u16; 256]) -> bool {
         let bytes = name.to_bytes_with_nul();
         let Ok(len) = u16::try_from(bytes.len()) else {
             return false;
         };
-        if self.index.len() == MAX_ENTRIES || self.bytes.len() + bytes.len() > MAX_NAME_BYTES {
+        if self.bytes.len() + bytes.len() + (self.index.len() + 1) * size_of::<Entry>()
+            > LISTING_BUDGET
+        {
             return false;
         }
         // One-based links reserve zero for the end of a first-byte bucket.
-        let head = &mut self.heads[usize::from(bytes[0])];
+        let bucket = usize::from(bytes[0]);
+        let link = self.index.len() as u16 + 1;
+        if tails[bucket] == 0 {
+            self.heads[bucket] = link;
+        } else {
+            self.index[usize::from(tails[bucket]) - 1].next = link;
+        }
+        tails[bucket] = link;
         self.index.push(Entry {
             start: self.bytes.len() as u32,
             len,
             kind,
-            next: *head,
+            next: 0,
         });
-        *head = self.index.len() as u16;
         self.bytes.extend_from_slice(bytes);
         true
     }
@@ -172,9 +180,10 @@ pub(super) fn scan(
             bytes: Vec::with_capacity(entries * 16),
             index: Vec::with_capacity(entries),
         });
+        let mut tails = [0; 256];
         let result = directory::scan_checked(path, b"", &mut |raw, kind| {
             if let (Some(name), Some(active)) = (raw, &mut listing)
-                && !active.push(name, kind)
+                && !active.push(name, kind, &mut tails)
             {
                 listing = None;
             }

@@ -23,6 +23,30 @@ if [[ $SUITE == review-perf ]]; then
   exit
 fi
 source tools/ci/bash-source.sh
+if [[ $SUITE == review-findings ]]; then
+  reference=$ref
+  if [[ $RUNNER_OS == macOS ]]; then
+    reference=$(brew --prefix bash)/bin/bash
+    [[ -x $reference ]] || brew install bash
+  fi
+  "$reference" --version > "$out/bash-version.txt"
+  args=()
+  while read -r name; do args+=(--case "$name"); done < <(
+    PYTHONPATH=tools python3 -c 'from bench_scripts import CASES; print("\n".join(k for k in CASES if k.startswith("witness-")))'
+  )
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$reference" \
+    --timing started --runs 15 "${args[@]}" > "$out/witnesses.txt"
+  # The previous release drops the bracketed prefix on this input.
+  python3 tools/bench_scripts.py "$current" --bash "$reference" --timing started \
+    --runs 15 --case flat-assoc-pairs > "$out/flat-pairs.txt"
+  python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$reference" \
+    --review-completion --runs 11 > "$out/completion.txt"
+  python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$reference" \
+    --command-cache --runs 15 > "$out/command-cache.txt"
+  python3 tools/bench_login.py "$current" --previous "$bin/baseline" --bash "$reference" \
+    --prompt --runs 31 > "$out/startup.txt"
+  exit
+fi
 if [[ $SUITE == correctness-review ]]; then
   reference=$ref
   if [[ $RUNNER_OS == macOS ]]; then

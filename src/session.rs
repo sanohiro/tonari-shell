@@ -82,6 +82,7 @@ struct Variable {
     letter_case: Option<LetterCase>,
     nameref: bool,
     readonly: bool,
+    traced: bool,
     integer: bool,
     array_assigned: bool,
     elements: Option<Rc<array::Elements>>,
@@ -91,7 +92,21 @@ struct Variable {
     exported: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NameList {
+    Declared,
+    Assigned,
+}
+
 impl Variable {
+    fn visible_in(&self, list: NameList) -> bool {
+        self.declared
+            && (list == NameList::Declared
+                || self.value.is_some()
+                || self.array_assigned
+                || self.dynamic)
+    }
+
     fn scalar_mut(&mut self) -> &mut Option<String> {
         self.char_count.set(0);
         &mut self.value
@@ -145,10 +160,10 @@ impl Variables {
         self.entries.get_mut(name)
     }
 
-    fn append_visible<'a>(&'a self, prefix: &str, names: &mut Vec<&'a str>) {
+    fn append_visible<'a>(&'a self, prefix: &str, listing: NameList, names: &mut Vec<&'a str>) {
         if prefix.is_empty() || self.entries.len() < 32 {
             names.extend(self.entries.iter().filter_map(|(key, var)| {
-                (var.declared && key.starts_with(prefix)).then_some(key.as_str())
+                (var.visible_in(listing) && key.starts_with(prefix)).then_some(key.as_str())
             }));
             return;
         }
@@ -174,7 +189,7 @@ impl Variables {
         }
         for key in keys.iter() {
             if let Some((key, var)) = self.entries.get_key_value(key)
-                && var.declared
+                && var.visible_in(listing)
             {
                 names.push(key.as_str());
             }
@@ -284,6 +299,7 @@ pub struct Session {
     // original process environment without building a copy on startup.
     variables: Variables,
     inherited_names: std::cell::OnceCell<Rc<Vec<String>>>,
+    listed_environment: std::cell::OnceCell<Rc<HashMap<OsString, OsString>>>,
     inherited_path: std::cell::OnceCell<OsString>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
@@ -513,10 +529,17 @@ impl Session {
     }
 
     pub fn variable_names(&self, prefix: &str) -> Vec<String> {
-        self.visible_names(prefix)
+        self.visible_names(prefix, NameList::Assigned)
             .into_iter()
             .map(str::to_owned)
             .collect()
+    }
+
+    // Bulk variable output repeatedly looks up inherited values. The process
+    // environment is immutable for this session and shell bindings overlay it.
+    fn listed_environment(&self) -> &HashMap<OsString, OsString> {
+        self.listed_environment
+            .get_or_init(|| Rc::new(std::env::vars_os().collect()))
     }
 
     fn inherited_variable_names(&self) -> &[String] {
@@ -530,6 +553,7 @@ impl Session {
             names.extend(
                 [
                     "PWD",
+                    "OLDPWD",
                     "SHELL",
                     "TERM",
                     "_",
@@ -582,7 +606,7 @@ impl Session {
         })
     }
 
-    fn visible_names(&self, prefix: &str) -> Vec<&str> {
+    fn visible_names(&self, prefix: &str, listing: NameList) -> Vec<&str> {
         let base = self.inherited_variable_names();
         let start = base.partition_point(|key| key.as_str() < prefix);
         let mut names: Vec<_> = base[start..]
@@ -590,7 +614,16 @@ impl Session {
             .take_while(|key| key.starts_with(prefix))
             .map(String::as_str)
             .filter(|key| {
-                !(self.funcname_unset && *key == "FUNCNAME" || self.variables.contains_key(*key))
+                !(self.variables.contains_key(*key)
+                    || *key == "FUNCNAME"
+                        && (self.funcname_unset
+                            || listing == NameList::Assigned && self.function_depth == 0)
+                    || *key == "OLDPWD"
+                        && listing == NameList::Assigned
+                        && std::env::var_os("OLDPWD").is_none()
+                    || *key == "PIPESTATUS"
+                        && listing == NameList::Assigned
+                        && self.pipe_status.first.is_none())
             })
             .collect();
         for (key, active) in [
@@ -601,7 +634,7 @@ impl Session {
                 names.push(key);
             }
         }
-        self.variables.append_visible(prefix, &mut names);
+        self.variables.append_visible(prefix, listing, &mut names);
         names.sort_unstable();
         names.dedup();
         names
@@ -800,13 +833,6 @@ impl Session {
                     "HOME" => Some(4),
                     "PROMPT_DIRTRIM" => Some(5),
                     "IFS" => return Some(Cow::Borrowed(crate::word::DEFAULT_IFS)),
-                    "PWD" => {
-                        return self
-                            .logical_directory_ref()
-                            .ok()?
-                            .to_str()
-                            .map(Cow::Borrowed);
-                    }
                     _ => None,
                 };
                 if let Some(i) = slot {
@@ -951,12 +977,6 @@ impl Session {
             "UID" => Some(unsafe { libc::getuid() }.to_string()),
             "PPID" => Some(self.shell_pid.1.to_string()),
             "BASHOPTS" | "SHELLOPTS" => Some(self.option_list(name == "SHELLOPTS")),
-            "PWD" => self
-                .logical_directory()
-                .ok()?
-                .into_os_string()
-                .into_string()
-                .ok(),
             "BASH_VERSION" => Some(BASH_VERSION.into()),
             "GROUPS" | "BASH_VERSINFO" => self.element(name, 0),
             "SHELL" => std::env::var(name).ok().or_else(crate::word::account_shell),
@@ -980,7 +1000,13 @@ impl Session {
             "PATH" => Some(std::env::var(name).unwrap_or_else(|_| {
                 "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into()
             })),
-            _ => std::env::var(name).ok(),
+            _ => match self.listed_environment.get() {
+                Some(env) => env
+                    .get(std::ffi::OsStr::new(name))?
+                    .to_str()
+                    .map(str::to_owned),
+                None => std::env::var(name).ok(),
+            },
         }
     }
 
@@ -1011,19 +1037,20 @@ impl Session {
         Self::builtin_readonly(base) || self.variables.get(base).is_some_and(|var| var.readonly)
     }
 
+    const BUILTIN_READONLY: [&str; 6] = [
+        "BASHOPTS",
+        "BASH_VERSINFO",
+        "EUID",
+        "PPID",
+        "SHELLOPTS",
+        "UID",
+    ];
+
     fn builtin_readonly(name: &str) -> bool {
-        matches!(
-            name,
-            "UID" | "EUID" | "PPID" | "BASHOPTS" | "SHELLOPTS" | "BASH_VERSINFO"
-        )
+        Self::BUILTIN_READONLY.contains(&name)
     }
 
     pub fn initialize_shell_level(&mut self, env: &crate::startup::Environment) {
-        if !env.pwd
-            && let Some(directory) = self.get("PWD")
-        {
-            self.assign("PWD", &directory);
-        }
         let level = env.shell_level.saturating_add(1);
         let level = if level >= 1000 {
             diagnostic!("warning: shell level ({level}) too high, resetting to 1");

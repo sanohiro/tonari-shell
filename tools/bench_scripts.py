@@ -50,6 +50,27 @@ def listing_loop(command, count):
 
 
 CASES = {
+    **{f"witness-declare-readonly-{n}": listing_loop("declare -pr", 256)
+       for n in (0, 256, 512, 1024)},
+    **{f"witness-inherited-{cmd}-{n}": listing_loop("declare -p" if cmd == "declare" else "set", 40)
+       for cmd in ("declare", "set") for n in (256, 512, 1024)},
+    "witness-combined-attributes": listing_loop("declare -prx", 256),
+    "witness-set-exported-options": listing_loop("set", 256),
+    "witness-declare-pairs": eval_loop("m=(first '[kept]=word' third value)",
+                                       'echo "${m[first]}"', "[kept]=word", "declare -A m", 1000),
+    "witness-nameref-length": eval_loop('n=${#ref[@]}', 'echo "$n"', "1024",
+                                        "a=({1..1024}); declare -n ref=a", 512),
+    "flat-assoc-pairs": eval_loop('m=(key [literal]=$x)', 'echo "${m[key]}"',
+                                  "[literal]=ab", "declare -A m; x=ab", 1000),
+    "witness-element-append": eval_loop('a[0]+=$chunk', 'echo "${#a[0]}"', "524288",
+                                        "a=(''); printf -v chunk '%0256d' 0", 2048),
+    "witness-bulk-append": eval_loop('a=(); a+=("${src[@]}")', 'echo "${#a[@]} ${#a[0]}"',
+                                     "1024 2048", "printf -v chunk '%02048d' 0; "
+                                     "for ((j=0;j<1024;j++)); do src[j]=$chunk; done", 32),
+    "witness-dir-rotate-one": eval_loop("pushd -n +1 || exit", 'echo "${#DIRSTACK[@]}"',
+                                        "129", "for ((j=0;j<128;j++)); do pushd -n entry$j >/dev/null; done", 2400),
+    "witness-dir-rotate-zero": eval_loop("pushd -n +0 || exit", 'echo "${#DIRSTACK[@]}"',
+                                         "129", "for ((j=0;j<128;j++)); do pushd -n entry$j >/dev/null; done", 2400),
     **{f"r8-append-{kind}-{n}": eval_loop(
         'm+=([k$i]=$i)' if kind == "assoc" else 'm+=([$i]=$i)',
         'echo "${#m[@]} ${m[k$((i-1))]}"' if kind == "assoc" else 'echo "${#m[@]} ${m[i-1]}"',
@@ -932,6 +953,14 @@ def main():
                 case_setup += 'for ((j=0;j<100;++j)); do eval "fn$j() { :; }"; export -f "fn$j"; done; '
             elif case in ("trap-list", "trap-list-named"):
                 case_setup += "trap : HUP USR1 USR2; "
+            if case.startswith("witness-inherited-"):
+                count = int(case.rsplit("-", 1)[1])
+                case_env = dict(case_env, **{f"BENCH_{i:04d}": "value" for i in range(count)})
+            if case.startswith("witness-declare-readonly-"):
+                count = int(case.rsplit("-", 1)[1])
+                case_setup += f'readonly bench_ro=ok; for ((j=0;j<{count};j++)); do alias bench_$j=true; done; '
+            elif case == "witness-set-exported-options":
+                case_setup += "export SHELLOPTS BASHOPTS; set -o pipefail; shopt -s nullglob; "
             if case == "export-list":
                 case_setup += 'for ((j=0;j<50;++j)); do export "V$j=value$j"; done; '
             elif case == "declare-indexed-list":

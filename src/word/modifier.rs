@@ -97,6 +97,11 @@ pub(crate) fn character_count(text: &str) -> usize {
 }
 
 pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String>, Error> {
+    if let Some((base, _, _)) = name.strip_prefix('#').and_then(array_elements_name)
+        && let Some(count) = env.session.referenced_array_len(base)
+    {
+        return Ok(Some(itoa::Buffer::new().format(count).to_owned()));
+    }
     if let Some(text) = env.borrowed_scalar(name) {
         return Ok(Some(text.to_owned()));
     }
@@ -125,11 +130,6 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
         } else if crate::session::array::subscript(&target).is_some() {
             return Ok(value(&target, env)?.map(|s| s.chars().count().to_string()));
         }
-    }
-    if let Some((base, _, _)) = name.strip_prefix('#').and_then(array_elements_name)
-        && let Some(count) = env.session.stored_array_len(base)
-    {
-        return Ok(Some(count.to_string()));
     }
     // A name reference to an indexed element must evaluate its subscript in
     // the live expansion, where arithmetic updates are visible to later words.

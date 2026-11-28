@@ -11,9 +11,9 @@ pub struct Completion {
     pub start: usize,
     pub replacement: String,
     pub choices: Vec<String>,
-    noquote: bool,
+    quoting: ChoiceQuoting,
     append_space: bool,
-    source_prefix: usize,
+    unmarked: Vec<usize>,
 }
 
 pub(crate) fn default_word_breaks(hostname: bool) -> &'static str {
@@ -138,13 +138,7 @@ impl<'a> Context<'a> {
 
     /// Tokenize the current simple command for completion without evaluating it.
     pub(crate) fn scan(line: &'a str, cursor: usize) -> Option<Self> {
-        if line[cursor..]
-            .chars()
-            .next()
-            .is_some_and(|c| !c.is_whitespace() && !"|;&".contains(c))
-        {
-            return None;
-        }
+        line.get(..cursor)?;
         let mut words = Vec::new();
         let mut word = String::new();
         let mut quoting = Quoting::default();
@@ -154,16 +148,24 @@ impl<'a> Context<'a> {
         let mut command_end = line.len();
         let mut current = None;
         for (i, c) in line.char_indices() {
+            let kind = quoting.consume(c);
+            let separator = kind == WordChar::Unquoted && (c.is_whitespace() || "|;&".contains(c));
             if i == cursor {
                 current = Some(words.len());
-                if !in_word {
+                if !in_word && separator {
                     words.push(String::new());
                 }
             }
-            let kind = quoting.consume(c);
-            if kind == WordChar::Unquoted && (c.is_whitespace() || "|;&".contains(c)) {
+            if separator {
                 if in_word {
-                    words.push(std::mem::take(&mut word));
+                    if i < cursor
+                        && words.is_empty()
+                        && assignment_prefix(&line[start..i]).is_some()
+                    {
+                        word.clear();
+                    } else {
+                        words.push(std::mem::take(&mut word));
+                    }
                 }
                 if c == '\n' || "|;&".contains(c) {
                     if i >= cursor {
@@ -176,6 +178,9 @@ impl<'a> Context<'a> {
                 }
                 if i < cursor {
                     start = i + c.len_utf8();
+                    if words.is_empty() {
+                        command_start = start;
+                    }
                 }
                 in_word = false;
             } else {
@@ -206,14 +211,59 @@ impl<'a> Context<'a> {
     }
 }
 
+// Inspect the source spelling so a quoted name or escaped equals remains a command.
+fn assignment_prefix(word: &str) -> Option<usize> {
+    let name = crate::word::name_chars_len(word);
+    if !crate::parser::is_identifier(&word[..name]) {
+        return None;
+    }
+    let mut rest = &word[name..];
+    if let Some(subscript) = rest.strip_prefix('[') {
+        let mut quote = Quoting::default();
+        let mut depth = 1;
+        let end = subscript
+            .char_indices()
+            .find(|&(_, c)| {
+                if quote.consume(c) == WordChar::Unquoted {
+                    match c {
+                        '[' => depth += 1,
+                        ']' => depth -= 1,
+                        _ => {}
+                    }
+                }
+                depth == 0
+            })?
+            .0;
+        rest = &subscript[end + 1..];
+    }
+    let value = rest.strip_prefix('+').unwrap_or(rest).strip_prefix('=')?;
+    Some(word.len() - value.len())
+}
+
+fn dequote(raw: &str) -> std::borrow::Cow<'_, str> {
+    if !raw.contains(['\\', '\'', '"']) {
+        return raw.into();
+    }
+    let mut quote = Quoting::default();
+    raw.chars()
+        .filter(|&c| quote.consume(c) != WordChar::Delimiter)
+        .collect::<String>()
+        .into()
+}
+
 struct Common {
     text: String,
     unique: bool,
+    unmark_dirs: bool,
 }
 
 impl Common {
     fn new(text: String) -> Self {
-        Self { text, unique: true }
+        Self {
+            text,
+            unique: true,
+            unmark_dirs: false,
+        }
     }
 
     fn could_change(&self, name: &str) -> bool {
@@ -324,77 +374,80 @@ impl Source {
                 choices.dedup();
                 choices
             }
-            Self::Commands if list => command_names(prefix, session),
-            Self::Commands => {
-                return Some((common_command(prefix, session)?, Vec::new()));
+            Self::Commands if !prefix.contains('/') => {
+                if !list {
+                    return Some((common_command(prefix, session)?, Vec::new()));
+                }
+                let mut names = command_names(prefix, session, false);
+                names.sort_unstable();
+                names.dedup();
+                names
             }
-            Self::Files | Self::Directories => {
-                let directories_only = matches!(self, Self::Directories);
-                let ignored = (!directories_only)
+            Self::Files | Self::Directories | Self::Commands => {
+                let filter = match self {
+                    Self::Directories => FileFilter::Directories,
+                    Self::Commands => {
+                        FileFilter::Commands(crate::execute::IgnoredExecutables::new(session))
+                    }
+                    _ => FileFilter::Any,
+                };
+                let directory = Directory::open(prefix, session)?;
+                let ignored = matches!(filter, FileFilter::Any)
                     .then(|| session.get("FIGNORE"))
                     .flatten()
                     .filter(|s| !s.is_empty());
-                if !list && !session.bindings.ignore_case {
-                    let directory = Directory::open(prefix, session)?;
+                let (mut common, choices) = if list {
+                    let mut choices = Vec::new();
+                    directory.collect(&filter, true, false, &mut choices);
+                    filter_ignored(
+                        &mut choices,
+                        ignored.as_deref(),
+                        session.shopt.force_fignore,
+                    );
+                    let choices = crate::pattern::sorted_names(choices);
+                    let common = if directory.fold.is_some() {
+                        let mut common = Common::new(choices.first()?.clone());
+                        for name in &choices[1..] {
+                            if directory
+                                .narrow_folded(&mut common, name, prefix)
+                                .is_break()
+                            {
+                                break;
+                            }
+                        }
+                        common
+                    } else {
+                        Common::from_names(choices.iter().map(String::as_str), prefix)?
+                    };
+                    (common, choices)
+                } else {
                     let common = if let Some(patterns) = ignored.as_deref() {
                         let suffixes: Vec<_> =
                             patterns.split(':').filter(|s| !s.is_empty()).collect();
-                        common_file(&directory, directories_only, |name| {
+                        common_file(&directory, &filter, |name| {
                             !suffixes
                                 .iter()
                                 .any(|s| ignored_suffix(&directory.dir, name, s))
                         })
                         .or_else(|| {
                             (!session.shopt.force_fignore)
-                                .then(|| common_file(&directory, directories_only, |_| true))
+                                .then(|| common_file(&directory, &filter, |_| true))
                                 .flatten()
                         })
                     } else {
-                        common_file(&directory, directories_only, |_| true)
+                        common_file(&directory, &filter, |_| true)
                     };
-                    return Some((common?, Vec::new()));
+                    (common?, Vec::new())
+                };
+                common.unmark_dirs = session.bindings.unmarked_dirs;
+                if common.unmark_dirs
+                    && !common.unique
+                    && common.text.len() > directory.dir.len()
+                    && common.text.ends_with('/')
+                {
+                    common.text.pop();
                 }
-                let mut choices = file_names(
-                    prefix,
-                    directories_only,
-                    !session.bindings.unmarked_dirs,
-                    session,
-                );
-                filter_ignored(
-                    &mut choices,
-                    ignored.as_deref(),
-                    session.shopt.force_fignore,
-                );
-                if session.bindings.ignore_case {
-                    let locale = session.character_locale();
-                    let first = choices
-                        .iter()
-                        .find(|s| s.starts_with(prefix))
-                        .or_else(|| choices.first())?;
-                    let mut len = first.len();
-                    for name in &choices {
-                        len = first[..len]
-                            .chars()
-                            .zip(name.chars())
-                            .take_while(|&(a, b)| {
-                                crate::pattern::same_letter(a, b, locale)
-                                    || session.bindings.map_case
-                                        && matches!((a, b), ('-', '_') | ('_', '-'))
-                            })
-                            .map(|(c, _)| c.len_utf8())
-                            .sum();
-                    }
-                    let common = Common {
-                        text: first[..len].into(),
-                        unique: choices.len() == 1,
-                    };
-                    return Some((common, if list { choices } else { Vec::new() }));
-                }
-                // Locale collation can place a bytewise nonmatch between two matches.
-                return Some((
-                    Common::from_names(choices.iter().map(String::as_str), prefix)?,
-                    choices,
-                ));
+                return Some((common, choices));
             }
         };
         // These generators return sorted choices. The first and last determine
@@ -414,7 +467,14 @@ pub fn at(
     let context = Context::scan(line, cursor)?;
     let first = context.current == 0;
     let start = context.start;
-    let prefix = context.words.get(context.current)?;
+    // COMP_WORDS includes the untouched suffix, but Tab replaces only up to point.
+    let partial;
+    let prefix = if cursor == line.len() {
+        context.words.get(context.current)?.as_str()
+    } else {
+        partial = dequote(&line[start..cursor]);
+        partial.as_ref()
+    };
     let command = (!first).then(|| context.words[0].as_str());
     // Registered definitions own the candidate list, including an explicitly
     // empty result. Only the shell's default completion offers learned arguments.
@@ -446,52 +506,44 @@ pub fn at(
             .matches(callback_prefix, session, list)
             .or_else(|| {
                 paths
-                    .then(|| abbreviated(callback_prefix, dirs, session))
+                    .then(|| abbreviated(callback_prefix, dirs, false, session))
                     .flatten()
             });
         if matches.is_some() || !generated.fallback {
             let (common, choices) = matches?;
-            return Some(Completion::new(
+            let mut completion = context.completion(
                 callback.start,
                 common,
                 choices,
                 generated.noquote,
                 !generated.nospace && cursor == line.len(),
-            ));
+                0,
+            );
+            if !generated.unmarked.is_empty() {
+                completion.unmarked = generated.unmarked;
+            }
+            return Some(completion);
         }
     }
     if !files_only {
         let raw = &line[start..cursor];
         let mut quoting = Quoting::default();
-        let mut file_start = None;
+        let mut file_start = assignment_prefix(raw);
         for (offset, c) in raw.char_indices() {
-            if quoting.consume(c) == WordChar::Unquoted
-                && (matches!(c, '>' | '<')
-                    || c == '=' && crate::parser::is_identifier(&raw[..offset]))
-            {
+            if quoting.consume(c) == WordChar::Unquoted && matches!(c, '>' | '<') {
                 file_start = Some(offset + 1);
             }
         }
         if let Some(skip) = file_start {
-            let operand = &raw[skip..];
-            let mut quoting = Quoting::default();
-            let dequoted;
-            let prefix = if operand.contains(['\\', '\'', '"']) {
-                dequoted = operand
-                    .chars()
-                    .filter(|&c| quoting.consume(c) != WordChar::Delimiter)
-                    .collect::<String>();
-                dequoted.as_str()
-            } else {
-                operand
-            };
-            let (common, choices) = Source::Files.matches(prefix, session, list)?;
-            return Some(Completion::new(
+            let prefix = dequote(&raw[skip..]);
+            let (common, choices) = Source::Files.matches(&prefix, session, list)?;
+            return Some(context.completion(
                 start + skip,
                 common,
                 choices,
                 false,
                 cursor == line.len(),
+                0,
             ));
         }
         if let Some(user) = raw.strip_prefix('~')
@@ -503,37 +555,28 @@ pub fn at(
                 .map(|s| format!("~{s}/"))
                 .collect();
             let common = Common::from_names(choices.iter().map(String::as_str), raw)?;
-            return Some(Completion::new(start, common, choices, false, false));
+            return Some(context.completion(start, common, choices, false, false, 0));
         }
     }
-    if let Some(result) = expanded_path(&context, session, command, list) {
+    if let Some(result) = expanded_path(&context, prefix, session, command, list, files_only) {
         return Some(result);
     }
-    if !files_only
-        && let Some(variable) =
-            variable_completion(&line[start..cursor], cursor, line.len(), session, list)
-    {
+    if !files_only && let Some(variable) = variable_completion(&context, session, list) {
         return Some(variable);
     }
-    let (common, choices) = ordinary(&context, session, command, list, files_only)?;
-    Some(Completion::new(
-        start,
-        common,
-        choices,
-        false,
-        cursor == line.len(),
-    ))
+    let (common, choices) = ordinary(&context, prefix, session, command, list, files_only)?;
+    Some(context.completion(start, common, choices, false, cursor == line.len(), 0))
 }
 
 fn ordinary(
     context: &Context<'_>,
+    prefix: &str,
     session: &Session,
     command: Option<&str>,
     list: bool,
     files_only: bool,
 ) -> Option<(Common, Vec<String>)> {
     let first = context.current == 0;
-    let prefix = context.words.get(context.current)?;
     if first && prefix.is_empty() && !files_only && session.shopt.no_empty_cmd_completion {
         return None;
     }
@@ -565,7 +608,7 @@ fn ordinary(
         } else {
             Source::Words(names)
         }
-    } else if first && !prefix.contains('/') {
+    } else if first {
         Source::Commands
     } else {
         Source::Files
@@ -576,9 +619,14 @@ fn ordinary(
     } else {
         default_source
     };
+    let command_path = matches!(source, Source::Commands) && prefix.contains('/');
     source
         .matches(prefix, session, list)
-        .or_else(|| files.then(|| abbreviated(prefix, dirs, session)).flatten())
+        .or_else(|| {
+            (files || command_path)
+                .then(|| abbreviated(prefix, dirs, command_path, session))
+                .flatten()
+        })
         .or_else(|| {
             if files_only || first || prefix.is_empty() {
                 return None;
@@ -597,9 +645,11 @@ fn ordinary(
 
 fn expanded_path(
     context: &Context<'_>,
+    prefix: &str,
     session: &Session,
     command: Option<&str>,
     list: bool,
+    files_only: bool,
 ) -> Option<Completion> {
     let Context {
         line,
@@ -640,13 +690,11 @@ fn expanded_path(
             };
             let parent = format!("{}/", path.trim_end_matches('/'));
             // The scanner has already removed quoting from the current word.
-            let rest = context
-                .words
-                .get(context.current)?
-                .split_once('/')
-                .map_or(rest, |(_, tail)| tail);
+            let rest = prefix.split_once('/').map_or(rest, |(_, tail)| tail);
             let expanded = format!("{parent}{rest}");
-            let source = if command == Some("cd") {
+            let source = if command.is_none() && !files_only {
+                Source::Commands
+            } else if matches!(command, Some("cd" | "pushd")) && !files_only {
                 Source::Directories
             } else {
                 Source::Files
@@ -677,33 +725,24 @@ fn expanded_path(
                         }
                     }
                 }
-                let append_space = cursor == line.len();
-                return Some(Completion {
+                return Some(context.completion(
                     start,
-                    replacement: quote_choice(
-                        &common.text,
-                        false,
-                        append_space && common.unique,
-                        offset,
-                    ),
+                    common,
                     choices,
-                    noquote: false,
-                    append_space,
-                    source_prefix: offset,
-                });
+                    false,
+                    cursor == line.len(),
+                    offset,
+                ));
             }
         }
     }
     None
 }
 
-fn variable_completion(
-    raw: &str,
-    cursor: usize,
-    end: usize,
-    session: &Session,
-    list: bool,
-) -> Option<Completion> {
+fn variable_completion(context: &Context<'_>, session: &Session, list: bool) -> Option<Completion> {
+    let cursor = context.cursor;
+    let end = context.line.len();
+    let raw = &context.line[context.start..cursor];
     let (quote, raw) = match raw.as_bytes().first() {
         Some(&q @ (b'\'' | b'"')) => (Some(char::from(q)), &raw[1..]),
         _ => (None, raw),
@@ -727,10 +766,12 @@ fn variable_completion(
     let names = session.variable_names(prefix);
     let mut common = Common::endpoints(names.first()?, names.last()?, names.len() > 1, prefix);
     let close = |name: &mut String| {
-        if braced {
+        if braced && !context.line[cursor..].starts_with('}') {
             name.push('}');
         }
-        if let Some(q) = quote {
+        if cursor == end
+            && let Some(q) = quote
+        {
             name.push(q);
         }
     };
@@ -748,69 +789,127 @@ fn variable_completion(
     } else {
         Vec::new()
     };
-    Some(Completion::new(
+    Some(context.completion(
         cursor - prefix.len(),
         common,
         choices,
         true,
         cursor == end,
+        0,
     ))
 }
 
-impl Completion {
-    fn new(
+impl Context<'_> {
+    fn completion(
+        &self,
         start: usize,
         common: Common,
-        choices: Vec<String>,
+        mut choices: Vec<String>,
         noquote: bool,
         append_space: bool,
-    ) -> Self {
-        Self {
-            start,
-            replacement: quote_choice(&common.text, noquote, append_space && common.unique, 0),
-            source_prefix: 0,
-            choices,
+        source_prefix: usize,
+    ) -> Completion {
+        let mut continued = None;
+        if self.cursor < self.line.len() {
+            let mut quoting = Quoting::default();
+            for c in self.line[start..self.cursor].chars() {
+                quoting.consume(c);
+            }
+            continued = match quoting {
+                Quoting::Single => Some('\''),
+                Quoting::Double | Quoting::DoubleEscape => Some('"'),
+                _ => None,
+            };
+        }
+        let quoting = ChoiceQuoting {
             noquote,
+            source_prefix,
+            continued,
+        };
+        let mut unmarked = Vec::new();
+        let mut replacement = quoting.spell(&common.text, append_space && common.unique);
+        if common.unmark_dirs {
+            if common.unique && replacement.ends_with('/') {
+                replacement.pop();
+            }
+            // Keep the directory bit for picker insertion after removing its display mark.
+            for (i, name) in choices.iter_mut().enumerate() {
+                if name.ends_with('/') {
+                    name.pop();
+                    unmarked.push(i);
+                }
+            }
+        }
+        Completion {
+            start,
+            replacement,
+            choices,
+            quoting,
             append_space,
+            unmarked,
         }
     }
+}
 
+impl Completion {
     pub fn select(&self, index: usize) -> String {
-        quote_choice(
+        self.quoting.spell(
             &self.choices[index],
-            self.noquote,
-            self.append_space,
-            self.source_prefix,
+            self.append_space && self.unmarked.binary_search(&index).is_err(),
         )
     }
 }
 
-fn quote_choice(common: &str, noquote: bool, append_space: bool, source_prefix: usize) -> String {
-    // Re-quote the complete word. A unique file followed by Enter must remain
-    // a single literal argument even when it contains shell metacharacters.
-    let mut replacement = String::new();
-    for (i, c) in common.char_indices() {
-        if noquote || i < source_prefix {
+struct ChoiceQuoting {
+    noquote: bool,
+    source_prefix: usize,
+    continued: Option<char>,
+}
+
+impl ChoiceQuoting {
+    fn spell(&self, common: &str, append_space: bool) -> String {
+        // Keep the suffix in its original quote context when inserting at point.
+        if let Some(q) = self.continued {
+            let mut replacement = common[..self.source_prefix].to_owned();
+            replacement.push(q);
+            for c in common[self.source_prefix..].chars() {
+                if !self.noquote && q == '\'' && c == '\'' {
+                    replacement.push_str("'\\''");
+                } else {
+                    if !self.noquote && q == '"' && matches!(c, '"' | '$' | '`' | '\\') {
+                        replacement.push('\\');
+                    }
+                    replacement.push(c);
+                }
+            }
+            return replacement;
+        }
+        // Re-quote the complete word. A unique file followed by Enter must remain
+        // a single literal argument even when it contains shell metacharacters.
+        let mut replacement = String::new();
+        for (i, c) in common.char_indices() {
+            if self.noquote || i < self.source_prefix {
+                replacement.push(c);
+                continue;
+            }
+            if c == '\n' {
+                replacement.push_str("'\n'");
+                continue;
+            }
+            let leading_tilde = i == 0 && c == '~' && common.contains('/');
+            let ordinary = c.is_alphanumeric()
+                || "/._-+,%^]}@".contains(c)
+                || !c.is_ascii() && !c.is_whitespace() && !c.is_control();
+            if !leading_tilde && !ordinary {
+                replacement.push('\\');
+            }
             replacement.push(c);
-            continue;
         }
-        if c == '\n' {
-            replacement.push_str("'\n'");
-            continue;
+        if append_space && !common.ends_with('/') {
+            replacement.push(' ');
         }
-        let leading_tilde = i == 0 && c == '~' && common.contains('/');
-        let ordinary = c.is_alphanumeric()
-            || "/._-+,%^]}@".contains(c)
-            || !c.is_ascii() && !c.is_whitespace() && !c.is_control();
-        if !leading_tilde && !ordinary {
-            replacement.push('\\');
-        }
-        replacement.push(c);
+        replacement
     }
-    if append_space && !common.ends_with('/') {
-        replacement.push(' ');
-    }
-    replacement
 }
 
 type CommandVisitor<'a> = dyn FnMut(&str, Option<(&Path, u8)>) -> ControlFlow<()> + 'a;
@@ -819,15 +918,27 @@ fn visit_commands(
     prefix: &str,
     session: &Session,
     common_only: bool,
+    preserve_duplicates: bool,
     visit: &mut CommandVisitor<'_>,
 ) -> ControlFlow<()> {
-    for name in crate::execute::builtin_names()
-        .iter()
-        .copied()
-        .filter(|n| !session.disabled_builtins.contains(*n))
+    static SORTED_BUILTINS: std::sync::OnceLock<Vec<&str>> = std::sync::OnceLock::new();
+    let builtins = SORTED_BUILTINS.get_or_init(|| {
+        let mut names = crate::execute::builtin_names().to_vec();
+        names.sort_unstable();
+        names
+    });
+    for name in session
+        .aliases
+        .names()
+        .map(String::as_str)
         .chain(crate::completion_spec::KEYWORDS.iter().copied())
         .chain(session.functions.names(prefix).map(String::as_str))
-        .chain(session.aliases.names().map(String::as_str))
+        .chain(
+            builtins
+                .iter()
+                .copied()
+                .filter(|n| !session.disabled_builtins.contains(*n)),
+        )
     {
         if name.starts_with(prefix) {
             visit(name, None)?;
@@ -837,12 +948,18 @@ fn visit_commands(
     let mut entries = 0usize;
     let mut checked_fd = false;
     let ignored = crate::execute::IgnoredExecutables::new(session);
-    for (position, dir) in std::env::split_paths(&session.search_path(&[])).enumerate() {
-        let path = if dir.as_os_str().is_empty() {
-            Path::new(".")
+    let search = session.search_path(&[]);
+    use std::os::unix::ffi::OsStrExt;
+    let mut seen = foldhash::HashSet::default();
+    for (position, component) in search.as_bytes().split(|&b| b == b':').enumerate() {
+        let path = Path::new(std::ffi::OsStr::from_bytes(if component.is_empty() {
+            b"."
         } else {
-            &dir
-        };
+            component
+        }));
+        if !preserve_duplicates && !seen.insert(path.as_os_str().as_bytes()) {
+            continue;
+        }
         let mut candidate = |raw: Option<&std::ffi::CStr>, kind| {
             if editing && entries.is_multiple_of(256) {
                 crate::editor::preview::scan_input();
@@ -893,7 +1010,7 @@ fn executable(
 fn common_command(prefix: &str, session: &Session) -> Option<Common> {
     let mut common: Option<Common> = None;
     let mut candidate = crate::execute::Candidate::new();
-    let _ = visit_commands(prefix, session, true, &mut |name, entry| {
+    let _ = visit_commands(prefix, session, true, false, &mut |name, entry| {
         if let Some(known) = &mut common {
             // Only a name that could shorten the prefix or change uniqueness
             // needs a filesystem permission check.
@@ -1046,17 +1163,28 @@ pub(crate) fn host_names(prefix: &str, session: &Session) -> Vec<String> {
         .collect()
 }
 
-pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
+pub fn command_names(prefix: &str, session: &Session, preserve_duplicates: bool) -> Vec<String> {
     let mut names = Vec::new();
-    let mut candidate = crate::execute::Candidate::new();
-    let _ = visit_commands(prefix, session, false, &mut |name, entry| {
-        if executable(&mut candidate, name, entry) {
-            names.push(name.to_owned());
+    if prefix.contains('/') {
+        if let Some(dir) = Directory::open(prefix, session) {
+            let filter = FileFilter::Commands(crate::execute::IgnoredExecutables::new(session));
+            dir.collect(&filter, false, true, &mut names);
         }
-        ControlFlow::Continue(())
-    });
-    names.sort_unstable();
-    names.dedup();
+        return names;
+    }
+    let mut candidate = crate::execute::Candidate::new();
+    let _ = visit_commands(
+        prefix,
+        session,
+        false,
+        preserve_duplicates,
+        &mut |name, entry| {
+            if executable(&mut candidate, name, entry) {
+                names.push(name.to_owned());
+            }
+            ControlFlow::Continue(())
+        },
+    );
     names
 }
 
@@ -1145,7 +1273,41 @@ struct Directory<'a> {
     fold: Option<crate::session::CharacterLocale>,
     map_case: bool,
     show_hidden: bool,
-    mark_dirs: bool,
+}
+
+enum FileFilter {
+    Any,
+    Directories,
+    Commands(crate::execute::IgnoredExecutables),
+}
+
+impl FileFilter {
+    fn files(directories_only: bool) -> Self {
+        if directories_only {
+            Self::Directories
+        } else {
+            Self::Any
+        }
+    }
+
+    fn accepts(
+        &self,
+        dir: &Directory<'_>,
+        name: &str,
+        kind: u8,
+        is_dir: bool,
+        candidate: &mut crate::execute::Candidate,
+    ) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Directories => is_dir,
+            Self::Commands(ignore) => {
+                is_dir
+                    || ((!ignore.active() || !ignore.contains(&dir.path.join(name)))
+                        && executable(candidate, name, Some((&dir.path, kind))))
+            }
+        }
+    }
 }
 
 impl<'a> Directory<'a> {
@@ -1188,7 +1350,6 @@ impl<'a> Directory<'a> {
                 .then(|| session.character_locale()),
             map_case: session.bindings.map_case,
             show_hidden: !session.bindings.hide_dotfiles,
-            mark_dirs: !session.bindings.unmarked_dirs,
         })
     }
 
@@ -1258,17 +1419,52 @@ impl<'a> Directory<'a> {
         });
     }
 
+    // Match the spelling that the sorted list would choose: prefer an exact
+    // typed prefix, then byte order. Different folded scalars may have different widths.
+    fn narrow_folded(&self, common: &mut Common, name: &str, prefix: &str) -> ControlFlow<()> {
+        let locale = self.fold.unwrap();
+        let mut old_len = 0;
+        let mut new_len = 0;
+        for (a, b) in common.text.chars().zip(name.chars()) {
+            if !(crate::pattern::same_letter(a, b, locale)
+                || self.map_case && matches!((a, b), ('-', '_') | ('_', '-')))
+            {
+                break;
+            }
+            old_len += a.len_utf8();
+            new_len += b.len_utf8();
+        }
+        let old = &common.text[..old_len];
+        let new = &name[..new_len];
+        let new_exact = new.starts_with(prefix);
+        let old_exact = old.starts_with(prefix);
+        if new_exact && !old_exact || new_exact == old_exact && new < old {
+            common.text.clear();
+            common.text.push_str(new);
+        } else {
+            common.text.truncate(old_len);
+        }
+        common.unique = false;
+        if common.text == prefix {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
     fn collect(
         &self,
-        directories_only: bool,
+        filter: &FileFilter,
         mark_directories: bool,
         dot_entries: bool,
         choices: &mut Vec<String>,
     ) {
         let dir = self.dir.as_ref();
+        let mut candidate = crate::execute::Candidate::new();
         self.visit(dot_entries, |name, kind| {
-            let is_dir = (directories_only || mark_directories) && self.is_directory(name, kind);
-            if directories_only && !is_dir {
+            let is_dir = (mark_directories || !matches!(filter, FileFilter::Any))
+                && self.is_directory(name, kind);
+            if !filter.accepts(self, name, kind, is_dir, &mut candidate) {
                 return ControlFlow::Continue(());
             }
             let mut path = String::with_capacity(dir.len() + name.len() + 1);
@@ -1317,7 +1513,12 @@ fn filter_ignored(choices: &mut Vec<String>, suffixes: Option<&str>, force: bool
     }
 }
 
-fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, Vec<String>)> {
+fn abbreviated(
+    prefix: &str,
+    dirs: bool,
+    command_path: bool,
+    session: &Session,
+) -> Option<(Common, Vec<String>)> {
     let (base, rest) = if let Some(rest) = prefix.strip_prefix("~/") {
         ("~/", rest)
     } else if let Some(rest) = prefix.strip_prefix('/') {
@@ -1368,8 +1569,17 @@ fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, V
         .iter()
         .filter_map(|p| Directory::open(p, session))
         .collect();
-    let mut matches = branch_matches(&branches, dirs);
-    if !dirs {
+    let mut matches = if command_path {
+        let filter = FileFilter::Commands(crate::execute::IgnoredExecutables::new(session));
+        let mut choices = Vec::new();
+        for branch in &branches {
+            branch.collect(&filter, true, false, &mut choices);
+        }
+        choices
+    } else {
+        branch_matches(&branches, dirs)
+    };
+    if !dirs && !command_path {
         filter_ignored(
             &mut matches,
             session.get("FIGNORE").as_deref(),
@@ -1378,7 +1588,9 @@ fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, V
     }
     matches.sort_unstable();
     matches.dedup();
-    alternatives(matches, prefix)
+    let (mut common, matches) = alternatives(matches, prefix)?;
+    common.unmark_dirs = session.bindings.unmarked_dirs;
+    Some((common, matches))
 }
 
 // Only independent, sufficiently large directories share workers. The editor
@@ -1406,7 +1618,7 @@ fn branch_matches(branches: &[Directory<'_>], dirs: bool) -> Vec<String> {
     if workers == 1 {
         let mut choices = Vec::new();
         for d in branches {
-            d.collect(dirs, true, false, &mut choices);
+            d.collect(&FileFilter::files(dirs), true, false, &mut choices);
         }
         return choices;
     }
@@ -1414,7 +1626,7 @@ fn branch_matches(branches: &[Directory<'_>], dirs: bool) -> Vec<String> {
     let scan = || {
         let mut choices = Vec::new();
         while let Some(d) = branches.get(next.fetch_add(1, Ordering::Relaxed)) {
-            d.collect(dirs, true, false, &mut choices);
+            d.collect(&FileFilter::files(dirs), true, false, &mut choices);
         }
         choices
     };
@@ -1447,30 +1659,46 @@ fn branch_matches(branches: &[Directory<'_>], dirs: bool) -> Vec<String> {
 
 fn common_file(
     directory: &Directory<'_>,
-    directories_only: bool,
+    filter: &FileFilter,
     accept: impl Fn(&str) -> bool,
 ) -> Option<Common> {
     let mut first_kind = libc::DT_UNKNOWN;
     let mut common: Option<Common> = None;
+    let mut candidate = crate::execute::Candidate::new();
+    let mut marked = String::new();
     directory.visit(false, |name, kind| {
         if !accept(name) {
             return ControlFlow::Continue(());
         }
-        if let Some(known) = &mut common {
-            if known.could_change(name) && (!directories_only || directory.is_directory(name, kind))
-            {
-                return known.narrow(name, directory.base);
-            }
-        } else if !directories_only || directory.is_directory(name, kind) {
-            first_kind = kind;
-            common = Some(Common::new(name.to_owned()));
+        if directory.fold.is_none() && common.as_ref().is_some_and(|c| !c.could_change(name)) {
+            return ControlFlow::Continue(());
         }
+        let is_dir = (directory.fold.is_some() || !matches!(filter, FileFilter::Any))
+            && directory.is_directory(name, kind);
+        if !filter.accepts(directory, name, kind, is_dir, &mut candidate) {
+            return ControlFlow::Continue(());
+        }
+        // A folded common prefix can span distinct names, including their final slash.
+        let name = if directory.fold.is_some() && is_dir {
+            marked.clear();
+            marked.push_str(name);
+            marked.push('/');
+            marked.as_str()
+        } else {
+            name
+        };
+        if let Some(known) = &mut common {
+            if directory.fold.is_some() {
+                return directory.narrow_folded(known, name, directory.base);
+            }
+            return known.narrow(name, directory.base);
+        }
+        first_kind = kind;
+        common = Some(Common::new(name.to_owned()));
         ControlFlow::Continue(())
     });
     let mut common = common?;
-    if common.unique
-        && directory.mark_dirs
-        && (directories_only || directory.is_directory(&common.text, first_kind))
+    if common.unique && directory.fold.is_none() && directory.is_directory(&common.text, first_kind)
     {
         common.text.push('/');
     }
@@ -1502,7 +1730,7 @@ pub(crate) fn generated_files(
     };
     let mut choices = Vec::new();
     directory.collect(
-        directories_only,
+        &FileFilter::files(directories_only),
         mark_directories,
         dot_entries,
         &mut choices,

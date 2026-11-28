@@ -403,7 +403,7 @@ pub(super) fn prepare_expanded(
                         String::new()
                     };
                     text.push('(');
-                    for (i, (index, mut word)) in parts.into_iter().enumerate() {
+                    for (i, (index, mut word)) in parts.indexed_words().enumerate() {
                         if i != 0 {
                             text.push(' ');
                         }
@@ -433,8 +433,11 @@ pub(super) fn prepare_expanded(
                         .skip(1)
                         .take_while(|arg| crate::builtins::flags::cluster(arg))
                         .any(|arg| arg.contains('A'));
-                let items =
-                    exp.array_items(parts, declared_assoc || exp.session.is_associative(&key))?;
+                let items = exp.array_items(
+                    parts,
+                    declared_assoc || exp.session.is_associative(&key),
+                    operand.is_some(),
+                )?;
                 if words.is_empty() {
                     if standalone {
                         let error = items.initializer_error();
@@ -520,6 +523,15 @@ pub(super) fn prepare_expanded(
                             ));
                         }
                         let key = element;
+                        if append
+                            && exp.session.append_element_text(
+                                base,
+                                crate::session::array::Element::Key(&key),
+                                &value,
+                            )
+                        {
+                            continue;
+                        }
                         let old = append
                             .then(|| exp.session.assoc_value(base, &key).map(str::to_owned))
                             .flatten();
@@ -562,7 +574,15 @@ pub(super) fn prepare_expanded(
                     };
                     old.wrapping_add(exp.arithmetic_value(&value)?).to_string()
                 } else if append {
-                    if direct_assignment && exp.session.append_plain_scalar(&key, &value) {
+                    if let Some(i) = index {
+                        if exp.session.append_element_text(
+                            base,
+                            crate::session::array::Element::Indexed(i),
+                            &value,
+                        ) {
+                            continue;
+                        }
+                    } else if direct_assignment && exp.session.append_plain_scalar(&key, &value) {
                         continue;
                     }
                     old(&exp).unwrap_or_default() + &value

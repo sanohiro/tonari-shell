@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::io::Write;
 use std::rc::Rc;
 
@@ -5,6 +6,7 @@ use super::{LetterCase, Session, Variable, is_identifier, print_attribute};
 
 #[derive(Default)]
 struct Options {
+    listing_attributes: u32,
     print: bool,
     nameref: Option<bool>,
     array: bool,
@@ -22,6 +24,37 @@ struct Options {
     upper: Option<bool>,
     inherit: bool,
     exported: Option<bool>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct ListingFilter {
+    attributes: u32,
+    indexed: bool,
+    associative: bool,
+}
+
+impl ListingFilter {
+    const fn bit(flag: u8) -> u32 {
+        1 << (flag.to_ascii_lowercase() - b'a')
+    }
+
+    fn new(flags: &Options) -> Self {
+        Self {
+            attributes: flags.listing_attributes,
+            indexed: flags.array,
+            associative: flags.associative,
+        }
+    }
+
+    fn matches(self, var: &Variable, array: bool, assoc: bool) -> bool {
+        var.declared
+            && (!self.indexed || array && !assoc)
+            && (!self.associative || assoc)
+            && (self.attributes == 0
+                || var
+                    .attribute_flags()
+                    .any(|flag| self.attributes & Self::bit(flag) != 0))
+    }
 }
 
 fn declare_functions(
@@ -155,6 +188,9 @@ impl Options {
         {
             var.letter_case = None;
         }
+        if let Some(traced) = self.traced {
+            var.traced = traced;
+        }
         if let Some(integer) = self.integer {
             var.integer = integer;
         }
@@ -183,6 +219,13 @@ impl Options {
         let exporting = command == "export";
         let attribute = readonly || exporting;
         let mut flags = Options {
+            listing_attributes: if readonly {
+                ListingFilter::bit(b'r')
+            } else if exporting {
+                ListingFilter::bit(b'x')
+            } else {
+                0
+            },
             readonly: readonly.then_some(true),
             exported: exporting.then_some(true),
             ..Options::default()
@@ -204,6 +247,25 @@ impl Options {
                     diagnostic!("{command}: {option}: unsupported option");
                     return Err(());
                 }
+                let scalar = match c {
+                    'r' => Some(&mut flags.readonly),
+                    'x' => Some(&mut flags.exported),
+                    'i' => Some(&mut flags.integer),
+                    'n' if !exporting => Some(&mut flags.nameref),
+                    't' => Some(&mut flags.traced),
+                    'l' => Some(&mut flags.lower),
+                    'u' => Some(&mut flags.upper),
+                    'c' => Some(&mut flags.capitalize),
+                    _ => None,
+                };
+                if let Some(setting) = scalar {
+                    if on {
+                        flags.listing_attributes |= ListingFilter::bit(c as u8);
+                    }
+                    // Bash applies enabled attributes before all removals.
+                    *setting = Some(on && *setting != Some(false));
+                    continue;
+                }
                 match c {
                     'a' if on => flags.array = true,
                     'a' => flags.remove_array = true,
@@ -213,19 +275,11 @@ impl Options {
                         flags.functions = true;
                         flags.function_names = true;
                     }
-                    't' => flags.traced = Some(on),
                     'f' => flags.functions = true,
-                    'r' => flags.readonly = Some(on),
                     'g' => flags.global = on,
-                    'i' => flags.integer = Some(on),
-                    'c' => flags.capitalize = Some(on),
-                    'l' => flags.lower = Some(on),
-                    'u' => flags.upper = Some(on),
                     'n' if exporting => flags.exported = Some(false),
-                    'n' => flags.nameref = Some(on),
                     'I' => flags.inherit = on,
                     'p' => flags.print = true,
-                    'x' => flags.exported = Some(on),
                     _ => {
                         diagnostic!("{command}: {option}: unsupported option");
                         return Err(());
@@ -249,15 +303,9 @@ fn print_variables(
     if operands.is_empty()
         && !local
         && !flags.print
-        && flags.exported.is_none()
-        && flags.readonly.is_none()
+        && flags.listing_attributes == 0
         && !flags.array
         && !flags.associative
-        && flags.nameref.is_none()
-        && flags.integer.is_none()
-        && flags.capitalize.is_none()
-        && flags.lower.is_none()
-        && flags.upper.is_none()
     {
         return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
     }
@@ -269,25 +317,12 @@ fn print_variables(
             .find(|scope| !scope.temporary)
             .expect("function scope")
     });
-    let names;
-    let names = if operands.is_empty() {
-        names = if let Some(scope) = local_scope {
-            let mut names: Vec<_> = scope.variables.keys().cloned().collect();
-            names.sort_unstable();
-            names
-        } else {
-            session.variable_names("")
-        };
-        &names[..]
-    } else {
-        operands
-    };
     const INLINE_OUTPUT: usize = 256;
     if let [name] = operands
         && name != "-"
         && local_scope.is_none_or(|s| s.variables.contains_key(name))
         && !matches!(name.as_str(), "BASHOPTS" | "SHELLOPTS")
-        && let Some(var) = session.scoped_variable(name, flags.global)
+        && let Some(var) = session.variables.get(name)
         && var.declared
         && !var.dynamic
         && var.elements.is_none()
@@ -316,7 +351,34 @@ fn print_variables(
     {
         return crate::Flow::Continue(1);
     }
-    for name in names {
+    let filter = if local {
+        ListingFilter::default()
+    } else {
+        ListingFilter::new(flags)
+    };
+    let names = if !operands.is_empty() {
+        Vec::new()
+    } else if let Some(scope) = local_scope {
+        let mut names: Vec<_> = scope.variables.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        names
+    } else if filter.attributes == ListingFilter::bit(b'r') {
+        // Inherited environment strings cannot carry a readonly attribute.
+        let mut names: Vec<_> =
+            Session::BUILTIN_READONLY
+                .into_iter()
+                .filter(|name| !session.variables.contains_key(*name))
+                .chain(session.variables.iter().filter_map(|(key, var)| {
+                    (var.declared && var.readonly).then_some(key.as_str())
+                }))
+                .collect();
+        names.sort_unstable();
+        names
+    } else {
+        session.visible_names("", super::NameList::Declared)
+    };
+    let all = operands.is_empty().then_some(filter);
+    for name in names.into_iter().chain(operands.iter().map(String::as_str)) {
         if name == "-"
             && session
                 .locals
@@ -333,30 +395,16 @@ fn print_variables(
         }
         let listed = local_scope.is_none_or(|scope| scope.variables.contains_key(name));
         let variable = listed
-            .then(|| session.declared_variable(name, flags.global))
+            .then(|| session.declaration(name, false, all))
             .flatten();
         if let Some(var) = variable.filter(|v| v.declared) {
-            if operands.is_empty()
-                && (flags.readonly == Some(true) && !var.readonly
-                    || flags.array && (var.elements.is_none() || var.associative().is_some())
-                    || flags.associative && var.associative().is_none()
-                    || flags.capitalize == Some(true)
-                        && var.letter_case != Some(LetterCase::Capitalize)
-                    || flags.lower == Some(true) && var.letter_case != Some(LetterCase::Lower)
-                    || flags.upper == Some(true) && var.letter_case != Some(LetterCase::Upper)
-                    || flags.integer == Some(true) && !var.integer
-                    || flags.nameref == Some(true) && !var.nameref)
-            {
-                continue;
-            }
-            if (flags.exported.is_none() || !operands.is_empty() || var.exported)
-                && print_attribute(
-                    &mut out,
-                    name,
-                    &var,
-                    (attribute && session.posix).then_some(command),
-                )
-                .is_err()
+            if print_attribute(
+                &mut out,
+                name,
+                &var,
+                (attribute && session.posix).then_some(command),
+            )
+            .is_err()
             {
                 return crate::execute::Flow::Continue(1);
             }
@@ -665,6 +713,7 @@ impl Session {
                     && !self.shopt.localvar_inherit
                 {
                     var.readonly = false;
+                    var.traced = false;
                     var.integer = false;
                     var.letter_case = None;
                     *var.scalar_mut() = None;
@@ -694,7 +743,7 @@ impl Session {
                 .filter(|_| !making_array && remove_reference.is_none())
             {
                 let dest = value.or(var.value.as_deref()).unwrap_or("");
-                if on
+                if flags.listing_attributes & ListingFilter::bit(b'n') != 0
                     && (target.is_some()
                         || var.elements.is_some()
                         || value.or(var.value.as_deref()).is_some()
@@ -771,7 +820,7 @@ impl Session {
                 };
                 let captured = std::cell::Cell::new(None);
                 let items = crate::expansion::Expansion::new(self, previous_status, &captured)
-                    .array_items(parts, var.associative().is_some());
+                    .array_items(parts, var.associative().is_some(), false);
                 match items.and_then(|items| {
                     initializer_error = items.initializer_error();
                     Ok(self.array_items(name, flags.global, &mut var, append, &items)?)
@@ -902,48 +951,91 @@ impl Session {
     }
 
     pub(super) fn declared_variable(&self, name: &str, global: bool) -> Option<Variable> {
+        self.declaration(name, global, None).map(Cow::into_owned)
+    }
+
+    fn declaration(
+        &self,
+        name: &str,
+        global: bool,
+        listing: Option<ListingFilter>,
+    ) -> Option<Cow<'_, Variable>> {
         let entry = self.scoped_variable(name, global);
-        if matches!(name, "BASH_ALIASES" | "BASH_CMDS") && entry.is_none_or(|v| v.dynamic) {
-            let mut var = entry.cloned().unwrap_or_default();
+        if listing.is_none()
+            && let Some(var) = entry
+            && !var.dynamic
+            && !matches!(name, "BASHOPTS" | "SHELLOPTS")
+        {
+            return Some(Cow::Borrowed(var));
+        }
+        let live_table =
+            matches!(name, "BASH_ALIASES" | "BASH_CMDS") && entry.is_none_or(|v| v.dynamic);
+        let array = entry.map_or_else(
+            || Self::builtin_array_parameter(name),
+            |v| v.elements.is_some(),
+        );
+        let assoc = live_table || entry.and_then(Variable::associative).is_some();
+        let mut var = match entry {
+            Some(var) => Cow::Borrowed(var),
+            None => Cow::Owned(Variable {
+                declared: true,
+                readonly: Self::builtin_readonly(name),
+                dynamic: super::dynamic::is_dynamic(name) || live_table,
+                integer: super::dynamic::integer_attribute(name)
+                    || matches!(name, "PPID" | "EUID" | "UID" | "BASHPID" | "HISTCMD"),
+                ..Variable::default()
+            }),
+        };
+        // Bash adds the integer attribute on the first read of SECONDS.
+        if name == "SECONDS" && var.dynamic && listing.is_some() && !self.dynamic.seconds_read.get()
+        {
+            var.to_mut().integer = false;
+        }
+        if entry.is_none() && !array {
+            var.to_mut().exported = matches!(name, "PWD" | "OLDPWD")
+                || if listing.is_some() {
+                    self.listed_environment()
+                        .contains_key(std::ffi::OsStr::new(name))
+                } else {
+                    std::env::var_os(name).is_some()
+                };
+        }
+        if listing.is_some_and(|filter| !filter.matches(&var, array, assoc)) {
+            return None;
+        }
+        if live_table {
+            let var = var.to_mut();
             var.declared = true;
             var.dynamic = true;
             var.array_assigned = true;
-            var.elements = Some(std::rc::Rc::new(super::array::Elements::Associative(
+            var.elements = Some(Rc::new(super::array::Elements::Associative(
                 self.table_snapshot(name),
             )));
-            return Some(var);
-        }
-        if let Some(var) = entry {
-            let mut var = var.clone();
-            if var.dynamic || matches!(name, "BASHOPTS" | "SHELLOPTS") {
-                *var.scalar_mut() = self.inherited_value(name);
+        } else if array && entry.is_none() {
+            let values = if listing.is_some() && self.empty_array_listing(name) {
+                Vec::new()
+            } else {
+                self.array_values(name)
+            };
+            let var = var.to_mut();
+            var.array_assigned = name != "FUNCNAME" || self.function_depth != 0;
+            var.elements = Some(Rc::new(super::array::Elements::Dense(values)));
+        } else if entry.is_none() || var.dynamic || matches!(name, "SHELLOPTS" | "BASHOPTS") {
+            let value = if listing.is_some() {
+                self.listed_scalar(name, entry).map(Cow::into_owned)
+            } else {
+                self.inherited_value(name)
+            };
+            if entry.is_none()
+                && value.is_none()
+                && name != "OLDPWD"
+                && !(listing.is_some() && (var.dynamic || Self::listed_dynamic_text(name)))
+            {
+                return None;
             }
-            return Some(var);
+            *var.to_mut().scalar_mut() = value;
         }
-        {
-            if self.array_parameter(name) {
-                return Some(Variable {
-                    declared: true,
-                    readonly: name == "BASH_VERSINFO",
-                    array_assigned: name != "FUNCNAME" || self.function_depth != 0,
-                    elements: Some(std::rc::Rc::new(super::array::Elements::Dense(
-                        self.array_values(name),
-                    ))),
-                    ..Variable::default()
-                });
-            }
-            let value = self.inherited_value(name);
-            (value.is_some() || name == "OLDPWD").then(|| Variable {
-                dynamic: super::dynamic::is_dynamic(name),
-                readonly: Self::builtin_readonly(name),
-                integer: super::dynamic::integer_attribute(name)
-                    || matches!(name, "PPID" | "EUID" | "UID"),
-                declared: true,
-                value,
-                exported: matches!(name, "PWD" | "OLDPWD") || std::env::var_os(name).is_some(),
-                ..Variable::default()
-            })
-        }
+        Some(var)
     }
 }
 

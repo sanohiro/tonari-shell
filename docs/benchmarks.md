@@ -1,5 +1,38 @@
 # Startup and execution / 起動と実行性能
 
+<a id="independent-review-follow-up"></a>
+
+## November 28 · Fixes from the independent review / 独立レビューで見つけた不具合の修正
+
+Each cell gives median elapsed milliseconds for **previous Tonari / fixed Tonari / GNU Bash**. The previous release was `437fc20`, the runtime under test was `8669b95`. Linux used a native AMD EPYC 7763 64-Core Processor with Bash 5.2.21. macOS used Apple M1 (Virtual) with Bash 5.3.20. Script timings use 15 interleaved trials after five warmups in an already-started shell. The 11-sample PTY measurements time Tab through a bound key displaying the resulting draft. The startup suite uses 31 samples. Full median and p95 results for all cases are in the [native run](https://github.com/sanohiro/tonari-shell/actions/runs/46147939793).
+
+| Checked workload | Native Linux x86-64, ms | Native macOS arm64, ms |
+| --- | ---: | ---: |
+| 256 readonly listings with 1,024 aliases | 40.929 / 1.435 / 3.654 | 21.677 / 1.198 / 3.547 |
+| 40 declarations of 1,024 inherited names | 336.449 / 16.996 / 168.691 | 219.083 / 10.459 / 106.309 |
+| 256 live option listings | 3.807 / 4.099 / 8.362 | 3.608 / 3.720 / 8.582 |
+| 512 nameref lengths over 1,024 elements | 10.241 / 0.710 / 1.788 | 5.782 / 0.683 / 1.561 |
+| 2,048 appends of 256 bytes to one array element | 283.855 / 2.456 / 384.684 | 29.234 / 1.554 / 105.812 |
+| 2,400 silent rotations of a 129-entry directory stack | 12.934 / 4.481 / 7.452 | 9.432 / 2.133 / 7.297 |
+| First Tab, 10,000 filenames with folded matches | 6.269 / 0.189 / 8.266 | 4.946 / 0.260 / 56.785 |
+| First Tab, one folded filename match among 10,000 | 3.826 / 3.796 / 3.703 | 3.821 / 3.846 / 7.294 |
+| First Tab, one PATH directory with 10,001 entries | 3.827 / 4.102 / 3.709 | 3.868 / 3.992 / 7.207 |
+| Second Tab, one PATH directory with 10,001 entries | 3.605 / 0.095 / 3.690 | 3.653 / 0.149 / 7.467 |
+| Second Tab, same 10,001-entry PATH directory four times | 14.028 / 0.106 / 14.431 | 14.641 / 0.152 / 29.843 |
+| Plain shell startup | 0.375 / 0.372 / 0.894 | 3.531 / 3.513 / 7.773 |
+| Exec to first interactive login prompt | 18.013 / 18.239 / 26.025 | 5.093 / 5.078 / 10.229 |
+
+The directory contains 10,000 non-executable files with the shared prefix and one executable with the rare prefix. The ambiguous filename search can stop once additional entries cannot change the common prefix. A unique match needs a full search. Command completion builds the directory index on first use and checks permissions on subsequent requests. Sharing its space budget between names and index entries lets the 10,001 entries fit. Interactive completion visits repeated PATH components once. `compgen -c` preserves their output multiplicity. Live option listings compute the current flags after changes; the previous release could time a stale value. The startup rows include the cost of validating inherited PWD. Absolute startup and filesystem timings depend on the host. [Terminal measurements](../tools/bench_completion.py) · [Startup workload](../tools/bench_login.py)
+
+On the EPYC, the first Tab for the single PATH directory cost 0.393 ms more than Bash. The second Tab saved 3.595 ms. A unique folded filename also took 0.093 ms longer than Bash. Keep both cold controls in future comparisons. For 256 `declare -prx` calls the fixed Linux shell took 2.581 ms versus Bash at 4.474 ms. The fixture separately verifies the contents of the union of the readonly and exported bindings.
+
+The physical M1 also ran separate first-working and tuned builds. For 10,000 checked associative key/value replacements the first correct version took 14.588 ms, the tuned version 12.923 ms and Bash 50.397 ms. For 2,400 silent one-slot directory rotations with long names, the previous / first / tuned / Bash times were 7.506 / 7.831 / 0.674 / 5.213 ms. For 256 readonly declarations with 512 aliases, a first correct build took 8.356 ms and borrowing the visible names reduced that to 5.264 ms in the same interleaved run. The final implementation selects the readonly names directly. A 100-launch startup control with valid inherited PWD measured 4.555 / 4.492 / 12.565 ms for previous / fixed / Bash. With stale PWD it measured 4.786 / 4.658 / 12.160 ms.
+
+The Linux static PIE grew from 2,674,232 to 2,712,728 bytes. The native macOS CI executable grew from 2,030,144 to 2,063,232 bytes. The build adds no runtime library dependency. To reproduce, dispatch `native-benchmarks.yml` with `previous=437fc20`, the `review-findings` suite and the `ubuntu-24.04` and `macos-15` runners. For a single script use `python3 tools/bench_scripts.py NEW --previous OLD --bash BASH --timing started --runs 15 --case witness-inherited-declare-1024`. For the terminal cases use `python3 tools/bench_completion.py OLD NEW --bash BASH --review-completion --runs 11`.
+
+各セルは変更前・修正後・Bash の順で、単位は ms。補完用ディレクトリには接頭辞が共通する通常ファイル1万件と、別の接頭辞を持つ実行可能ファイル1件を置いた。初回の一意な補完にはディレクトリ全体の走査が必要で、PATH 索引も初回に作る。候補が多い初回、該当が1件だけの初回、2回目の Tab を個別に計測した。配列・変数・子プロセスの回帰試験では、値だけでなく引数の境界、終了状態、子に渡った環境も確認する。[レビューの追試](review-evaluation.md#runtime-follow-up)
+
+
 <a id="independent-review-trial"></a>
 
 ## November 28 · Independent reviewer controls / 独立レビューの対照計測

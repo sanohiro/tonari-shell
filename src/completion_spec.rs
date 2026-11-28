@@ -6,8 +6,8 @@ use std::rc::Rc;
 use crate::{Session, complete, execute, parser, pattern};
 
 pub(crate) const KEYWORDS: &[&str] = &[
-    "!", "[[", "]]", "case", "coproc", "do", "done", "elif", "else", "esac", "fi", "for",
-    "function", "if", "in", "select", "then", "time", "until", "while", "{", "}",
+    "if", "then", "else", "elif", "fi", "case", "esac", "for", "select", "while", "until", "do",
+    "done", "in", "function", "time", "{", "}", "!", "[[", "]]", "coproc",
 ];
 macro_rules! actions {
     ($( $kind:ident => ($name:literal, $flag:literal $(, $short:literal)?) ),+ $(,)?) => {
@@ -439,6 +439,7 @@ impl Spec {
             _ => return None,
         };
         Some(Generated {
+            unmarked: Vec::new(),
             source,
             noquote: self.options.contains(CompOption::Noquote),
             nospace: self.options.contains(CompOption::Nospace),
@@ -539,7 +540,7 @@ impl Spec {
                 CompAction::Service => words.extend(complete::service_names(prefix)),
                 CompAction::Signal => words.extend(complete::signal_names(prefix)),
                 CompAction::Hostname => words.extend(complete::host_names(prefix, session)),
-                CompAction::Command => words.extend(complete::command_names(prefix, session)),
+                CompAction::Command => words.extend(complete::command_names(prefix, session, true)),
                 CompAction::Directory | CompAction::File => {
                     let files = complete::generated_files(
                         prefix,
@@ -1004,6 +1005,7 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
 }
 
 pub struct Generated {
+    pub unmarked: Vec<usize>,
     pub source: complete::Source,
     pub fallback: bool,
     pub noquote: bool,
@@ -1128,10 +1130,15 @@ fn generate_for_tab(
     };
     let allows_default = spec.options.contains(CompOption::Default)
         || spec.options.contains(CompOption::Bashdefault);
+    let mut unmarked_directories = foldhash::HashSet::default();
     if spec.options.contains(CompOption::Plusdirs)
         || (words.is_empty() && spec.options.contains(CompOption::Dirnames))
     {
-        words.extend(complete::file_names(prefix, true, true, session));
+        let extra = complete::file_names(prefix, true, !session.bindings.unmarked_dirs, session);
+        if session.bindings.unmarked_dirs {
+            unmarked_directories.extend(extra.iter().cloned());
+        }
+        words.extend(extra);
     }
     if words.is_empty() && allows_default {
         return None;
@@ -1157,11 +1164,18 @@ fn generate_for_tab(
         words.sort_unstable();
         words.dedup();
     }
-    if filenames
-        && !session.bindings.unmarked_dirs
-        && (list || words.len() == 1 || words.iter().any(|w| w.contains('/')))
-    {
-        for word in &mut words {
+    let mut unmarked = Vec::new();
+    let check_files =
+        filenames && (list || words.len() == 1 || words.iter().any(|w| w.contains('/')));
+    if check_files || !unmarked_directories.is_empty() {
+        for (index, word) in words.iter_mut().enumerate() {
+            if unmarked_directories.contains(word) {
+                unmarked.push(index);
+                continue;
+            }
+            if !check_files {
+                continue;
+            }
             let directory = word
                 .strip_prefix("~/")
                 .and_then(|rest| session.tilde_path(rest));
@@ -1171,17 +1185,24 @@ fn generate_for_tab(
                     .unwrap_or_else(|| Path::new(word))
                     .is_dir()
             {
-                word.push('/');
+                if session.bindings.unmarked_dirs {
+                    unmarked.push(index);
+                } else {
+                    word.push('/');
+                }
             }
         }
     }
+    let nospace =
+        spec.options.contains(CompOption::Nospace) || words.len() == 1 && !unmarked.is_empty();
     Some(Generated {
+        unmarked,
         source: complete::Source::Words(words),
         fallback: false,
         // Bash callbacks may supply shell syntax, including their own trailing separator.
         noquote: spec.options.contains(CompOption::Noquote)
             || (!filenames && (spec.function.is_some() || spec.command.is_some())),
-        nospace: spec.options.contains(CompOption::Nospace),
+        nospace,
     })
 }
 
