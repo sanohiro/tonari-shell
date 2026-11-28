@@ -46,6 +46,17 @@ f; printf '%s/%s/%s/%s/%s\\n' "${m[old]}" "${m[new]}" "${a[0]}" "${a[2]}" "${a[4
 declare -ia nums=(2); nums+=([1]='nums[0]+3'); echo "${nums[*]}"
 """, 0, b"xy\none!/two/2/six!/eight\n2 5\n", minimum=5)
 
+    def test_array_evaluation_declare_global_append_with_local_shadow(self):
+        self.compare("""declare -A m=([outer]=old)
+f() { local -A m=([inner]=here); declare -gA m+=([new]=yes); echo "${m[inner]}/${m[new]-absent}"; }
+f; echo "${m[outer]}/${m[new]}"
+""", 0, b"here/absent\nold/yes\n", minimum=5)
+
+    def test_array_evaluation_partial_append_before_error(self):
+        script = """a=(old); trap 'echo "${a[*]}"' EXIT
+a+=([1]=first [-99]=invalid)"""
+        self.compare(script, 1, b"old first\n", minimum=5)
+
     def test_array_evaluation_completion_observes_child_state(self):
         self.compare("""v=parent; wl='${v:=wrong}'; unset side
 out=$(compgen -W '${side:=child} literal' -- ch); echo "$out/${side-unset}"

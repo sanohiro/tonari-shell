@@ -48,10 +48,12 @@ fn capture_arguments(
     session: &mut Session,
     last: u8,
 ) -> Option<Vec<String>> {
-    if !words
-        .iter()
-        .all(|w| w.as_literal().is_some() || !session.nounset && inert_operand(w, session, false))
-    {
+    if !words.iter().all(|w| {
+        w.as_literal().is_some() || !session.nounset && (inert_operand(w, session, false) ||
+            matches!(w, parser::Word::Expanded(parts) if matches!(parts.as_slice(),
+                [crate::word::Part::Parameter {name, quoted: true}]
+                if name.strip_suffix("[@]").is_some_and(|base| inert_parameter(base, session) && session.stored_array(base)))))
+    }) {
         return None;
     }
     let captured = std::cell::Cell::new(None);
@@ -925,6 +927,19 @@ fn foreground_builtin(
         }
         if let parser::Command::LiteralAssignment(text, len) = &statement.command
             && session.capture_local(&text[..len.get()])
+        {
+            status = 0;
+            continue;
+        }
+        if let Some(cmd) = statement.single_stage()
+            && cmd.compound.is_none()
+            && cmd.words.is_empty()
+            && cmd.redirects.is_empty()
+            && !cmd.assignments.is_empty()
+            && cmd.assignments.iter().all(|(k, v)| {
+                session.capture_local(k)
+                    && matches!(v, parser::Assignment::Scalar(w) if w.as_literal().is_some())
+            })
         {
             status = 0;
             continue;

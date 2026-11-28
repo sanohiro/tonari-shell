@@ -55,6 +55,10 @@ CASES = {
         'echo "${#m[@]} ${m[k$((i-1))]}"' if kind == "assoc" else 'echo "${#m[@]} ${m[i-1]}"',
         f"{n} {n-1}", "declare -A m" if kind == "assoc" else "m=()", n)
         for kind in ("assoc", "indexed") for n in (500, 2000, 5000)},
+    **{f"r8-declare-append-{kind}": eval_loop(
+        'declare -A m+=([k$i]=$i)' if kind == "assoc" else 'declare -a m+=([$i]=$i)',
+        'echo "${#m[@]}"', "2000", "declare -A m" if kind == "assoc" else "m=()", 2000)
+        for kind in ("assoc", "indexed")},
     "r8-physical-cd": eval_loop('cd -P inside && cd -P .. || exit',
         '[[ $PWD == "$orig" && $OLDPWD == "$orig/inside" ]] && echo yes', "yes",
         'mkdir -p inside; cd -P .; orig=$PWD', 500),
@@ -85,6 +89,9 @@ CASES = {
     **{f"r8-case-{label}": eval_loop('x=${s'+op+'}', 'echo "${x:0:4} ${#x}"', out+" 2000",
         'export LC_ALL=C.UTF-8; s=; for ((i=0;i<500;i++)); do s+=' + word + '; done', 200)
        for label,op,word,out in [("upper","^^","éüαβ","ÉÜΑΒ"), ("lower",",,","ÉÜΑΒ","éüαβ"), ("toggle","~~","ÉüΑβ","éÜαΒ")]},
+    "r8-test-regex": eval_loop('[[ $s =~ ^(0) ]] || exit', 'echo "${BASH_REMATCH[*]}"', "0 0", "printf -v s '%065536d' 0", 200),
+    "r8-case-varied": eval_loop('x=${s^^}', 'echo "${#x}"', "2048",
+        'export LC_ALL=C.UTF-8; s=' + ''.join(chr(0x4e00 + n) for n in range(2048)), 200),
     "r8-control-shift": ("set -- {1..5000}; while (($#)); do shift; done; echo $#", "0"),
     "r8-control-stat": eval_loop('[[ -f /bin/ls ]] && [ -f /bin/ls ] || exit', 'echo $i', "2000"),
     "r8-control-pipe": eval_loop('true | true', 'echo $i', "50", "shopt -s lastpipe", 50),

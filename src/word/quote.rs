@@ -1,5 +1,22 @@
 pub(crate) fn single_quote(text: &str) -> String {
-    let mut output = String::with_capacity(text.len() + 2);
+    let bytes = text.as_bytes();
+    // For dense quotes, copying each ordinary byte is cheaper than restarting a search at each tiny span.
+    if bytes.len() >= 256 && memchr::memchr_iter(b'\'', &bytes[..128]).take(8).count() == 8 {
+        let count = memchr::memchr_iter(b'\'', bytes).count();
+        let mut quoted = Vec::with_capacity(bytes.len() + 2 + 3 * count);
+        quoted.push(b'\'');
+        for &b in bytes {
+            if b == b'\'' {
+                quoted.extend_from_slice(b"'\\''");
+            } else {
+                quoted.push(b);
+            }
+        }
+        quoted.push(b'\'');
+        // Replacing an ASCII quote with ASCII preserves all UTF-8 boundaries.
+        return unsafe { String::from_utf8_unchecked(quoted) };
+    }
+    let mut output = String::with_capacity(bytes.len() + 2);
     push_single_quote(&mut output, text);
     output
 }
@@ -38,7 +55,18 @@ pub(crate) fn parameter_quote(text: &str, session: &crate::Session) -> String {
 }
 
 pub(crate) fn needs_ansi(data: &[u8], ascii: bool) -> bool {
-    data.iter()
+    let (blocks, tail) = data.as_chunks::<8>();
+    let ones = u64::from_ne_bytes([1; 8]);
+    let high = ones << 7;
+    let has_zero = |x: u64| x.wrapping_sub(ones) & !x & high != 0;
+    blocks.iter().any(|block| {
+        let word = u64::from_ne_bytes(*block);
+        // A C0 control has its top three bits clear. DEL is exactly 0x7f.
+        (ascii && word & high != 0)
+            || has_zero(word & (ones * 0xe0))
+            || has_zero(word ^ (ones * 0x7f))
+    }) || tail
+        .iter()
         .any(|b| b.is_ascii_control() || ascii && !b.is_ascii())
 }
 
@@ -71,4 +99,25 @@ pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
     out.push(b'\'');
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_control_and_non_ascii_bytes_at_every_alignment() {
+        for ascii in [false, true] {
+            for i in 0..17 {
+                let mut bytes = [b'A'; 17];
+                for b in 0..=u8::MAX {
+                    bytes[i] = b;
+                    assert_eq!(
+                        needs_ansi(&bytes, ascii),
+                        b.is_ascii_control() || ascii && !b.is_ascii()
+                    );
+                }
+            }
+        }
+    }
 }

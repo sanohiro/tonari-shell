@@ -169,6 +169,8 @@ pub(crate) fn convert_chars(
         return text.into_owned();
     }
     let utf8 = utf8_locale();
+    let mut recent = [('\0', '\0'); 16];
+    let reuse = all && text.len() >= 256;
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
     for c in chars.by_ref() {
@@ -180,7 +182,21 @@ pub(crate) fn convert_chars(
             CaseDirection::Toggle => !c.is_uppercase(),
         };
         out.push(if eligible {
-            mapped_in(c, upper, locale, utf8)
+            if c.is_ascii() && locale != CharacterLocale::Turkic {
+                if upper {
+                    c.to_ascii_uppercase()
+                } else {
+                    c.to_ascii_lowercase()
+                }
+            } else if reuse {
+                let slot = &mut recent[c as usize % 16];
+                if slot.0 != c {
+                    *slot = (c, mapped_in(c, upper, locale, utf8));
+                }
+                slot.1
+            } else {
+                mapped_in(c, upper, locale, utf8)
+            }
         } else {
             c
         });

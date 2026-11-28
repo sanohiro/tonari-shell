@@ -14,3 +14,8 @@ python3 tools/bench_scripts.py "$current" --previous "$baseline" --bash "$refere
   --runs "${BENCH_RUNS:-15}" --case source-functions-mixed > "$out/source-return.txt"
 python3 tools/bench_editor_input.py "$baseline" "$current" "$reference" --entries 5000 \
   --runs "${BENCH_RUNS:-15}" --case paste --case commit > "$out/input.txt"
+completion=${BASH_COMPLETION_FILE:-/usr/share/bash-completion/bash_completion}
+if [[ -r "$completion" ]]; then
+  PYTHONPATH=tools python3 tools/ci/array-completion.py "$completion" "$baseline" "$current" "$reference" \
+    "${BENCH_RUNS:-15}" > "$out/bash-completion.txt"
+fi

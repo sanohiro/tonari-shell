@@ -48,6 +48,9 @@ pub(crate) fn decode(source: &str) -> Result<String, Error> {
 }
 
 fn escapes(source: &str, braced_hex: bool) -> Result<String, Error> {
+    if memchr::memchr(b'\\', source.as_bytes()).is_none() {
+        return Ok(source.to_owned());
+    }
     let mut bytes = Vec::with_capacity(source.len());
     let mut chars = source.chars();
     let mut buffer = [0u8; 4];

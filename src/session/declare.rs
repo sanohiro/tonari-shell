@@ -158,7 +158,7 @@ impl Options {
         if let Some(integer) = self.integer {
             var.integer = integer;
         }
-        if self.associative && may_create_array {
+        if self.associative && may_create_array && var.associative().is_none() {
             var.make_associative()?;
         }
         if self.remove_array && var.elements.is_some() && var.associative().is_none()
@@ -171,6 +171,7 @@ impl Options {
         }
         if (self.array || subscript && !self.associative && var.associative().is_none())
             && may_create_array
+            && (var.elements.is_none() || var.value.is_some())
         {
             var.make_array();
         }
