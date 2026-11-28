@@ -591,7 +591,12 @@ impl Session {
                 {
                     index = next
                 }
-                Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", path.display()))),
+                Err(e) => {
+                    return Err(io::Error::new(
+                        e.kind(),
+                        format!("{}: {}", path.display(), crate::builtins::os_message(&e)),
+                    ));
+                }
             }
         }
         Ok(false)
@@ -757,7 +762,11 @@ impl Session {
         }
         Err(DirectoryError::Other(io::Error::new(
             error.kind(),
-            format!("{}: {error}", target.display()),
+            format!(
+                "{}: {}",
+                target.display(),
+                crate::builtins::os_message(&error)
+            ),
         )))
     }
 

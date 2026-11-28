@@ -14,11 +14,14 @@ jobs:
         with:
           ref: ${{ matrix.revision == 'previous' && github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
-      - run: cargo build --locked --release
+      - name: Build the Linux distribution executable
+        run: |
+          rustup toolchain install "$(sed -n 's/^ *toolchain=//p' tools/build-release.sh)" --profile minimal --component rust-src --target x86_64-unknown-linux-musl
+          cp "$(tools/build-release.sh)" "$RUNNER_TEMP/tonari"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: shell-${{ matrix.revision }}
-          path: target/release/tonari
+          path: ${{ runner.temp }}/tonari
           if-no-files-found: error
           retention-days: 1
 
@@ -51,6 +54,25 @@ jobs:
             python3 "$suite" "$PWD/bin/tonari" /bin/bash
           done
           python3 tests/compat/source_review.py /bin/bash bin/tonari --runs 0
+
+  macos-integration:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Check the arm64 release against GNU Bash
+        run: |
+          rustup toolchain install "$(sed -n 's/^ *toolchain=//p' tools/build-release.sh)" --profile minimal --component rust-src --target aarch64-apple-darwin
+          shell=$(tools/build-release.sh)
+          reference=$(brew --prefix bash)/bin/bash
+          [[ -x $reference ]] || brew install bash
+          "$reference" --version
+          REFERENCE_BASH="$reference" python3 tests/shell.py "$shell" -q
+          for suite in tests/review_{builtins,interactive,language,runtime}.py; do
+            python3 "$suite" "$PWD/$shell" "$reference"
+          done
 
   compare:
     needs: build

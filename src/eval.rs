@@ -102,6 +102,13 @@ fn run_statements<'a>(
             )
         };
         session.tested_depth -= u32::from(tested);
+        if std::mem::take(&mut session.jobs.foreground_interrupted)
+            && session.interactive
+            && (!session.traps.catches(libc::SIGINT) || session.loop_depth > 0)
+            && !session.traps.ignores(libc::SIGINT)
+        {
+            return Flow::Unwind(crate::traps::signal_status(libc::SIGINT));
+        }
         match flow {
             Flow::Discard(code) if session.errexit && !tested && session.tested_depth == 0 => {
                 return Flow::Exit(code);
@@ -165,6 +172,21 @@ pub(crate) fn compound(
 }
 
 fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: bool) -> Flow {
+    // Simple stages re-enter here for their compound body; functions and
+    // eval check their own entry. Defer the OS stack query for plain commands.
+    if !matches!(
+        command.as_ref(),
+        Command::Pipeline(_)
+            | Command::LiteralAssignment(..)
+            | Command::Scalar(_)
+            | Command::Arithmetic(_)
+            | Command::Test(_)
+            | Command::Function { .. }
+    ) && crate::stack_budget_exceeded()
+    {
+        diagnostic!("command nesting limit exceeded");
+        return Flow::Unwind(1);
+    }
     if matches!(command.as_ref(), Command::Arithmetic(_) | Command::Test(_))
         && let Some(flow) = crate::traps::debug(session, status)
     {
@@ -274,7 +296,11 @@ fn execution_error(error: std::io::Error) -> Flow {
 }
 
 fn single_status(session: &mut Session, flow: &Flow) {
-    if let Flow::Discard(code) | Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) = flow
+    if let Flow::Discard(code)
+    | Flow::Unwind(code)
+    | Flow::Continue(code)
+    | Flow::Exit(code)
+    | Flow::Return(code) = flow
     {
         session.pipe_status.single(*code);
     }
@@ -389,11 +415,10 @@ fn run_for(
                 }
             });
         }
-        if s.assign_existing_literal(name, value) {
-            return Ok(Some(last));
-        }
         let error = if s.is_nameref(name) {
             s.assign_for_reference(name, value.to_owned()).err()
+        } else if s.assign_existing_literal(name, value) {
+            return Ok(Some(last));
         } else if s.readonly(name) {
             Some(crate::session::READONLY)
         } else if s.integer(name) {
@@ -775,7 +800,7 @@ fn repeat(
             break Flow::Continue(0);
         }
         if crate::interrupted() {
-            break Flow::Continue(130);
+            break Flow::Unwind(crate::traps::signal_status(libc::SIGINT));
         }
         let step = match next(session, last) {
             Ok(None) => break Flow::Continue(result),
@@ -822,7 +847,7 @@ pub(crate) fn call_with_bindings(
     let name = arguments.next().expect("function name");
     if session.function_nesting_full() {
         diagnostic!("{name}: function nesting limit exceeded");
-        return Flow::Discard(1);
+        return Flow::Unwind(1);
     }
     let function = session.functions[&name].clone();
     let traced = session.traced_functions.contains(&name);

@@ -8,12 +8,7 @@ use crate::Session;
 
 pub(super) const DEFAULT_HISTSIZE: usize = 500;
 
-fn tail_lines_offset(
-    file: &fs::File,
-    len: u64,
-    mut lines: usize,
-    unterminated: bool,
-) -> std::io::Result<u64> {
+fn tail_lines_offset(file: &fs::File, len: u64, mut lines: usize) -> std::io::Result<u64> {
     if lines == 0 {
         return Ok(len);
     }
@@ -23,9 +18,6 @@ fn tail_lines_offset(
         let n = pos.min(block.len() as u64) as usize;
         pos -= n as u64;
         file.read_exact_at(&mut block[..n], pos)?;
-        if unterminated && pos + n as u64 == len && block[n - 1] != b'\n' {
-            lines -= 1;
-        }
         for i in memchr::memrchr_iter(b'\n', &block[..n]) {
             if lines == 0 {
                 return Ok(pos + i as u64 + 1);
@@ -368,6 +360,8 @@ pub(crate) struct Entries {
     written: usize,
     incomplete_files: Vec<(u64, u64)>,
     imported: Option<InitialJournal>,
+    // Local appends beyond an unread prefix must be skipped by history -n.
+    local_writes: Vec<((u64, u64), std::ops::Range<u64>)>,
 }
 
 #[derive(Clone)]
@@ -406,7 +400,7 @@ impl InitialJournal {
         let available = session
             .history_limit("HISTSIZE", DEFAULT_HISTSIZE)
             .saturating_sub(session.history_lines().len());
-        let pos = tail_lines_offset(&journal, self.len, available, false)?;
+        let pos = tail_lines_offset(&journal, self.len, available)?;
         journal.seek(SeekFrom::Start(pos))?;
         let mut older = Vec::new();
         let mut timestamps = Vec::new();
@@ -489,12 +483,8 @@ impl Session {
             if history.as_ref().is_some_and(|h| h.incomplete(path)) {
                 return;
             }
-            if let Err(e) = commands::limit_plain_file(
-                path,
-                limit,
-                timed,
-                history.and_then(|h| h.imported.as_mut()),
-            ) && e.kind() != std::io::ErrorKind::NotFound
+            if let Err(e) = commands::limit_plain_file(path, limit, timed, history)
+                && e.kind() != std::io::ErrorKind::NotFound
             {
                 diagnostic!("{}: {e}", path.display());
             }
@@ -593,8 +583,6 @@ impl Session {
         let line = &h.lines[index];
         if self.history_enabled && self.accept_history(line, h.lines[..index].last()) {
             History::append(self, line, cwd, status, Some(&mut history.window));
-        } else {
-            self.history_mut().discard_current();
         }
     }
 

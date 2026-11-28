@@ -382,8 +382,6 @@ fn ere_list_end(body: &[u8]) -> Option<usize> {
     None
 }
 
-
-
 fn open_list(pattern: &str) -> Option<usize> {
     let bytes = pattern.as_bytes();
     let mut i = 0;

@@ -478,8 +478,12 @@ pub(super) fn prepare_expanded(
                         out.push_str(&trace_word(&value));
                     });
                 }
+                let mut stored_index = false;
                 match exp.session.reference_name(&key) {
-                    Ok(std::borrow::Cow::Owned(resolved)) => key = resolved,
+                    Ok(std::borrow::Cow::Owned(resolved)) => {
+                        stored_index = !key.contains('[');
+                        key = resolved;
+                    }
                     Ok(_) => {}
                     Err(error) if exp.session.function_depth == 0 => {
                         return Err(crate::expansion::Error::fatal(
@@ -515,7 +519,11 @@ pub(super) fn prepare_expanded(
                     && exp.session.is_associative(base)
                 {
                     if standalone {
-                        let element = exp.expanded_key(subscript)?;
+                        let element = if stored_index {
+                            crate::arithmetic::data_key(subscript, &mut exp)?
+                        } else {
+                            exp.expanded_key(subscript)?
+                        };
                         if element.is_empty() {
                             return Err(crate::expansion::Error::fatal(
                                 format!("{key}: bad array subscript"),
@@ -552,6 +560,8 @@ pub(super) fn prepare_expanded(
                     }
                     let n = if let Some(n) = Session::plain_decimal(subscript) {
                         n
+                    } else if stored_index {
+                        crate::arithmetic::data_index(subscript, &mut exp)?
                     } else {
                         exp.arithmetic(subscript)?
                     };
@@ -681,9 +691,13 @@ fn expand_prepared_redirects(
     if redirects.iter().any(|r| r.variable.is_some()) {
         cmd.named_redirects = redirects;
     } else if !redirects.is_empty() {
-        // Bash expands external/redirect-only redirections in a child context.
-        // Clone only if an expansion can change a variable in that context.
-        let child = assignment_only || builtin(cmd, last_status, session).is_none();
+        // A standalone null command expands ordinary output redirects in the shell.
+        // Bash isolates the whole redirect list if any redirect replaces stdin.
+        let child = if assignment_only {
+            !standalone || redirects.iter().any(|r| r.fd == 0)
+        } else {
+            builtin(cmd, last_status, session).is_none()
+        };
         let process_scope = session.substitutions.scope();
         let mut isolated = (child && redirects.iter().any(|r| redirection_observable(r, session)))
             .then(|| session.clone());

@@ -1,5 +1,21 @@
 # Startup and execution / 起動と実行性能
 
+<a id="evaluation-stack-interrupt"></a>
+
+## November 28 · Evaluation stack and interrupt handling / 評価スタックと割り込み
+
+On an Apple M1 MacBook Air, Darwin 27.2.0 arm64, Rust 1.96.1 release, two warmups preceded 15 measured launches per executable in rotating order. Each command ran with `--noprofile --norc -c`, `LC_ALL=C` and `PATH=/usr/bin:/bin`. The first version checked the native stack floor while maintaining an expansion depth counter. The second checked the floor directly and moved builtin redirection handling into a separate frame. The binaries were 2,395,504 and 2,378,992 bytes respectively. The Bash 5.3.20 reference was 873,872 bytes.
+
+| Script | First median (ms) | Second median (ms) | Bash median (ms) |
+| --- | ---: | ---: | ---: |
+| `f(){ if (( $1 )); then f $(( $1 - 1 )); fi; }; for ((i=0;i<300;i++)); do f 8; done; echo "$i"` | 8.819 | 8.904 | 20.889 |
+| `x=abc; for ((i=0;i<3000;i++)); do : "$x" "$x" "$x" "$x"; done; echo "$i"` | 6.397 | 6.571 | 20.777 |
+| `f(){ { { :; } 3>&1; } 3>&1; }; for ((i=0;i<300;i++)); do f; done; echo "$i"` | 5.793 | 5.840 | 12.605 |
+
+The output was 300, 3000 and 300. In a separate interleaved run the first/second function times were 12.065/11.786 ms and the redirected group times were 7.959/7.404 ms. The timing differences varied across runs. A native stack sample gave a repeatable reduction from 10,960 to 9,872 bytes per function level. Bash used 1,010 bytes per level in the same script. To measure, run `f(){ if (( $1 )); then f $(( $1 - 1 )); else kill -0 "$$"; fi; }; f 0; f 8; :` and record the stack address at both calls to libc `kill` using a debugger or interposer. Divide the address difference by eight. Signal zero checks the PID without sending a signal. The saved stack space and smaller executable justified the change. [Bounded native and terminal regressions](../tests/shell.py)
+
+Apple M1 の同一環境で各シェルの実行順を入れ替え、出力と時間を確認した。通常の関数呼び出しでは、リダイレクト専用フレームを分離した結果、1 段のスタック使用量が 10,960 バイトから 9,872 バイトになった。実行時間の差は試行間で変動した。Bash はこの例で 1 段 1,010 バイトだった。時間・スタックの値はこの入力とビルドに対する実測である。
+
 <a id="independent-review-follow-up"></a>
 
 ## November 28 · Fixes from the independent review / 独立レビューで見つけた不具合の修正

@@ -99,9 +99,19 @@ impl Undo {
     pub(super) fn apply(&mut self, line: &mut String, cursor: &mut usize) {
         self.boundary();
         if let Some(change) = self.entries.pop_back() {
+            if line.get(change.inserted.clone()).is_none() {
+                // Older deltas depend on this change too.
+                *self = Self::default();
+                return;
+            }
             self.bytes -= change.removed.len();
             line.replace_range(change.inserted, &change.removed);
-            *cursor = change.cursor;
+            if line.is_char_boundary(change.cursor) {
+                *cursor = change.cursor;
+            } else {
+                *cursor = line.len();
+                *self = Self::default();
+            }
         }
     }
 }

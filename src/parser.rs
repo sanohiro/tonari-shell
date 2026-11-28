@@ -17,7 +17,10 @@ mod ansi;
 pub(crate) use ansi::decode as ansi_string;
 pub(crate) mod completion_words;
 mod here_doc;
-pub(crate) use lexer::{arithmetic_segments, arithmetic_word, associative_pair_word, subscript_word};
+pub(crate) use lexer::{
+    arithmetic_segments, arithmetic_word, associative_pair_word, initializer_index_word,
+    subscript_word,
+};
 mod lexer;
 mod modifier;
 mod wrapper;
@@ -175,18 +178,14 @@ impl Error {
     }
 }
 
-thread_local! {
-    static EXPANSION_DEPTH: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
-}
-
-// A nested lexer starts a new Reader. Charge the parent even across that
-// boundary, including expansion of a word originally obtained from a file.
-pub(crate) fn enter_expansion() -> Result<crate::ScopedCell<u16>, Error> {
-    let depth = EXPANSION_DEPTH.get();
-    if depth >= 128 || depth >= 8 && depth.is_multiple_of(8) && crate::stack_budget_exceeded() {
-        return Err(Error::Invalid("shell expansion nesting limit exceeded"));
+// Lexing nested syntax and resolving a stored word share the current native
+// stack, including in a forked substitution child.
+pub(crate) fn check_expansion_stack() -> Result<(), Error> {
+    if crate::stack_budget_exceeded() {
+        Err(Error::Invalid("shell expansion nesting limit exceeded"))
+    } else {
+        Ok(())
     }
-    Ok(crate::ScopedCell::enter(&EXPANSION_DEPTH, depth + 1))
 }
 
 pub(crate) fn reserved(word: &str) -> bool {
@@ -1069,13 +1068,13 @@ impl Reader {
             }
             _ => return Err(Error::Invalid("expected a case word")),
         };
-        self.alias_newlines(&["in"])?;
+        self.alias_newlines(false, &["in"])?;
         self.expect("in")?;
         let header = self.location(start);
         self.newlines();
         let mut arms = Vec::with_capacity(2);
         loop {
-            self.alias_newlines(&["esac"])?;
+            self.alias_newlines(false, &["esac"])?;
             if self.keyword() == Some("esac") {
                 break;
             }
@@ -1180,7 +1179,7 @@ impl Reader {
             if matches!(self.peek(), Some(Token::End)) {
                 self.tokens.pop_front();
             }
-            self.newlines();
+            self.alias_newlines(true, &["do", "{"])?;
             let (open, close) = if self.keyword() == Some("{") {
                 ("{", "}")
             } else {
@@ -1202,7 +1201,7 @@ impl Reader {
             "expected a loop variable",
             "expected a loop variable",
         )?;
-        self.alias_newlines(&["in", "do"])?;
+        self.alias_newlines(false, &["in", "do"])?;
         let words = if self.keyword() == Some("in") {
             self.tokens.pop_front();
             let mut words = Vec::new();
@@ -1226,7 +1225,7 @@ impl Reader {
         if matches!(self.peek(), Some(Token::End)) {
             self.tokens.pop_front();
         }
-        self.alias_newlines(&["do"])?;
+        self.alias_newlines(true, &["do"])?;
         self.expect("do")?;
         let body = self.list(&["done"])?;
         self.expect("done")?;
@@ -1281,7 +1280,7 @@ impl Reader {
                 _ => return Err(Error::Invalid("expected empty function parentheses")),
             }
         }
-        self.alias_newlines(&["{", "if", "while", "until", "for", "case"])?;
+        self.alias_newlines(true, &["{", "if", "while", "until", "for", "case"])?;
         let start = self.position();
         let compound = self.nested(Self::compound)?.ok_or_else(|| {
             if self.peek().is_none() {

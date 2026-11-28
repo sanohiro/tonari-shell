@@ -292,6 +292,7 @@ impl Session {
         literal_key: bool,
     ) -> Result<(), &'static str> {
         let resolved = self.reference_name(target)?;
+        let stored = resolved != target && !target.contains('[');
         let target = resolved.as_ref();
         let element = subscript(target);
         let base = element.map_or(target, |(base, _)| base);
@@ -318,6 +319,8 @@ impl Session {
                         return Err("bad array subscript");
                     }
                     expr.to_owned()
+                } else if stored {
+                    crate::arithmetic::data_key(expr, self)?
                 } else {
                     self.subscript_key(expr)?
                 };
@@ -491,6 +494,16 @@ impl Session {
         self.stored_array_len(target)
     }
 
+    pub(crate) fn initialized_array(&self, name: &str) -> bool {
+        let Ok(base) = self.reference_name(name) else {
+            return false;
+        };
+        self.variables.get(base.as_ref()).map_or_else(
+            || Self::builtin_array_parameter(&base),
+            |var| var.array_assigned || var.dynamic && var.elements.is_some(),
+        )
+    }
+
     pub(crate) fn stored_array_len(&self, name: &str) -> Option<usize> {
         if self.active_groups(name) && !self.variables.contains_key(name) {
             return Some(self.group_ids().len());
@@ -589,7 +602,8 @@ impl Session {
         let elements = if self.live_table(name) {
             snapshot = Elements::Associative(self.table_snapshot(name));
             &snapshot
-        } else if let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref()) {
+        } else if let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref())
+        {
             elements
         } else {
             return false;
@@ -908,12 +922,13 @@ impl Session {
         map: &mut Elements,
         visible: bool,
         expression: &str,
+        evaluate: impl FnOnce(&str, &mut Session) -> Result<i64, &'static str>,
     ) -> Result<i64, &'static str> {
         if let Some(number) = Self::plain_decimal(expression) {
             return Ok(number);
         }
         if !visible {
-            return crate::arithmetic::run(expression, self);
+            return evaluate(expression, self);
         }
         if let Some((base, index)) = subscript(expression)
             && base == name
@@ -926,7 +941,7 @@ impl Session {
         *current.scalar_mut() = None;
         current.elements = Some(Rc::new(std::mem::replace(map, Elements::Dense(Vec::new()))));
         let previous = self.variables.insert(name.into(), current);
-        let result = crate::arithmetic::run(expression, self);
+        let result = evaluate(expression, self);
         let mut current = self.variables.remove(name).expect("active initializer");
         if let Some(previous) = previous {
             self.variables.insert(name.into(), previous);
@@ -1040,9 +1055,14 @@ impl Session {
                     Some(Index::Expression(expr)) if matches!(expr.as_str(), "*" | "@") => {
                         return Err("cannot assign to non-numeric index");
                     }
-                    Some(Index::Expression(expr)) => {
-                        Some(self.initializer_number(name, var, &mut map, visible, expr)?)
-                    }
+                    Some(Index::Expression(expr)) => Some(self.initializer_number(
+                        name,
+                        var,
+                        &mut map,
+                        visible,
+                        expr,
+                        |s, vars| crate::arithmetic::data_index(s, vars),
+                    )?),
                     None => None,
                 };
                 let i = match index {
@@ -1068,6 +1088,7 @@ impl Session {
                                         &mut map,
                                         visible,
                                         &expression,
+                                        crate::arithmetic::run,
                                     )?
                                 }
                             },
@@ -1075,8 +1096,15 @@ impl Session {
                     } else {
                         0
                     };
-                    old.wrapping_add(self.initializer_number(name, var, &mut map, visible, value)?)
-                        .to_string()
+                    old.wrapping_add(self.initializer_number(
+                        name,
+                        var,
+                        &mut map,
+                        visible,
+                        value,
+                        crate::arithmetic::run,
+                    )?)
+                    .to_string()
                 } else if concat {
                     map.get(&i).unwrap_or_default().to_owned() + value
                 } else {
@@ -1150,6 +1178,7 @@ impl Session {
                 &mut elements,
                 visible,
                 crate::arithmetic::numeric_subscript(expr),
+                |s, vars| crate::arithmetic::data_index(s, vars),
             )
             .and_then(|n| {
                 if n >= 0 {
@@ -1175,7 +1204,7 @@ impl Session {
         {
             return Ok(value);
         }
-        let n = crate::arithmetic::index(expr, &|k| self.get(k))?;
+        let n = crate::arithmetic::data_index(expr, &mut crate::arithmetic::ReadOnly(self))?;
         self.relative_index(name, n)
     }
 

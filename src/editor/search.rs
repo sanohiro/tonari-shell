@@ -22,6 +22,42 @@ impl ReverseSearch {
         }
     }
 
+    pub(super) fn accept(
+        self,
+        text: &mut String,
+        cursor: &mut usize,
+        undo: &mut super::Undo,
+        history: &mut History,
+        session: &Session,
+        view: &mut View,
+    ) {
+        if !self.pending.is_empty()
+            && let Ok(Some(found)) = history.find_command(session, view, &self.pending, &|| false)
+        {
+            if !self.query.is_empty() {
+                history.last_search.clone_from(&self.query);
+            }
+            *text = found;
+            *cursor = text.len();
+        }
+        if *text != self.original {
+            undo.record(
+                &self.original,
+                0..self.original.len(),
+                text.len(),
+                self.original_cursor,
+                false,
+            );
+        }
+        if !self.query.is_empty()
+            && let Some(at) = text.rfind(&self.query)
+        {
+            *cursor = at;
+        } else if *text == self.original {
+            *cursor = self.original_cursor;
+        }
+    }
+
     pub(super) fn edit_query(
         &mut self,
         action: super::Action,
@@ -123,5 +159,30 @@ impl ReverseSearch {
         };
         super::push_visible(display, visible);
         display.push_str("': ");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn committing_a_selection_records_the_previous_draft_and_cursor() {
+        let mut state = ReverseSearch::new("draft", 2);
+        state.query = "green".to_owned();
+        let mut text = "choose green".to_owned();
+        let mut cursor = text.len();
+        let mut undo = super::super::Undo::default();
+        state.accept(
+            &mut text,
+            &mut cursor,
+            &mut undo,
+            &mut History::default(),
+            &Session::default(),
+            &mut View::Unread,
+        );
+        assert_eq!(cursor, 7);
+        undo.apply(&mut text, &mut cursor);
+        assert_eq!((text.as_str(), cursor), ("draft", 2));
     }
 }

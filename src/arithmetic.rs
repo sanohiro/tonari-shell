@@ -23,7 +23,7 @@ pub(crate) fn shell_error(
 }
 
 pub(crate) trait Variables {
-    fn get(&self, name: &str) -> Option<String>;
+    fn get(&self, name: &str) -> Result<Option<String>>;
     fn scalar_text(&self, _name: &str) -> Option<&str> {
         None
     }
@@ -37,9 +37,7 @@ pub(crate) trait Variables {
     fn set_indexed(&mut self, name: &str, index: i64, value: i64) -> Result<()> {
         self.set(&format!("{name}[{index}]"), value)
     }
-    fn associative_key(&mut self, _name: &str, _source: &str) -> Option<Result<String>> {
-        None
-    }
+    fn is_associative(&self, name: &str) -> bool;
     fn nounset(&self) -> bool {
         false
     }
@@ -52,8 +50,8 @@ impl Variables for Session {
     fn decimal(&self, name: &str) -> Option<i64> {
         self.scalar_decimal(name)
     }
-    fn get(&self, name: &str) -> Option<String> {
-        self.get(name)
+    fn get(&self, name: &str) -> Result<Option<String>> {
+        self.arithmetic_get(name)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<()> {
         if let Some((base, index)) = crate::session::array::subscript(name) {
@@ -84,43 +82,79 @@ impl Variables for Session {
         }
         Ok(())
     }
-    fn associative_key(&mut self, name: &str, source: &str) -> Option<Result<String>> {
+    fn is_associative(&self, name: &str) -> bool {
         self.is_associative(name)
-            .then(|| data_key(source, |key| self.get(key)))
     }
     fn nounset(&self) -> bool {
         self.nounset
     }
 }
 
-// Arithmetic recursion can reach a key stored in a shell variable. Decode
-// quoting and simple parameter names without invoking the shell evaluator.
-pub(crate) fn data_key(source: &str, lookup: impl Fn(&str) -> Option<String>) -> Result<String> {
-    use crate::word::{Part, Word, is_identifier};
+// A subscript obtained from a variable is data. Read parameter values and
+// arithmetic operands without passing any part of it to the shell evaluator.
+fn data_text(word: crate::word::Word, vars: &mut dyn Variables, depth: u16) -> Result<String> {
+    use crate::word::{Alternative, Part, Word, is_identifier};
+    check_depth(depth)?;
+    let parts = match word {
+        Word::Literal(value) => return Ok(value),
+        Word::Expanded(parts) => parts,
+        _ => return Err("invalid indirect array subscript"),
+    };
+    let mut output = String::new();
+    for part in parts {
+        match part {
+            Part::Text(s) | Part::Pattern(s) | Part::Unquoted(s) => output.push_str(&s),
+            Part::Parameter { name, .. } | Part::BraceParameter(name) if is_identifier(&name) => {
+                if let Some(value) = vars.get(&name)? {
+                    output.push_str(&value);
+                }
+            }
+            Part::Alternative {
+                name,
+                op: op @ (Alternative::Default | Alternative::Alternate),
+                check_empty,
+                word,
+                ..
+            } if is_identifier(&name) => {
+                let value = vars.get(&name)?.filter(|s| !check_empty || !s.is_empty());
+                if (op == Alternative::Default) == value.is_none() {
+                    output.push_str(&data_text(*word, vars, depth + 1)?);
+                } else if op == Alternative::Default {
+                    output.push_str(value.as_deref().unwrap_or(""));
+                }
+            }
+            Part::Arithmetic { expression, .. } => {
+                let n = data_index_at(&expression, vars, depth + 1)?;
+                output.push_str(itoa::Buffer::new().format(n));
+            }
+            _ => return Err("invalid indirect array subscript"),
+        }
+    }
+    Ok(output)
+}
+
+pub(crate) fn data_key(source: &str, vars: &mut dyn Variables) -> Result<String> {
+    data_key_at(source, vars, 0)
+}
+
+fn single_data_parameter(source: &str) -> Option<&str> {
+    let parameter = source.strip_prefix('$')?;
+    let name = parameter
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .unwrap_or(parameter);
+    crate::word::is_identifier(name).then_some(name)
+}
+
+fn data_key_at(source: &str, vars: &mut dyn Variables, depth: u16) -> Result<String> {
     if !source.is_empty() && !source.contains(['$', '`', '\'', '"', '\\']) {
         return Ok(source.to_owned());
     }
-    let word = crate::parser::subscript_word(source, true).map_err(|e| e.message())?;
-    let key = match word {
-        Word::Literal(key) => key,
-        Word::Expanded(parts) => {
-            let mut key = String::new();
-            for part in parts {
-                match part {
-                    Part::Text(s) | Part::Pattern(s) => key.push_str(&s),
-                    Part::Parameter { name, .. } | Part::BraceParameter(name)
-                        if is_identifier(&name) =>
-                    {
-                        if let Some(value) = lookup(&name) {
-                            key.push_str(&value);
-                        }
-                    }
-                    _ => return Err("invalid arithmetic array subscript"),
-                }
-            }
-            key
-        }
-        Word::Declaration(_) => return Err("invalid arithmetic array subscript"),
+    let key = if let Some(name) = single_data_parameter(source) {
+        vars.get(name)?.unwrap_or_default()
+    } else {
+        let word = crate::parser::subscript_word(source, true).map_err(|e| e.message())?;
+        data_text(word, vars, depth + 1)?
     };
     if key.is_empty() {
         Err("bad array subscript")
@@ -129,76 +163,53 @@ pub(crate) fn data_key(source: &str, lookup: impl Fn(&str) -> Option<String>) ->
     }
 }
 
-struct ReadOnly<'a, F>(&'a F);
-impl<F: Fn(&str) -> Option<String>> Variables for ReadOnly<'_, F> {
-    fn get(&self, name: &str) -> Option<String> {
-        (self.0)(name)
+fn data_index_at(source: &str, vars: &mut dyn Variables, depth: u16) -> Result<i64> {
+    if !source.contains(['$', '`', '"', '\\']) {
+        return calculate(source, vars, depth);
+    }
+    if let Some(name) = single_data_parameter(source) {
+        if let Some(n) = vars.decimal(name) {
+            return Ok(n);
+        }
+        let value = vars.get(name)?.unwrap_or_default();
+        return calculate(&value, vars, depth);
+    }
+    let (keys, tail) = if source.contains('[') {
+        crate::parser::arithmetic_segments(source, |name| vars.is_associative(name))
+    } else {
+        crate::parser::arithmetic_word(source).map(|word| (Vec::new(), word))
+    }
+    .map_err(|e| e.message())?;
+    if keys.is_empty() {
+        return calculate(&data_text(tail, vars, depth + 1)?, vars, depth);
+    }
+    let mut text = String::new();
+    for (prefix, key) in keys {
+        text.push_str(&data_text(prefix, vars, depth + 1)?);
+        crate::word::quote::push_single_quote(&mut text, &data_text(key, vars, depth + 1)?);
+    }
+    text.push_str(&data_text(tail, vars, depth + 1)?);
+    calculate(&text, vars, depth)
+}
+
+pub(crate) fn data_index(source: &str, vars: &mut dyn Variables) -> Result<i64> {
+    data_index_at(source, vars, 0)
+}
+
+pub(crate) struct ReadOnly<'a>(pub(crate) &'a Session);
+impl Variables for ReadOnly<'_> {
+    fn get(&self, name: &str) -> Result<Option<String>> {
+        self.0.arithmetic_get(name)
+    }
+    fn scalar_text(&self, name: &str) -> Option<&str> {
+        self.0.stored_scalar(name)
+    }
+    fn is_associative(&self, name: &str) -> bool {
+        self.0.is_associative(name)
     }
     fn set(&mut self, _: &str, _: i64) -> Result<()> {
         Err("assignment is unavailable in read-only arithmetic")
     }
-}
-
-pub fn evaluate(source: &str, lookup: &impl Fn(&str) -> Option<String>) -> Result<i64> {
-    calculate(source, &mut ReadOnly(lookup), 0)
-}
-
-// A subscript obtained through indirection is data. Support pure parameter
-// and arithmetic forms without dispatching commands or assigning variables.
-pub(crate) fn index(source: &str, lookup: &impl Fn(&str) -> Option<String>) -> Result<i64> {
-    if !source.contains('$') {
-        return evaluate(source, lookup);
-    }
-    fn text(
-        word: crate::word::Word,
-        lookup: &impl Fn(&str) -> Option<String>,
-        depth: u8,
-    ) -> Result<String> {
-        use crate::word::{Alternative, Part, Word, is_identifier};
-        if depth >= 32 {
-            return Err("array subscript nested too deeply");
-        }
-        let parts = match word {
-            Word::Literal(value) => return Ok(value),
-            Word::Expanded(parts) => parts,
-            _ => return Err("invalid indirect array subscript"),
-        };
-        let mut output = String::new();
-        for part in parts {
-            match part {
-                Part::Text(s) | Part::Pattern(s) => output.push_str(&s),
-                Part::Parameter { name, .. } if is_identifier(&name) => {
-                    if let Some(s) = lookup(&name) {
-                        output.push_str(&s);
-                    }
-                }
-                Part::Alternative {
-                    name,
-                    op: op @ (Alternative::Default | Alternative::Alternate),
-                    check_empty,
-                    word,
-                    ..
-                } if is_identifier(&name) => {
-                    let value = lookup(&name).filter(|s| !check_empty || !s.is_empty());
-                    if (op == Alternative::Default) == value.is_none() {
-                        output.push_str(&text(*word, lookup, depth + 1)?);
-                    } else if op == Alternative::Default {
-                        output.push_str(value.as_deref().unwrap_or(""));
-                    }
-                }
-                Part::Arithmetic { expression, .. } => {
-                    let word =
-                        crate::parser::arithmetic_word(&expression).map_err(|e| e.message())?;
-                    output
-                        .push_str(&evaluate(&text(word, lookup, depth + 1)?, lookup)?.to_string());
-                }
-                _ => return Err("invalid indirect array subscript"),
-            }
-        }
-        Ok(output)
-    }
-    let word = crate::parser::arithmetic_word(source).map_err(|e| e.message())?;
-    evaluate(&text(word, lookup, 0)?, lookup)
 }
 
 pub(crate) fn with_variables(source: &str, vars: &mut dyn Variables) -> Result<i64> {
@@ -238,16 +249,6 @@ pub(crate) fn inert(source: &str, session: &Session) -> bool {
 
 pub fn run(source: &str, session: &mut Session) -> Result<i64> {
     calculate(source, session, 0)
-}
-
-pub fn expanded(source: &str, session: &mut Session, status: u8) -> Result<i64> {
-    if !source.contains(['$', '`', '"', '\\']) {
-        return run(source, session);
-    }
-    let captured = std::cell::Cell::new(None);
-    crate::expansion::Expansion::new(session, status, &captured)
-        .arithmetic(source)
-        .map_err(|_| "invalid arithmetic expansion")
 }
 
 fn expanded_operand(source: &str, session: &mut Session, status: u8) -> ShellResult<i64> {
@@ -634,6 +635,9 @@ impl<'a> Parser<'a> {
                 left = Value::Number(if test { yes } else { no });
                 continue;
             }
+            if precedence == 2 && matches!(left, Value::Number(_)) {
+                return Err("arithmetic assignment requires a variable");
+            }
             let a = if op == "=" {
                 0
             } else {
@@ -747,8 +751,9 @@ fn element_name<'a>(
     if index.is_empty() {
         return Err("empty array subscript");
     }
-    if let Some(key) = variables.associative_key(base, index) {
-        return Ok(Target::Name(format!("{base}[{}]", key?).into()));
+    if variables.is_associative(base) {
+        let key = data_key_at(index, variables, depth + 1)?;
+        return Ok(Target::Name(format!("{base}[{key}]").into()));
     }
     if matches!(index, "@" | "*") {
         diagnostic!("{base}: bad array subscript");
@@ -756,7 +761,7 @@ fn element_name<'a>(
     }
     Ok(Target::Indexed(
         base,
-        calculate(numeric_subscript(index), variables, depth + 1)?,
+        data_index_at(numeric_subscript(index), variables, depth + 1)?,
     ))
 }
 
@@ -800,14 +805,14 @@ impl Value<'_> {
                             // Recursive arithmetic evaluation can mutate this variable.
                             Some(raw.to_owned())
                         } else {
-                            variables.get(name)
+                            variables.get(name)?
                         }
                     }
                     Target::Indexed(name, index) => {
                         if let Some(n) = variables.indexed_decimal(name, *index) {
                             return Ok(n);
                         }
-                        variables.get(&format!("{name}[{index}]"))
+                        variables.get(&format!("{name}[{index}]"))?
                     }
                 };
                 match text {
@@ -1048,7 +1053,10 @@ mod tests {
     use super::*;
     #[test]
     fn precedence_numbers_and_lazy_branches() {
-        let lookup = |name: &str| (name == "n").then(|| "3+1".to_owned());
+        let mut session = Session::default();
+        session.assign("n", "3+1");
+        session.assign("x", "x");
+        let mut vars = ReadOnly(&session);
         for (s, v) in [
             ("2+3*4", 14),
             ("2**3**2", 512),
@@ -1058,9 +1066,9 @@ mod tests {
             ("1 || (1/0)", 1),
             ("-1 >> 2", -1),
         ] {
-            assert_eq!(evaluate(s, &lookup).unwrap(), v, "{s}");
+            assert_eq!(data_index(s, &mut vars).unwrap(), v, "{s}");
         }
-        assert!(evaluate("08", &lookup).is_err());
-        assert!(evaluate("x", &|_| Some("x".into())).is_err());
+        assert!(data_index("08", &mut vars).is_err());
+        assert!(data_index("x", &mut vars).is_err());
     }
 }

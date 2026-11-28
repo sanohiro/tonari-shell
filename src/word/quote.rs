@@ -89,7 +89,7 @@ pub(crate) fn parameter_quote(text: &str, session: &crate::Session) -> String {
 }
 
 fn escaped_scalar(c: char) -> bool {
-    !c.is_ascii() && c.escape_debug().next() == Some('\\')
+    !c.is_ascii() && !crate::pattern::printable_utf8(c)
 }
 
 fn contains_nonprinting(data: &[u8]) -> bool {

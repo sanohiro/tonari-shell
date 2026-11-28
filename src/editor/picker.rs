@@ -103,7 +103,12 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session, query: &mut String) -
         27 => {
             // Disambiguate a lone Escape from an arrow or bracketed paste.
             let timeout = session.bindings.timeout();
-            if keys.queued.is_empty() && !super::input::wait_for_key(session, timeout.min(50))? {
+            if keys.queued.is_empty()
+                && !super::input::wait_for_key(
+                    session,
+                    if timeout > 0 { timeout.min(50) } else { 50 },
+                )?
+            {
                 return Ok(Key::Cancel);
             }
             let Some(introducer) = keys.get()? else {
@@ -163,11 +168,11 @@ pub(super) fn choose(
     keys: &mut Keys,
     screen: &mut Screen,
     session: &Session,
+    query: &mut String,
+    selected: &mut usize,
 ) -> io::Result<Option<usize>> {
-    let mut query = String::new();
     let mut hits = Vec::new();
     let mut scanned = 0;
-    let mut selected: usize = 0;
     let contains = |value: &str, needle: &str| {
         if !session.bindings.ignore_case {
             return value.contains(needle);
@@ -181,7 +186,7 @@ pub(super) fn choose(
     loop {
         // Preserve source order, and resume scanning only when the user
         // navigates past the matches already found for this query.
-        let wanted = (selected / rows + 1) * rows;
+        let wanted = (*selected / rows + 1) * rows;
         if hits.len() < wanted && scanned < choices.len() {
             if query.is_empty() {
                 let end = wanted.min(choices.len());
@@ -194,15 +199,15 @@ pub(super) fn choose(
                     scanned += 1;
                     if (!session.bindings.ignore_case
                         && finder.find(choices[index].as_bytes()).is_some())
-                        || (session.bindings.ignore_case && contains(&choices[index], &query))
+                        || (session.bindings.ignore_case && contains(&choices[index], query))
                     {
                         hits.push(index);
                     }
                 }
             }
         }
-        selected = selected.min(hits.len().saturating_sub(1));
-        let offset = selected / rows * rows;
+        *selected = (*selected).min(hits.len().saturating_sub(1));
+        let offset = *selected / rows * rows;
         let page = hits
             .iter()
             .skip(offset)
@@ -212,8 +217,8 @@ pub(super) fn choose(
             screen,
             "filter> ",
             page,
-            selected - offset,
-            &query,
+            *selected - offset,
+            query,
             "(no matches)",
         );
         io::stderr().write_all(screen.output.as_bytes())?;
@@ -221,30 +226,30 @@ pub(super) fn choose(
             return Ok(None);
         };
         let old_len = query.len();
-        match read_key(first, keys, session, &mut query)? {
+        match read_key(first, keys, session, query)? {
             Key::Changed => {}
             Key::Cancel => return Ok(None),
             Key::Accept => {
-                if let Some(&index) = hits.get(selected) {
+                if let Some(&index) = hits.get(*selected) {
                     return Ok(Some(index));
                 }
                 continue;
             }
             Key::Down => {
-                if selected + 1 < hits.len() || scanned < choices.len() {
-                    selected += 1;
+                if *selected + 1 < hits.len() || scanned < choices.len() {
+                    *selected += 1;
                 }
                 continue;
             }
             Key::Up => {
-                selected = selected.saturating_sub(1);
+                *selected = selected.saturating_sub(1);
                 continue;
             }
             Key::Ignore => continue,
         }
-        selected = 0;
+        *selected = 0;
         if query.len() > old_len {
-            hits.retain(|&i| contains(&choices[i], &query));
+            hits.retain(|&i| contains(&choices[i], query));
         } else {
             scanned = 0;
             hits.clear();
@@ -258,13 +263,13 @@ pub(super) fn history(
     session: &Session,
     keys: &mut Keys,
     screen: &mut Screen,
+    selected: &mut usize,
 ) -> io::Result<Option<String>> {
     let rows = page_rows(screen);
-    let mut selected: usize = 0;
     let mut snapshot = None;
     let mut refresh = true;
     loop {
-        let offset = selected / rows * rows;
+        let offset = *selected / rows * rows;
         let wanted = offset + rows;
         if refresh {
             draw(
@@ -296,9 +301,9 @@ pub(super) fn history(
         }
         filter.fill(session, query, wanted, waiting);
         if filter.exhausted() {
-            selected = selected.min(filter.hits.len().saturating_sub(1));
+            *selected = (*selected).min(filter.hits.len().saturating_sub(1));
         }
-        let offset = selected / rows * rows;
+        let offset = *selected / rows * rows;
         let page = filter
             .hits
             .iter()
@@ -309,7 +314,7 @@ pub(super) fn history(
             screen,
             "history> ",
             page,
-            selected - offset,
+            *selected - offset,
             query,
             if filter.exhausted() {
                 "(no matches)"
@@ -330,22 +335,22 @@ pub(super) fn history(
         match key {
             Key::Cancel => return Ok(None),
             Key::Accept => {
-                filter.fill(session, query, selected + 1, || {
+                filter.fill(session, query, *selected + 1, || {
                     crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
                 });
-                selected = selected.min(filter.hits.len().saturating_sub(1));
-                if selected < filter.hits.len() {
-                    return Ok(Some(filter.hits[selected].to_string()));
+                *selected = (*selected).min(filter.hits.len().saturating_sub(1));
+                if *selected < filter.hits.len() {
+                    return Ok(Some(filter.hits[*selected].to_string()));
                 }
                 continue;
             }
             Key::Up => {
-                selected = selected.saturating_sub(1);
+                *selected = selected.saturating_sub(1);
                 continue;
             }
             Key::Down => {
-                if !filter.exhausted() || selected + 1 < filter.hits.len() {
-                    selected += 1;
+                if !filter.exhausted() || *selected + 1 < filter.hits.len() {
+                    *selected += 1;
                 }
                 continue;
             }
@@ -353,6 +358,6 @@ pub(super) fn history(
             Key::Changed => {}
         }
         refresh = true;
-        selected = 0;
+        *selected = 0;
     }
 }

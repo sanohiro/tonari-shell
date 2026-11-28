@@ -146,7 +146,11 @@ impl Session {
                 var.exported = !remove;
                 var.declared = true;
             } else {
-                let mut var = self.declared_variable(name, false).unwrap_or_default();
+                let mut var = match self.declared_variable(name, false) {
+                    Some(var) => var,
+                    None if remove => continue,
+                    None => Default::default(),
+                };
                 var.exported = !remove;
                 var.declared = true;
                 self.variables.insert(name.into(), var);
@@ -382,7 +386,7 @@ impl Session {
                         self.remove_key(base, index);
                         continue;
                     }
-                    match self.subscript_key(index) {
+                    match crate::arithmetic::data_key(index, self) {
                         Ok(key) => self.remove_key(base, &key),
                         Err(e) => {
                             diagnostic!("unset: {e}");
@@ -403,18 +407,21 @@ impl Session {
                 {
                     continue;
                 }
-                let resolved = crate::arithmetic::expanded(index, self, 0)
-                    .and_then(|n| self.relative_index(base, n));
-                match resolved {
-                    Ok(i) if !array && i != 0 => {
-                        diagnostic!("unset: {base}: not an array variable");
-                        status = 1;
-                    }
-                    Ok(i) => self.unset_element(base, i),
+                let i = match crate::arithmetic::data_index(index, self) {
+                    Ok(i) => i,
                     Err(e) => {
                         diagnostic!("unset: {e}");
                         return crate::Flow::Discard(1);
                     }
+                };
+                if !array && i != 0 {
+                    diagnostic!("unset: {base}: not an array variable");
+                    status = 1;
+                } else if let Ok(element) = self.relative_index(base, i) {
+                    self.unset_element(base, element);
+                } else {
+                    diagnostic!("unset: [{index}]: bad array subscript");
+                    status = 1;
                 }
                 continue;
             }

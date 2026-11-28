@@ -28,6 +28,17 @@ fn utf8_locale() -> libc::locale_t {
     }) as libc::locale_t
 }
 
+pub(crate) fn printable_utf8(c: char) -> bool {
+    unsafe extern "C" {
+        fn iswprint_l(c: u32, locale: libc::locale_t) -> libc::c_int;
+    }
+    let locale = utf8_locale();
+    if locale.is_null() {
+        return !c.is_control();
+    }
+    unsafe { iswprint_l(c as u32, locale) != 0 }
+}
+
 fn mapped_in(c: char, upper: bool, locale: CharacterLocale, utf8: libc::locale_t) -> char {
     unsafe extern "C" {
         fn towupper_l(c: u32, locale: libc::locale_t) -> u32;

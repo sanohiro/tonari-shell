@@ -788,7 +788,10 @@ fn callback(
     }
     session.replace_array("COMPREPLY", Vec::new());
     let flow = crate::call_function(session, args, last, false);
-    let values = if matches!(flow, crate::Flow::Discard(_) | crate::Flow::Exit(_)) {
+    let values = if matches!(
+        flow,
+        crate::Flow::Unwind(_) | crate::Flow::Discard(_) | crate::Flow::Exit(_)
+    ) {
         Vec::new()
     } else {
         session.take_completion_reply()

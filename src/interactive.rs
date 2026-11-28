@@ -389,7 +389,11 @@ pub(super) fn interactive_loop(
                         execute_program(session, program, status, false)
                     };
                     status = match flow {
-                        Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
+                        Flow::Unwind(s)
+                        | Flow::Discard(s)
+                        | Flow::Continue(s)
+                        | Flow::Return(s)
+                        | Flow::Exit(s) => s,
                         _ => 1,
                     };
                     if record {

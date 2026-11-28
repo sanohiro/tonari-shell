@@ -205,7 +205,7 @@ impl Input {
             && crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
             && crate::interrupted()
         {
-            return Err(Flow::Discard(crate::traps::signal_status(libc::SIGINT)));
+            return Err(Flow::Unwind(crate::traps::signal_status(libc::SIGINT)));
         }
         if remaining == Some(Duration::ZERO) {
             return Err(Flow::Continue(crate::traps::signal_status(libc::SIGALRM)));
@@ -442,7 +442,9 @@ pub(super) fn run(
             Ok(crate::editor::Input::Line(text)) => edited = Some(text.into_bytes().into_iter()),
             Ok(crate::editor::Input::Directory(_)) => unreachable!(),
             Ok(crate::editor::Input::End) => edited = Some(Vec::new().into_iter()),
-            Ok(crate::editor::Input::Cancel) => return Flow::Discard(130),
+            Ok(crate::editor::Input::Cancel) => {
+                return Flow::Unwind(crate::traps::signal_status(libc::SIGINT));
+            }
             Ok(crate::editor::Input::Control(flow)) => return flow,
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
                 return Flow::Continue(crate::traps::signal_status(libc::SIGALRM));

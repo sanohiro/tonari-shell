@@ -754,6 +754,19 @@ pub(super) fn run_builtin(
     if cmd.redirects.is_empty() {
         return Ok(eval_builtin(builtin, cmd, session, last_status, false));
     }
+    run_redirected_builtin(builtin, cmd, session, last_status, final_command)
+}
+
+// Preserve descriptor restoration while the body runs. Keep this frame off
+// the call stack for ordinary functions and eval without redirections.
+#[inline(never)]
+fn run_redirected_builtin(
+    builtin: Builtin,
+    cmd: &mut PreparedCommand,
+    session: &mut Session,
+    last_status: u8,
+    final_command: bool,
+) -> io::Result<Flow> {
     let one;
     let pair;
     let multiple;

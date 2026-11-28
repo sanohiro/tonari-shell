@@ -847,6 +847,39 @@ impl Session {
         self.get(name).map(Cow::Owned)
     }
 
+    pub(crate) fn arithmetic_get(&self, name: &str) -> Result<Option<String>, &'static str> {
+        if self.is_nameref(name)
+            && let Cow::Owned(target) = self.reference_name(name)?
+        {
+            self.reference_value(name, &target)
+        } else {
+            Ok(self.get(name))
+        }
+    }
+
+    fn reference_value(&self, name: &str, target: &str) -> Result<Option<String>, &'static str> {
+        let depth = self.reference_depth.get();
+        if depth >= 32 {
+            return Err("array subscript nested too deeply");
+        }
+        self.reference_depth.set(depth + 1);
+        let value = if !name.contains('[')
+            && let Some((base, expr)) = array::subscript(target)
+        {
+            if self.is_associative(base) {
+                crate::arithmetic::data_key(expr, &mut crate::arithmetic::ReadOnly(self))
+                    .map(|key| self.assoc_value(base, &key).map(str::to_owned))
+            } else {
+                self.resolve_index(base, expr)
+                    .map(|index| self.element(base, index))
+            }
+        } else {
+            Ok(self.get(target))
+        };
+        self.reference_depth.set(depth);
+        value
+    }
+
     pub fn get(&self, name: &str) -> Option<String> {
         if name == "_" {
             return self
@@ -879,14 +912,7 @@ impl Session {
             return Some(text);
         }
         if let Cow::Owned(target) = self.reference_name(name).ok()? {
-            let depth = self.reference_depth.get();
-            if depth >= 32 {
-                return None;
-            }
-            self.reference_depth.set(depth + 1);
-            let value = self.get(&target);
-            self.reference_depth.set(depth);
-            return value;
+            return self.reference_value(name, &target).ok().flatten();
         }
         if let Some((base, index)) = array::subscript(name) {
             if self.is_associative(base) {
@@ -1159,8 +1185,8 @@ impl Session {
 
     pub(crate) fn assign_value(&mut self, name: &str, mut value: Cow<'_, str>) {
         match self.reference_name(name) {
-            Ok(Cow::Owned(target)) => {
-                if let Err(e) = self.assign_target(&target, &value) {
+            Ok(Cow::Owned(_)) => {
+                if let Err(e) = self.assign_target(name, &value) {
                     diagnostic!("{name}: {e}");
                 }
                 return;
@@ -1316,7 +1342,10 @@ impl Session {
     }
 
     pub(crate) fn remember_literal_argument(&mut self, words: &[String]) {
-        let arg = words.last().map_or("", String::as_str);
+        self.remember_argument(words.last().map_or("", String::as_str));
+    }
+
+    pub(crate) fn remember_argument(&mut self, arg: &str) {
         if self.last_argument.as_deref() != Some(arg) {
             let slot = self.last_argument.get_or_insert_with(String::new);
             slot.clear();

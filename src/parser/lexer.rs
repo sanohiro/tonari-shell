@@ -291,7 +291,7 @@ fn braced_parameter<'a>(
     assignment: bool,
     quoted_name: bool,
 ) -> Result<(), Error> {
-    let _nesting = super::enter_expansion()?;
+    super::check_expansion_stack()?;
     chars.next();
     let content = chars.as_str();
     if starts_braced_command(content) {
@@ -542,6 +542,19 @@ fn braced_parameter<'a>(
             });
             return Ok(());
         }
+        if chars.as_str().starts_with('@') {
+            alternative_word(chars, quoted)?;
+            let end = content.len() - chars.as_str().len();
+            word.part(Part::Modify {
+                name: parameter_name(name),
+                operation: Box::new(crate::word::Modification::InvalidTransform(format!(
+                    "${{{}",
+                    &content[..end]
+                ))),
+                quoted,
+            });
+            return Ok(());
+        }
         let check_empty = chars.as_str().starts_with(':');
         if check_empty {
             chars.next();
@@ -576,7 +589,7 @@ pub(super) fn backquote(
     word: &mut WordBuilder,
     quoted: bool,
 ) -> Result<(), Error> {
-    let _nesting = super::enter_expansion()?;
+    super::check_expansion_stack()?;
     let mut source = String::new();
     let mut rest = chars.as_str();
     while let Some(at) = memchr::memchr2(b'`', b'\\', rest.as_bytes()) {
@@ -811,7 +824,7 @@ fn substitution_body(nested: &str, brace: bool) -> Result<(Vec<super::Statement>
 }
 
 fn nested_program(chars: &mut Chars<'_>) -> Result<Vec<super::Statement>, Error> {
-    let _nesting = super::enter_expansion()?;
+    super::check_expansion_stack()?;
     let nested = chars.as_str();
     let (body, after) = substitution_body(nested, false)?;
     *chars = after.chars();
@@ -882,6 +895,10 @@ pub(super) fn arithmetic_clauses(source: &str) -> Result<[&str; 3], Error> {
     Ok(fields)
 }
 
+pub(crate) fn initializer_index_word(source: &str) -> Result<Word, Error> {
+    scan_subscript(source, SubscriptMode::InitializerIndex, |_, _| Ok(false))
+}
+
 pub(crate) fn arithmetic_word(source: &str) -> Result<crate::word::Word, Error> {
     subscript_word(source, false)
 }
@@ -947,6 +964,7 @@ pub(crate) fn associative_pair_word(source: &str, assignment_value: bool) -> Res
 
 enum SubscriptMode {
     Arithmetic,
+    InitializerIndex,
     Associative,
     PairKey,
     PairValue,
@@ -965,7 +983,11 @@ fn scan_subscript<'a>(
     mode: SubscriptMode,
     mut bracket: impl FnMut(&mut WordBuilder, &mut &'a str) -> Result<bool, Error>,
 ) -> Result<Word, Error> {
-    let associative = !matches!(mode, SubscriptMode::Arithmetic);
+    let associative = !matches!(
+        mode,
+        SubscriptMode::Arithmetic | SubscriptMode::InitializerIndex
+    );
+    let single_quotes = associative || matches!(mode, SubscriptMode::InitializerIndex);
     let pair = matches!(mode, SubscriptMode::PairKey | SubscriptMode::PairValue);
     let mut chars = source.chars();
     let mut word = WordBuilder::default();
@@ -996,8 +1018,8 @@ fn scan_subscript<'a>(
                 }
             }
             '"' => quoted(&mut chars, c, &mut word)?,
-            '\'' if associative => quoted(&mut chars, c, &mut word)?,
-            '$' if associative && chars.as_str().starts_with('\'') => {
+            '\'' if single_quotes => quoted(&mut chars, c, &mut word)?,
+            '$' if single_quotes && chars.as_str().starts_with('\'') => {
                 chars.next();
                 word.literal(&ansi::quoted(&mut chars)?);
             }
@@ -1651,9 +1673,9 @@ fn scan_word(
     })))
 }
 
-// After a case arm terminator only a pattern list or esac is legal.
-// Recognizing this boundary locally avoids parsing all preceding arms.
-fn follows_case_terminator(tokens: &[Token]) -> bool {
+// Recognize a pattern after an arm terminator or a standalone case header.
+// Ambiguous headers still go through the full parser.
+fn closes_case_pattern(tokens: &[Token], unparenthesized: bool) -> bool {
     let mut rest = tokens;
     while let Some((pattern, before)) = rest.split_last() {
         if !matches!(
@@ -1666,10 +1688,24 @@ fn follows_case_terminator(tokens: &[Token]) -> bool {
             rest = earlier;
             continue;
         }
+        if pattern.keyword() == Some("esac") {
+            return false;
+        }
+        let mut header = before
+            .iter()
+            .rev()
+            .skip_while(|t| matches!(t, Token::Newline));
+        match header.next() {
+            Some(Token::EndArm(_)) => return true,
+            Some(token) if unparenthesized && token.keyword() == Some("in") => {}
+            _ => return false,
+        }
+        let subject = header.find(|t| !matches!(t, Token::Newline));
         return matches!(
-            before.iter().rev().find(|t| !matches!(t, Token::Newline)),
-            Some(Token::EndArm(_))
-        ) && pattern.keyword() != Some("esac");
+            subject,
+            Some(Token::Word(_) | Token::Reserved(_) | Token::TimeUtility)
+        ) && header.next().and_then(Token::keyword) == Some("case")
+            && matches!(header.next(), None | Some(Token::End | Token::Newline));
     }
     false
 }
@@ -1801,7 +1837,11 @@ fn scan(
         }
         if separator(c) && !process_start(chars.as_str()) {
             chars.next();
-            if substitution && c == ')' && saw_case && follows_case_terminator(&tokens) {
+            if substitution
+                && c == ')'
+                && saw_case
+                && closes_case_pattern(&tokens, parentheses == 0 && !in_test)
+            {
                 tokens.push(Token::RightParen);
                 continue;
             }

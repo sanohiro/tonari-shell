@@ -587,7 +587,16 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
             }
             "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()),
             "keyseq-timeout" => {
-                bindings.timeout = Some(value.parse::<i32>().unwrap_or(0).max(0));
+                let value = value
+                    .trim_start()
+                    .strip_prefix('+')
+                    .unwrap_or(value.trim_start());
+                let digits = value.bytes().take_while(u8::is_ascii_digit).count();
+                bindings.timeout = Some(if digits == 0 {
+                    0
+                } else {
+                    value[..digits].parse().unwrap_or(i32::MAX)
+                });
             }
             "keymap" => bindings.map = Keymap::parse(value)?,
             "editing-mode" if matches!(value, "emacs" | "vi") => {
@@ -906,10 +915,7 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                                 "editing-mode",
                                 if session.vi { "vi" } else { "emacs" }.into(),
                             ),
-                            (
-                                "enable-bracketed-paste",
-                                yes(b.bracketed_paste.unwrap_or(session.interactive)).into(),
-                            ),
+                            ("enable-bracketed-paste", yes(b.paste()).into()),
                             (
                                 "keymap",
                                 match b.map {

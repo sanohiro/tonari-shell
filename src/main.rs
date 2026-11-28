@@ -161,43 +161,20 @@ fn input_timeout() -> Option<libc::timespec> {
     })
 }
 
-// Keep the common recursion check to address arithmetic. ulimit -s updates
-// the budget when the soft limit changes, including inside a forked shell.
-static STACK_BUDGET: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-fn update_stack_budget(soft: libc::rlim_t) {
-    // A process can advertise an unlimited soft limit even when its main
-    // stack is bounded by the host. Keep the initial environment and the
-    // deeper parser and signal frames clear of the guard page.
-    let limit = (soft as usize).min(8 * 1024 * 1024);
-    let reserve = (limit / 4).min(256 * 1024);
-    let mut budget = (limit / 2).saturating_sub(reserve).max(1);
-    if limit <= 512 * 1024 && MAIN_STACK_ORIGIN.get() != 0 {
-        let usable = MAIN_STACK_ORIGIN.get().saturating_sub(thread_stack_floor());
-        budget = budget.min(usable.max(1));
-    }
-    STACK_BUDGET.store(budget, std::sync::atomic::Ordering::Relaxed);
-}
-
-#[cold]
-fn initial_stack_budget() -> usize {
-    let mut limit = std::mem::MaybeUninit::uninit();
-    if unsafe { libc::getrlimit(libc::RLIMIT_STACK, limit.as_mut_ptr()) } != 0 {
-        return 1;
-    }
-    update_stack_budget(unsafe { limit.assume_init() }.rlim_cur);
-    STACK_BUDGET.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 thread_local! {
-    // Interpreter entry (including ENOEXEC reentry) is on the main thread.
-    // Test harnesses and optional workers can enter it on a smaller stack.
+    // Worker threads have independent fixed-size stacks. A fork inherits the
+    // current interpreter stack and its cached guard address.
     static MAIN_STACK_ORIGIN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static WORKER_STACK_FLOOR: std::cell::OnceCell<usize> = const { std::cell::OnceCell::new() };
+    static STACK_FLOOR: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn guarded_floor(low: usize, high: usize, limit: usize) -> usize {
+    let usable = high.saturating_sub(low).min(limit);
+    high - usable + (usable / 2).min(256 * 1024)
 }
 
 #[cold]
-fn thread_stack_floor() -> usize {
+fn thread_stack_bounds() -> Option<(usize, usize)> {
     #[cfg(target_os = "macos")]
     let (low, size) = unsafe {
         let thread = libc::pthread_self();
@@ -205,7 +182,7 @@ fn thread_stack_floor() -> usize {
         (
             libc::pthread_get_stackaddr_np(thread)
                 .addr()
-                .saturating_sub(size),
+                .checked_sub(size)?,
             size,
         )
     };
@@ -213,7 +190,7 @@ fn thread_stack_floor() -> usize {
     let (low, size) = unsafe {
         let mut attr = std::mem::MaybeUninit::uninit();
         if libc::pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 {
-            return usize::MAX;
+            return None;
         }
         let mut attr = attr.assume_init();
         let mut low = std::ptr::null_mut();
@@ -221,11 +198,70 @@ fn thread_stack_floor() -> usize {
         let result = libc::pthread_attr_getstack(&attr, &mut low, &mut size);
         libc::pthread_attr_destroy(&mut attr);
         if result != 0 {
-            return usize::MAX;
+            return None;
         }
         (low.addr(), size)
     };
-    low.saturating_add((size / 2).min(256 * 1024))
+    (size != 0).then_some((low, low.checked_add(size)?))
+}
+
+#[cfg(all(target_os = "linux", target_env = "musl"))]
+fn main_stack_bounds() -> Option<(usize, usize)> {
+    // musl's pthread_getattr_np reports only the currently mapped main
+    // stack. Linux grows this mapping toward the preceding VMA.
+    let origin = MAIN_STACK_ORIGIN.get();
+    let maps = std::fs::read("/proc/self/maps").ok()?;
+    let mut previous_end = 0usize;
+    for line in maps.split(|&byte| byte == b'\n') {
+        let range = std::str::from_utf8(line.split(|&byte| byte == b' ').next()?).ok()?;
+        let (low, high) = range.split_once('-')?;
+        let low = usize::from_str_radix(low, 16).ok()?;
+        let high = usize::from_str_radix(high, 16).ok()?;
+        if (low..high).contains(&origin) {
+            let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+            let gap = usize::try_from(page).ok()?.saturating_mul(256);
+            return Some((previous_end.saturating_add(gap).min(low), high));
+        }
+        previous_end = high;
+    }
+    None
+}
+
+#[cold]
+fn update_stack_budget(soft: libc::rlim_t) {
+    if MAIN_STACK_ORIGIN.get() == 0 {
+        return;
+    }
+    #[cfg(all(target_os = "linux", target_env = "musl"))]
+    let bounds = main_stack_bounds().or_else(thread_stack_bounds);
+    #[cfg(not(all(target_os = "linux", target_env = "musl")))]
+    let bounds = thread_stack_bounds();
+    let limit = if soft == libc::RLIM_INFINITY {
+        8 * 1024 * 1024
+    } else {
+        soft as usize
+    };
+    let floor = bounds.map_or(usize::MAX, |(low, high)| guarded_floor(low, high, limit));
+    STACK_FLOOR.set(floor);
+}
+
+#[cold]
+fn initial_stack_floor() -> usize {
+    if MAIN_STACK_ORIGIN.get() == 0 {
+        let floor = thread_stack_bounds().map_or(usize::MAX, |(low, high)| {
+            guarded_floor(low, high, usize::MAX)
+        });
+        STACK_FLOOR.set(floor);
+    } else {
+        let mut limit = std::mem::MaybeUninit::uninit();
+        let soft = if unsafe { libc::getrlimit(libc::RLIMIT_STACK, limit.as_mut_ptr()) } == 0 {
+            unsafe { limit.assume_init() }.rlim_cur
+        } else {
+            libc::RLIM_INFINITY
+        };
+        update_stack_budget(soft);
+    }
+    STACK_FLOOR.get()
 }
 
 fn stack_budget_exceeded() -> bool {
@@ -235,17 +271,42 @@ fn stack_budget_exceeded() -> bool {
 
 #[inline]
 fn stack_budget_exceeded_at(here: usize) -> bool {
-    let origin = MAIN_STACK_ORIGIN.get();
-    if origin == 0 {
-        return WORKER_STACK_FLOOR.with(|floor| here <= *floor.get_or_init(thread_stack_floor));
-    }
-    let budget = STACK_BUDGET.load(std::sync::atomic::Ordering::Relaxed);
-    let budget = if budget == 0 {
-        initial_stack_budget()
+    let floor = STACK_FLOOR.get();
+    here <= if floor == 0 {
+        initial_stack_floor()
     } else {
-        budget
-    };
-    origin.saturating_sub(here) >= budget
+        floor
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn stack_limit_respects_the_allocation_and_soft_limit() {
+    const MIB: usize = 1024 * 1024;
+    let reserve = MIB / 4;
+    assert_eq!(
+        guarded_floor(15 * MIB, 16 * MIB, 8 * MIB),
+        15 * MIB + reserve
+    );
+    assert_eq!(guarded_floor(8 * MIB, 16 * MIB, MIB), 15 * MIB + reserve);
+    assert_eq!(
+        guarded_floor(2 * MIB, 32 * MIB, 16 * MIB),
+        16 * MIB + reserve
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn command_and_expansion_check_the_active_stack() {
+    let mut session = Session::default();
+    let statements = parser::session_source("{ value=ran; } 2>&1", true, &session).unwrap();
+    let _guard = ScopedCell::enter(&STACK_FLOOR, usize::MAX);
+    assert_eq!(
+        execute_program(&mut session, statements, 0, false),
+        Flow::Unwind(1)
+    );
+    assert!(parser::check_expansion_stack().is_err());
+    assert!(session.get("value").is_none());
 }
 
 #[cfg(test)]
@@ -256,7 +317,8 @@ fn recursion_guard_uses_the_worker_stack_bounds() {
         .spawn(|| {
             let marker = 0u8;
             let here = std::ptr::from_ref(&marker).addr();
-            let floor = thread_stack_floor();
+            let (low, high) = thread_stack_bounds().unwrap();
+            let floor = guarded_floor(low, high, usize::MAX);
             // An OS can reuse a larger cached thread stack. Test the actual
             // boundary, including both sides, rather than the requested size.
             assert!(floor > 0 && floor < here);
@@ -351,6 +413,9 @@ fn apply_invocation_options(
         session.interactive && !invocation.noediting && invocation.options.vi.unwrap_or(false);
     session.emacs =
         session.interactive && !invocation.noediting && invocation.options.emacs.unwrap_or(true);
+    if session.vi {
+        session.bindings.map = editor::bindings::Keymap::Insert;
+    }
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
     {
@@ -449,7 +514,7 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
         return 1;
     }
     let initial = match startup::initialize(session, &invocation, &env) {
-        Flow::Discard(status) | Flow::Continue(status) => status,
+        Flow::Unwind(status) | Flow::Discard(status) | Flow::Continue(status) => status,
         Flow::Return(status) | Flow::Exit(status) => {
             return traps::finish(session, status);
         }
@@ -506,7 +571,11 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
         Input::Stdin => input::stdin_script(session, invocation.options.check),
     };
     let code = match flow {
-        Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
+        Flow::Unwind(s)
+        | Flow::Discard(s)
+        | Flow::Continue(s)
+        | Flow::Exit(s)
+        | Flow::Return(s) => s,
         Flow::Break(..) | Flow::LoopContinue(_) => 1,
     };
     traps::finish_shell(

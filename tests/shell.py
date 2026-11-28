@@ -48,6 +48,105 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_second_review_stored_subscripts_and_quoting(self):
+        from review_r2_language import verify
+
+        env = dict(self.env, LC_ALL="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8")
+        programs = {"tonari": TONARI}
+        version = subprocess.check_output([BASH, "-c", 'printf "%s.%s.%s" "${BASH_VERSINFO[@]:0:3}"'],
+                                          text=True, env=env)
+        if int(version.split(".")[0]) >= 5:
+            programs["bash"] = BASH
+        verify(programs, env, version)
+
+    def test_second_review_option_and_variable_state(self):
+        cases = [
+            ("a=(one two); more=yes; unset 'a[-5]' more; echo \"$?/${a[*]}/${more-unset}\"",
+             b"1/one two/unset\n"),
+            ("s=ok; unset 's[-1]'; echo \"$?/$s\"; unset 's[0]'; echo \"$?/${s-unset}\"",
+             b"1/ok\n0/unset\n"),
+            ("export -n missing; declare -p missing 2>/dev/null; echo $?; "
+             "export -n PATH; command -v cat >/dev/null; echo \"$?/${PATH+present}\"",
+             b"1\n0/present\n"),
+            ("set -eo pipefail -Z; printf '%s/' \"$?\"; shopt -qo pipefail; echo \"$?\"; "
+             "set -u -o nonoption; echo \"$?/${absent-fallback}\"; shopt -qo nounset; echo $?",
+             b"2/1\n2/fallback\n0\n"),
+        ]
+        for source, expected in cases:
+            for shell in (TONARI, BASH):
+                result = self.command(shell, source)
+                self.assertEqual((result.returncode, result.stdout), (0, expected), result.stderr)
+
+    def test_second_review_integer_whitespace(self):
+        source = r"""set -- word
+for whitespace in $'\v' $'\r' $'\f' $'\n'; do
+  test "${whitespace}7${whitespace}" -eq 7 && test -v "${whitespace}1${whitespace}" || exit 9
+  read -n "2$whitespace" v <<<abcd; printf '<%s>' "$v"
+done
+test '7 ' -eq 7 2>/dev/null; echo "/$?"
+"""
+        shells = (TONARI, BASH) if bash_version() >= (5, 3) else (TONARI,)
+        for shell in shells:
+            result = self.command(shell, source)
+            self.assertEqual((result.returncode, result.stdout), (0, b"<ab>" * 4 + b"/2\n"), result.stderr)
+
+    def test_second_review_redirection_expansion_context(self):
+        script = """x=1; >"out$((x++))"; printf '%s/' "$x"; test -f out1 || exit 1
+>file <"out$((x=1))"; printf '%s/' "$x"
+>file 3<"out$((x=1))"; echo "$x"
+"""
+        for shell in (BASH, TONARI):
+            result = self.command(shell, script)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"2/2/1\n", b""))
+
+    def test_second_review_source_skips_unreadable_path(self):
+        for name in ("first", "second"):
+            (self.cwd / name).mkdir()
+            (self.cwd / name / "library").write_text(f"marker={name}\n")
+        bad = self.cwd / "first" / "library"
+        bad.chmod(0)
+        if os.access(bad, os.R_OK):
+            self.skipTest("current user can read mode 000")
+        for shell in (BASH, TONARI):
+            result = self.command(shell, 'PATH=first:second; . library && echo "$marker"')
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"second\n", b""))
+
+    def test_second_review_case_patterns_and_read_boundaries(self):
+        script = """shopt -s expand_aliases
+alias D=do
+alias B='{ echo function;'
+for n in 1 2; D echo "$n"; done
+for ((n=3; n<4; n++)); D echo "$n"; done
+f() B }; f
+v=$(case x in a|x) printf x;; esac; case y in
+y) printf y;; esac; echo case z in word)
+echo "$v"
+"""
+        for shell in (BASH, TONARI):
+            r = self.command(shell, script)
+            self.assertEqual((r.returncode, r.stdout, r.stderr),
+                             (0, b"1\n2\n3\nfunction\nxycase z in word\n", b""))
+
+    def test_second_review_parameter_pattern_locale(self):
+        self.env["LC_ALL"] = "C"
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        script = r"""LC_ALL="$1"; v=éa; printf '<%s>' "${v#?}" "${v#[[:alpha:]]}" "${v//[[:alpha:]]/X}" "${v^^[[:alpha:]]}"
+LC_ALL=C; printf '<%s>' "${v#[[:alpha:]]}"
+v='xa\'; p='[a]\'; printf '<%s>' "${v/%$p/Z}" "${v//$p/Z}" """
+        for shell in (BASH, TONARI):
+            r = self.command(shell, script, "shell", utf8)
+            self.assertEqual((r.returncode, r.stdout, r.stderr),
+                             (0, "<a><a><XX><ÉA><éa><xZ><xa\\>".encode(), b""))
+
+    def test_second_review_seekable_stdin_last_argument(self):
+        script = self.cwd / "script"
+        script.write_bytes(b"echo old\n:\nprintf '<%s>' \"$_\"\ntrue\nprintf '<%s>' \"$_\"\nx=1\nx=2\nprintf '<%s>' \"$_\"\n")
+        for shell in (BASH, TONARI):
+            with script.open("rb") as fd:
+                result = subprocess.run([shell], cwd=self.cwd, env=self.env, stdin=fd,
+                                        capture_output=True, timeout=5)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"old\n<:><true><>", b""))
+
     def test_scaling_multiline_readers_leave_following_input(self):
         source = ("a=(\n" + "entry\n" * 300 +
                   ")\nx=$(\n:\necho one\n); y=\"first\nsecond\"\n" +
@@ -871,6 +970,77 @@ p='\360\237\230\200'; echo "${p@P}" """
                 return
             time.sleep(0.005)
         self.fail("reader did not consume the queued input")
+
+    def test_function_limit_unwinds_nested_inputs(self):
+        (self.cwd / "included").write_text("leaf; echo source-tail\necho another-line\n")
+        for shell in self.shells_for(5):
+            for nested in ("eval leaf", "source ./included", "mapfile -tc1 -C leaf a <<<'item'",
+                           "trap 'leaf; echo trap-tail' USR1; kill -USR1 $$"):
+                script = ("FUNCNEST=1; leaf(){ :; }; parent(){ " + nested +
+                          "; echo inner-tail; }; parent; echo outer-tail\necho next:$?\n")
+                for mode in ("-c", "file", "stdin"):
+                    with self.subTest(shell=shell, command=nested, mode=mode):
+                        path = self.cwd / "main"
+                        path.write_text(script)
+                        args = ["-c", script] if mode == "-c" else [path] if mode == "file" else []
+                        result = subprocess.run([shell, *args], cwd=self.cwd, env=self.env,
+                                                input=script.encode() if mode == "stdin" else b"",
+                                                capture_output=True, timeout=3)
+                        expected = (1, b"") if mode == "-c" else (0, b"next:1\n")
+                        self.assertEqual((result.returncode, result.stdout), expected)
+                        self.assertEqual(result.stderr.count(b"nesting"), 1)
+
+    def test_terminal_interrupt_unwinds_loops_and_foreground_jobs(self):
+        child = """/bin/sh -c 'echo run""READY; exec sleep 2'"""
+        # Emit READY from inside the finite loop or the foreground child.
+        cases = (
+            ("for ((i=0;i<20000;i++)); do ((i)) || echo run''READY; :; done", False),
+            (child, False),
+            ("for i in one; do " + child + "; echo loop''TAIL; done", False),
+            ("trap 'echo caught' INT; " + child, True),
+        )
+        for shell in self.shells_for(5):
+            for command, continues in cases:
+                with self.subTest(shell=shell, command=command):
+                    fd = self.terminal_session(shell=shell)
+                    os.write(fd, (command + "; echo line''TAIL\n").encode())
+                    self.read_until(fd, b"runREADY\r\n")
+                    os.write(fd, b"\x03")
+                    reply = self.read_until(fd, PROMPT)
+                    self.assertEqual(b"lineTAIL" in reply, continues)
+                    self.assertNotIn(b"loopTAIL", reply)
+                    os.write(fd, b"echo code=$?\n")
+                    self.assertIn(b"code=" + (b"0" if continues else b"130") + b"\r\n",
+                                  self.read_until(fd, PROMPT))
+                    os.write(fd, b"/bin/sh -c 'exit 130'; echo normal=$?\n")
+                    self.assertIn(b"normal=130\r\n", self.read_until(fd, PROMPT))
+
+    def test_foreground_restop_keeps_job_order_and_listing_format(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell)
+                os.write(fd, b"""/bin/sh -c 'kill -STOP $$; kill -STOP $$; exit 0' & p=$!; wait %1
+""")
+                self.read_until(fd, PROMPT)
+                os.write(fd, b"sleep .8 & q=$!; fg %1; jobs > job-list\n")
+                reply = self.read_until(fd, PROMPT)
+                rows = (self.cwd / "job-list").read_bytes().splitlines()
+                self.assertEqual([row[:3] for row in rows], [b"[1]", b"[2]"])
+                self.assertIn(rows[0] + b"\r\n", reply)
+                self.assertIn(b"Stopped", rows[0])
+                os.write(fd, b'kill -CONT %1; wait "$p"; wait "$q"\n')
+                self.read_until(fd, PROMPT)
+
+    def test_interactive_wait_interrupt_with_inherited_hangup_ignore(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell, ignored=(signal.SIGHUP,))
+                os.write(fd, b"sleep 1 & p=$!; echo wait''READY; wait; echo wait''TAIL\n")
+                self.read_until(fd, b"waitREADY\r\n")
+                os.write(fd, b"\x03")
+                self.assertNotIn(b"waitTAIL", self.read_until(fd, PROMPT))
+                os.write(fd, b'echo code=$?; wait "$p"\n')
+                self.assertIn(b"code=130\r\n", self.read_until(fd, PROMPT))
 
     def test_terminal_interrupt_discards_input_command_list(self):
         cases = (("read -ru3 a", b"partial", b"old"),
@@ -4711,7 +4881,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                      'history 1 | sed "s/^ *[0-9]* *//"', 0,
                      b"second\n\t echo first\n\t echo second\nchanged\necho changed\n")
 
-    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=(), with_pid=False):
+    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=(), with_pid=False, ignored=()):
         pid, fd = pty.fork()
         if pid == 0:
             try:
@@ -4719,6 +4889,8 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                 # inherit SIG_IGN. Model a terminal emulator starting a new shell.
                 signal.signal(signal.SIGINT, signal.SIG_DFL)
                 signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+                for sig in ignored:
+                    signal.signal(sig, signal.SIG_IGN)
                 if blocked:
                     signal.pthread_sigmask(signal.SIG_BLOCK, blocked)
                 os.chdir(self.cwd)

@@ -89,9 +89,7 @@ impl Environment {
                     b"BASH_COMPAT" => settings.compat = utf8().map(str::to_owned),
                     b"SHELLOPTS" if import => settings.shellopts = utf8().map(str::to_owned),
                     b"BASHOPTS" if import => settings.bashopts = utf8().map(str::to_owned),
-                    _ if key.starts_with(b"BASH_FUNC_") && import => {
-                        session.import_function(bytes)
-                    }
+                    _ if key.starts_with(b"BASH_FUNC_") && import => session.import_function(bytes),
                     _ => {}
                 }
             }
@@ -155,7 +153,7 @@ fn sourced(
     // Guard the interpreter stack if startup files source one another recursively.
     if crate::stack_budget_exceeded() {
         diagnostic!("source nesting limit exceeded");
-        return Flow::Continue(1);
+        return Flow::Unwind(1);
     }
     let old = (!args.is_empty())
         .then(|| std::mem::replace(&mut session.positional, Vec::from(args).into_iter()));
@@ -230,7 +228,13 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
                 Err(e)
                     if matches!(
                         e.raw_os_error(),
-                        Some(libc::ENOENT | libc::ENOTDIR | libc::EISDIR)
+                        Some(
+                            libc::ENOENT
+                                | libc::ENOTDIR
+                                | libc::EISDIR
+                                | libc::EACCES
+                                | libc::ELOOP
+                        )
                     ) => {}
                 Err(e) => {
                     diagnostic!(

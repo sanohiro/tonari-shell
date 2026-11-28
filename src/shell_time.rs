@@ -230,11 +230,7 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
             } else {
                 digits.parse::<i32>().ok()? as usize
             };
-            let pad = if flags.ends_with('0') {
-                '0'
-            } else {
-                ' '
-            };
+            let pad = if flags.ends_with('0') { '0' } else { ' ' };
             let count = size.saturating_sub(value.len());
             fmt.try_reserve(count).ok()?;
             fmt.extend(std::iter::repeat_n(pad, count));

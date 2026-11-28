@@ -121,6 +121,7 @@ pub fn file_script(
             Flow::Continue(0)
         } else {
             match execute_program(session, program, status, false) {
+                Flow::Unwind(code) if session.source_depth == 0 => Flow::Continue(code),
                 Flow::Discard(code) => Flow::Continue(code),
                 flow => flow,
             }
@@ -276,7 +277,19 @@ pub(crate) fn still_open(
         Some(CompoundEnd(close)) => {
             // A complete, independent command with no outer terminator can only
             // extend the pending body. Never defer quotes, here-docs or syntax errors.
-            !text.contains(close)
+            (!text.contains(close)
+                || text
+                    .trim_ascii_start()
+                    .split_ascii_whitespace()
+                    .next()
+                    .is_some_and(|keyword| {
+                        matches!(
+                            (keyword, close),
+                            ("if", "fi")
+                                | ("case", "esac")
+                                | ("while" | "until" | "select" | "for", "done")
+                        )
+                    }))
                 && !text.contains("<<")
                 && (parser::validate_tail(text, session, 1)
                     || close == "esac"
@@ -505,6 +518,12 @@ fn run(
                     && !session.functions.contains_key(command.trim_ascii())
                     && !session.disabled_builtins.contains(command.trim_ascii()))
         {
+            let command_name = command.trim_ascii();
+            session.remember_argument(if matches!(command_name, ":" | "true") {
+                command_name
+            } else {
+                ""
+            });
             session.current_command = Some(parser::Location::label(command.into(), base_line));
             session.pipe_status.single(0);
             session.command_number += usize::from(session.source_depth == 0);
@@ -606,6 +625,7 @@ fn run(
                     return flow;
                 }
                 match flow {
+                    Flow::Unwind(code) if session.source_depth == 0 => state.record(code),
                     Flow::Discard(code) | Flow::Continue(code) => state.record(code),
                     other => return other,
                 }

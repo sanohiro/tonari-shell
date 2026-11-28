@@ -740,7 +740,7 @@ pub fn debug(session: &mut Session, status: u8) -> Option<Flow> {
         Flow::Continue(2) if session.shopt.extdebug && session.function_depth > 0 => {
             Some(Flow::Return(2))
         }
-        Flow::Continue(n) if session.shopt.extdebug && n != 0 => Some(Flow::Continue(n)),
+        Flow::Continue(n) if session.shopt.extdebug && n != 0 => Some(Flow::Continue(0)),
         Flow::Continue(_) => None,
         other => Some(other),
     }

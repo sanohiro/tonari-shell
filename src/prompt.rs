@@ -209,9 +209,7 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
             {
                 let pwd = &output[start..];
                 let prefix = if pwd.starts_with("~/") { "~/" } else { "" };
-                let path = pwd
-                    .strip_prefix("~/")
-                    .unwrap_or(pwd);
+                let path = pwd.strip_prefix("~/").unwrap_or(pwd);
                 if let Some((i, _)) = path.rmatch_indices('/').nth(limit - 1)
                     && i > 3
                 {

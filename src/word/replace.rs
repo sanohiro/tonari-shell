@@ -85,14 +85,20 @@ pub(super) fn substitute(
     expand_amp: bool,
 ) -> String {
     let pattern = compiled.text;
-    if crate::pattern::trailing_escape(pattern) {
-        return text;
-    }
     let fold = compiled.fold;
     let extglob = compiled.extended;
     use ReplaceMode::*;
     let expand_amp = expand_amp && template.contains(['\\', '&']);
     if expand_amp && template == "&" {
+        return text;
+    }
+    if crate::pattern::trailing_escape(pattern) {
+        if mode == Suffix
+            && let Some(cut) = crate::pattern::trim_boundary(&text, compiled, false, true)
+        {
+            let suffix = text.split_off(cut);
+            write_replacement(&mut text, template, &suffix, expand_amp);
+        }
         return text;
     }
     if pattern == "?" {

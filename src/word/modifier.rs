@@ -3,6 +3,7 @@ use crate::expansion::{Error, Expansion};
 
 #[derive(Clone, Debug)]
 pub enum Modification {
+    InvalidTransform(String),
     Replace {
         pattern: Word,
         replacement: Word,
@@ -102,6 +103,16 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
     {
         return Ok(Some(itoa::Buffer::new().format(count).to_owned()));
     }
+    if let Some(operand) = name.strip_prefix('#')
+        && let Some((base, index)) = crate::session::array::subscript(operand)
+        && !matches!(index, "@" | "*")
+    {
+        let value = value(operand, env)?;
+        if value.is_none() && env.session.nounset && !env.session.initialized_array(base) {
+            return Err(env.missing(operand, "unbound variable"));
+        }
+        return Ok(Some(value.map_or(0, |s| character_count(&s)).to_string()));
+    }
     if let Some(text) = env.borrowed_scalar(name) {
         return Ok(Some(text.to_owned()));
     }
@@ -128,22 +139,15 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
                 return Ok(Some(count.to_string()));
             }
         } else if crate::session::array::subscript(&target).is_some() {
-            return Ok(value(&target, env)?.map(|s| s.chars().count().to_string()));
+            return Ok(value(reference, env)?.map(|s| s.chars().count().to_string()));
         }
     }
-    // A name reference to an indexed element must evaluate its subscript in
-    // the live expansion, where arithmetic updates are visible to later words.
-    let resolved;
-    let name = if env.session.is_nameref(name)
+    if env.session.is_nameref(name)
         && !env.shadows(name)
-        && let Ok(std::borrow::Cow::Owned(target)) = env.session.reference_name(name)
-        && crate::session::array::subscript(&target).is_some()
+        && let Some(element) = env.assignment_element(name)?
     {
-        resolved = target;
-        &resolved
-    } else {
-        name
-    };
+        return Ok(element.value(env.session));
+    }
     let expanded;
     let name = if let Some((base, index)) = crate::session::array::subscript(name) {
         if !matches!(index, "@" | "*") && env.session.is_associative(base.trim_start_matches('#')) {
@@ -278,6 +282,21 @@ impl Modification {
     ) -> Result<Part, Error> {
         let scalar = |s| scalar_part(s, quoted);
         match self {
+            Self::InvalidTransform(text) => {
+                if matches!(name, "@" | "*") || array_elements_name(name).is_some() {
+                    if let Values::Elements(values, at) = Values::read(name, env)?
+                        && values.is_empty()
+                    {
+                        return Ok(Part::Elements { values, at, quoted });
+                    }
+                } else if value(name, env)?.is_none() {
+                    if env.session.nounset {
+                        return Err(env.missing(name, "unbound variable"));
+                    }
+                    return Ok(scalar(String::new()));
+                }
+                Err(env.missing(text, "bad substitution"))
+            }
             Self::Replace {
                 pattern,
                 replacement,
@@ -297,6 +316,7 @@ impl Modification {
                 } else {
                     replacement.scalar(&lookup, positional)
                 };
+                let _locale = crate::pattern::parameter_locale(env.session, &pattern);
                 let compiled = crate::pattern::ParameterPattern::new(
                     &pattern,
                     env.session.shopt.glob.extglob,
@@ -346,6 +366,7 @@ impl Modification {
                     Word::Literal(text) if text.is_empty() => text,
                     word => env.pattern(word)?,
                 };
+                let _locale = crate::pattern::parameter_locale(env.session, &pattern);
                 let filter = if pattern.is_empty() || pattern == "?" {
                     None
                 } else {

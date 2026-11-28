@@ -57,7 +57,10 @@ impl Error {
         Self {
             message: "".into(),
             status: match flow {
-                crate::Flow::Discard(n) | crate::Flow::Exit(n) | crate::Flow::Break(_, n) => n,
+                crate::Flow::Unwind(n)
+                | crate::Flow::Discard(n)
+                | crate::Flow::Exit(n)
+                | crate::Flow::Break(_, n) => n,
                 _ => 0,
             },
             recovery: Recovery::Control(flow),
@@ -219,11 +222,21 @@ impl<'a> Expansion<'a> {
         if matches!(expr, "@" | "*") {
             return Ok(None);
         }
+        let stored = name != resolved && !name.contains('[');
         let base = base.to_owned();
         Ok(Some(if self.session.is_associative(&base) {
-            AssignmentElement::Key(base, self.key(expr)?)
+            let key = if stored {
+                arithmetic::data_key(expr, self)?
+            } else {
+                self.key(expr)?
+            };
+            AssignmentElement::Key(base, key)
         } else {
-            let n = self.arithmetic(expr)?;
+            let n = if stored {
+                arithmetic::data_index(expr, self)?
+            } else {
+                self.arithmetic(expr)?
+            };
             let index = self.session.relative_index(&base, n)?;
             AssignmentElement::Index(base, index)
         }))
@@ -389,9 +402,9 @@ impl<'a> Expansion<'a> {
             if let Some(crate::parser::Subscript { index, append }) = index {
                 // Shell expansions in a subscript precede its RHS, but arithmetic
                 // in the resulting text runs when the initialized array is written.
-                let index = if index.contains(['$', '`', '"', '\\']) {
+                let index = if index.contains(['$', '`', '"', '\'', '\\']) {
                     let word = crate::parser::with_subscript_aliases(self.session, &index, || {
-                        crate::parser::arithmetic_word(&index)
+                        crate::parser::initializer_index_word(&index)
                     })
                     .map_err(|e| e.message())?;
                     self.scalar(word)?
@@ -629,8 +642,12 @@ impl Variables for Expansion<'_> {
     fn scalar_text(&self, name: &str) -> Option<&str> {
         self.borrowed_scalar(name)
     }
-    fn get(&self, name: &str) -> Option<String> {
-        self.lookup(name)
+    fn get(&self, name: &str) -> Result<Option<String>, &'static str> {
+        if self.session.is_nameref(name) && !self.shadows(name) {
+            self.session.arithmetic_get(name)
+        } else {
+            Ok(self.lookup(name))
+        }
     }
     fn set(&mut self, name: &str, value: i64) -> Result<(), &'static str> {
         if crate::session::array::subscript(name).is_some() || self.session.is_nameref(name) {
@@ -642,14 +659,8 @@ impl Variables for Expansion<'_> {
         self.assign(name, &value.to_string());
         Ok(())
     }
-    fn associative_key(
-        &mut self,
-        name: &str,
-        source: &str,
-    ) -> Option<Result<String, &'static str>> {
-        self.session
-            .is_associative(name)
-            .then(|| arithmetic::data_key(source, |name| self.lookup(name)))
+    fn is_associative(&self, name: &str) -> bool {
+        self.session.is_associative(name)
     }
     fn nounset(&self) -> bool {
         self.session.nounset

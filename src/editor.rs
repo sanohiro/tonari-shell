@@ -73,7 +73,11 @@ fn matching_opener(text: &str, cursor: usize) -> Option<usize> {
 }
 
 fn previous(s: &str, i: usize) -> usize {
-    if i == 0 || s.as_bytes()[i - 1].is_ascii() && s.as_bytes()[i - 1] != b'\n' {
+    if i == 0
+        || s.as_bytes()[i - 1].is_ascii()
+            && s.as_bytes()[i - 1] != b'\n'
+            && (i == 1 || s.as_bytes()[i - 2].is_ascii())
+    {
         return i.saturating_sub(1);
     }
     s[..i]
@@ -777,34 +781,6 @@ pub fn line(
     if read.is_none() && keys.queued.is_empty() {
         history.prepare_search(session, &|| poll_readable(0, 0));
     }
-    // A signal can interrupt any part of one input operation. Retry that
-    // operation with its consumed bytes intact after running a read handler.
-    macro_rules! read_key {
-        ($operation:expr) => {
-            loop {
-                match $operation {
-                    Ok(value) => break value,
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                        if RESIZED.swap(false, std::sync::atomic::Ordering::Relaxed) {
-                            screen.resize();
-                            screen.draw(prompt, &text, cursor, "")?;
-                        } else if session.traps.read_pending() {
-                            if let Some(outcome) =
-                                read_trap(&mut term, session, status, &mut screen, &mut recall)?
-                            {
-                                session.editor_queue = std::mem::take(&mut keys.queued);
-                                return Ok(outcome);
-                            }
-                        } else {
-                            screen.cancel(prompt, &text)?;
-                            return Ok(Input::Cancel);
-                        }
-                    }
-                    Err(e) => return Err(e),
-                }
-            }
-        };
-    }
     loop {
         if session.traps.read_pending()
             && let Some(outcome) = read_trap(&mut term, session, status, &mut screen, &mut recall)?
@@ -841,6 +817,35 @@ pub fn line(
         } else {
             prompt
         };
+        // A signal can interrupt any part of one input operation. Retry that
+        // operation with its consumed bytes intact after running a read handler.
+        macro_rules! read_key {
+            ($operation:expr) => {
+                loop {
+                    match $operation {
+                        Ok(value) => break value,
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                            if RESIZED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                                screen.resize();
+                                screen.draw(visible_prompt, &text, cursor, "")?;
+                            } else if session.traps.read_pending() {
+                                if let Some(outcome) =
+                                    read_trap(&mut term, session, status, &mut screen, &mut recall)?
+                                {
+                                    session.editor_queue = std::mem::take(&mut keys.queued);
+                                    return Ok(outcome);
+                                }
+                                screen.draw(visible_prompt, &text, cursor, "")?;
+                            } else {
+                                screen.cancel(prompt, &text)?;
+                                return Ok(Input::Cancel);
+                            }
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            };
+        }
         let needs_hint = hint.is_empty();
         edit.render_frame(
             &mut screen,
@@ -934,6 +939,16 @@ pub fn line(
                 continue;
             }
             Binding::Shell(command) => {
+                if let Some(state) = search.take() {
+                    state.accept(
+                        &mut text,
+                        &mut cursor,
+                        &mut edit.undo,
+                        history,
+                        session,
+                        &mut view,
+                    );
+                }
                 drop(term);
                 io::stderr().write_all(b"\r\n")?;
                 let flow = edit.execute_binding(
@@ -1023,29 +1038,15 @@ pub fn line(
                     search = None;
                     continue;
                 }
-                Action::Accept | Action::Forward | Action::Back | Action::Home | Action::End => {
-                    if !state.pending.is_empty()
-                        && let Ok(Some(found)) =
-                            history.find_command(session, &mut view, &state.pending, &|| false)
-                    {
-                        if !state.query.is_empty() {
-                            history.last_search.clone_from(&state.query);
-                        }
-                        text = found;
-                    }
-                    if text != state.original {
-                        edit.undo.record(
-                            &state.original,
-                            0..state.original.len(),
-                            text.len(),
-                            state.original_cursor,
-                            false,
-                        );
-                    }
-                    search = None;
-                    cursor = text.len();
-                }
-                _ => {
+                Action::Search
+                | Action::Rubout
+                | Action::Insert
+                | Action::Paste
+                | Action::Complete
+                | Action::Up
+                | Action::Down
+                | Action::PrefixUp
+                | Action::PrefixDown => {
                     if action == Action::Search
                         && state.query.is_empty()
                         && !history.last_search.is_empty()
@@ -1064,12 +1065,14 @@ pub fn line(
                         |bytes| screen.paste_frame(visible_prompt, "", 0, bytes)
                     ));
                     if state.wants_picker(action) {
+                        let mut selected_row = 0;
                         let selected = read_key!(picker::history(
                             &mut state.query,
                             history,
                             session,
                             &mut keys,
                             &mut screen,
+                            &mut selected_row,
                         ));
                         match selected {
                             Some(command) => {
@@ -1089,6 +1092,16 @@ pub fn line(
                     state.queue(shortest);
                     cursor = text.len();
                     continue;
+                }
+                _ => {
+                    search.take().unwrap().accept(
+                        &mut text,
+                        &mut cursor,
+                        &mut edit.undo,
+                        history,
+                        session,
+                        &mut view,
+                    );
                 }
             }
         }
@@ -1313,11 +1326,15 @@ pub fn line(
                 if let Some(result) = result {
                     if was_tab && result.choices.len() > 1 && action == Action::Complete {
                         last_tab = false;
+                        let mut filter = String::new();
+                        let mut selected_row = 0;
                         let selected = read_key!(picker::choose(
                             &result.choices,
                             &mut keys,
                             &mut screen,
-                            session
+                            session,
+                            &mut filter,
+                            &mut selected_row,
                         ));
                         replaying = false;
                         if let Some(index) = selected {

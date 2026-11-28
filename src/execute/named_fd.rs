@@ -216,7 +216,13 @@ pub(super) fn run(
         session.jobs.forked(false);
         coprocess::after_fork(session);
         let code = match command(cmd, session, status) {
-            Ok(Flow::Continue(s) | Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s)) => s,
+            Ok(
+                Flow::Continue(s)
+                | Flow::Discard(s)
+                | Flow::Unwind(s)
+                | Flow::Exit(s)
+                | Flow::Return(s),
+            ) => s,
             Ok(_) => 1,
             Err(e) => {
                 diagnostic!("{e}");

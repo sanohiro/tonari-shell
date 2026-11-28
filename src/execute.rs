@@ -38,6 +38,8 @@ use crate::session::Session;
 pub enum Flow {
     Continue(u8),
     Discard(u8),
+    // Abort nested shell input through to the outer reader.
+    Unwind(u8),
     Exit(u8),
     Return(u8),
     Break(u32, u8),
@@ -47,9 +49,11 @@ pub enum Flow {
 impl Flow {
     pub(crate) fn child_status(self) -> u8 {
         match self {
-            Self::Continue(code) | Self::Exit(code) | Self::Return(code) | Self::Discard(code) => {
-                code
-            }
+            Self::Continue(code)
+            | Self::Exit(code)
+            | Self::Return(code)
+            | Self::Discard(code)
+            | Self::Unwind(code) => code,
             Self::Break(_, code) => code,
             Self::LoopContinue(_) => 0,
         }
@@ -253,9 +257,11 @@ fn redirection_observable(r: &Redirect<Word>, session: &Session) -> bool {
     }
     stage_expansion(&r.word, session)
         || matches!(r.target, Target::HereDoc { expand: true })
-            && r.word
-                .as_literal()
-                .is_some_and(|text| !plain_here_parts(text, |_, name| name.is_none_or(|name| !stage_parameter(name, session))))
+            && r.word.as_literal().is_some_and(|text| {
+                !plain_here_parts(text, |_, name| {
+                    name.is_none_or(|name| !stage_parameter(name, session))
+                })
+            })
 }
 
 // A parenthesized pipeline stage is already the subshell Bash exposes.
@@ -458,8 +464,8 @@ fn start(
         && r.fd == 0
         && matches!(r.target, Target::HereDoc { .. } | Target::HereString)
         && r.word.len() <= here_input::PIPE_LIMIT
-        && let Ok(reader) =
-            here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT, session).and_then(private_fd)
+        && let Ok(reader) = here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT, session)
+            .and_then(private_fd)
         && let Ok(pid) =
             External::new(cmd, session)?.spawn_redirected(&[], None, Some(&reader), output.as_ref())
     {
@@ -1319,7 +1325,10 @@ pub fn run_pipeline(
                 let flow = lastpipe(raw, reader, last_status, session)?;
                 let code = match flow {
                     Flow::Continue(code) => return Ok(Stage::Status(code)),
-                    Flow::Exit(code) | Flow::Discard(code) | Flow::Return(code) => code,
+                    Flow::Exit(code)
+                    | Flow::Discard(code)
+                    | Flow::Unwind(code)
+                    | Flow::Return(code) => code,
                     Flow::Break(..) | Flow::LoopContinue(_) => 0,
                 };
                 last_flow = Some(flow);

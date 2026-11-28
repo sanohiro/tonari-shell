@@ -116,7 +116,7 @@ fn shell_traps_alone_do_not_install_a_wait_mask() {
 
 impl WaitMask {
     pub fn new(traps: &Traps) -> io::Result<Option<Self>> {
-        if !traps.interactive_hup
+        if !traps.interactive_handlers
             && traps.implicit.is_empty()
             && !traps
                 .entries

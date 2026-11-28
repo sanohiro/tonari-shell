@@ -324,7 +324,7 @@ pub(super) fn run_parsed(
             return crate::traps::dispatch(session, last);
         }
         if watch && crate::interrupted() {
-            return Flow::Discard(crate::traps::signal_status(libc::SIGINT));
+            return Flow::Unwind(crate::traps::signal_status(libc::SIGINT));
         }
         return match result {
             Ok(()) => Flow::Continue(0),

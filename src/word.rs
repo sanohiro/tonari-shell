@@ -26,18 +26,24 @@ fn indirect_target(
     mut target: String,
     env: &mut crate::expansion::Expansion<'_>,
 ) -> Result<String, crate::expansion::Error> {
-    // Resolve a computed numeric index once. Later parameter
-    // operations consume the index without reinterpreting its source.
+    // Indirection supplies a stored subscript. Resolve it once before
+    // evaluating the parameter operation that follows the indirection.
     if let Some((base, expr)) = crate::session::array::subscript(&target)
         && is_identifier(base)
+        && !expr.is_empty()
         && !matches!(expr, "@" | "*")
-        && !env.session.is_associative(base)
-        && !expr.bytes().all(|b| b.is_ascii_digit())
     {
-        let index = env.session.resolve_index(base, expr).map_err(|_| {
-            crate::expansion::Error::discard(format!("{target}: invalid variable name"))
-        })?;
-        target = format!("{base}[{index}]");
+        if env.session.is_associative(base) {
+            // Later modifiers parse source subscripts. Quote the resolved key
+            // so its characters survive that stage literally.
+            let key = crate::arithmetic::data_key(expr, env)?;
+            target = format!("{base}[{}]", quote::single_quote(&key));
+        } else if !expr.bytes().all(|b| b.is_ascii_digit()) {
+            let index = env.session.resolve_index(base, expr).map_err(|_| {
+                crate::expansion::Error::discard(format!("{target}: invalid variable name"))
+            })?;
+            target = format!("{base}[{index}]");
+        }
     } else if !(is_identifier(&target)
         || array_elements_name(&target).is_some()
         || (!target.is_empty() && target.bytes().all(|b| b.is_ascii_digit()))
@@ -316,7 +322,7 @@ impl Word {
             Self::Literal(_) => return Ok(()),
             Self::Expanded(parts) | Self::Declaration(parts) => parts,
         };
-        let _nesting = crate::parser::enter_expansion()
+        crate::parser::check_expansion_stack()
             .map_err(|error| crate::expansion::Error::discard(error.message()))?;
         let literal = modifier::scalar_part;
         let mixed = parts.len() > 1;
@@ -352,12 +358,13 @@ impl Word {
                 && let Some(reference) = name.strip_prefix('!')
                 && env.session.is_nameref(reference)
             {
-                let target = env
-                    .session
-                    .read_reference_name(reference)
-                    .unwrap_or_default()
-                    .into_owned();
-                *part = literal(target, *quoted);
+                let target = env.session.read_reference_name(reference);
+                if matches!(target, Some(std::borrow::Cow::Borrowed(_))) {
+                    return Err(crate::expansion::Error::discard(format!(
+                        "{reference}: invalid indirect expansion"
+                    )));
+                }
+                *part = literal(target.unwrap_or_default().into_owned(), *quoted);
                 continue;
             }
             if let Part::Parameter { name, .. } = part
@@ -451,6 +458,7 @@ impl Word {
                     {
                         let extended = env.session.shopt.glob.extglob;
                         let source = std::mem::take(pattern.as_mut()).fixed_pattern(extended);
+                        let _locale = crate::pattern::parameter_locale(env.session, &source);
                         let compiled =
                             crate::pattern::ParameterPattern::new(&source, extended, None);
                         let cut = crate::pattern::trim_boundary(text, &compiled, *prefix, *longest);
@@ -464,6 +472,7 @@ impl Word {
                     }
                     let values = modifier::Values::read(name, env)?;
                     let pattern = env.pattern(std::mem::take(pattern.as_mut()))?;
+                    let _locale = crate::pattern::parameter_locale(env.session, &pattern);
                     let compiled = crate::pattern::ParameterPattern::new(
                         &pattern,
                         env.session.shopt.glob.extglob,
@@ -636,7 +645,9 @@ impl Word {
                 {
                     let value = modifier::value(name, env)?;
                     if env.session.nounset && value.is_none() {
-                        return Err(env.missing(name, "unbound variable"));
+                        return Err(
+                            env.missing(name.strip_prefix('#').unwrap_or(name), "unbound variable")
+                        );
                     }
                     *part = literal(
                         value.unwrap_or_else(|| {

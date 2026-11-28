@@ -683,6 +683,26 @@ impl Session {
             return out.flush().map_or(1, |()| 0);
         }
         let mut i = 0;
+        // GNU set validates short flags before applying any. A bad name after
+        // -o is diagnosed during application and preserves preceding changes.
+        let has_option_name = |name: &String| !name.is_empty() && !name.starts_with(['-', '+']);
+        let mut flags = args.iter().peekable();
+        while let Some(opt) = flags.next() {
+            let Some((prefix @ ("-" | "+"), rest)) = opt.split_at_checked(1) else {
+                break;
+            };
+            if matches!(opt.as_str(), "--" | "-") {
+                break;
+            }
+            for flag in rest.chars() {
+                if flag == 'o' {
+                    flags.next_if(|name| has_option_name(name));
+                } else if Self::short_option_name(flag).is_none() {
+                    diagnostic!("set: {prefix}{flag}: invalid option");
+                    return 2;
+                }
+            }
+        }
         let mut replace_positionals = false;
         while let Some(opt) = args.get(i) {
             if opt == "--" {
@@ -716,7 +736,7 @@ impl Session {
                         self.command_history_expansion = enable;
                     }
                     'o' => {
-                        let Some(name) = args.get(i) else {
+                        let Some(name) = args.get(i).filter(|name| has_option_name(name)) else {
                             let mut out = io::BufWriter::with_capacity(
                                 512,
                                 crate::builtins::StdoutFd(Some("set")),
@@ -727,7 +747,10 @@ impl Session {
                                     return 1;
                                 }
                             }
-                            return out.flush().map_or(1, |()| 0);
+                            if out.flush().is_err() {
+                                return 1;
+                            }
+                            continue;
                         };
                         i += 1;
                         if let Some(value) = self.option_value(name, true) {

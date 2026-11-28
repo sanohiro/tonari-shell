@@ -595,9 +595,9 @@ A repeated `shift` used to move every remaining positional argument. The session
 
 `shift` は残りの引数を移動せず、先頭を一つ進めます。配列の末尾追加も全要素をコピーせず、連続した添字の配列をそのまま伸ばします。単独の `"${a[@]}"` は、空文字・空白・ワイルドカードを含む各要素を一つの引数として渡せます。ソート・素数のふるい・キューをまとめて使うスクリプトでも出力を照合しました。[実測](benchmarks.md#external-suites)
 
-When every PATH candidate is missing, an ordinary foreground command can return the lookup result immediately. The next invocation searches PATH again. Permission errors, redirections and active traps retain the execution path needed for their effects. Past 128 nested function calls the evaluator also checks stack usage against its soft limit before admitting deeper calls, up to 256. This lets the Ackermann workload finish with the expected value. [Regression tests](../tests/shell.py)
+When every PATH candidate is missing, an ordinary foreground command can return the lookup result immediately. The next invocation searches PATH again. Permission errors, redirections and active traps retain the execution path needed for their effects. The implementation measured here checked stack usage after 128 levels and capped functions at 256. The November 28 evaluation-stack update below supersedes those limits. This lets the Ackermann workload finish with the expected value. [Regression tests](../tests/shell.py)
 
-コマンド検索では、PATH の全候補が存在しないと確認できた場合、その一回の結果を引き継ぎます。次の実行では再検索するので、直前に作られた実行ファイルを発見できます。権限エラー、リダイレクト、シグナルのトラップなどは従来の実行経路で処理します。再帰関数は通常の呼び出しのコストを保ちつつ、128 段を越えた時点でスタックの使用量とソフト上限を確認し、最大 256 段まで進めます。これで外部ベンチの Ackermann 関数も Bash と同じ結果を返しました。[回帰テスト](../tests/shell.py)
+コマンド検索では、PATH の全候補が存在しないと確認できた場合、その一回の結果を引き継ぎます。次の実行では再検索するので、直前に作られた実行ファイルを発見できます。権限エラー、リダイレクト、シグナルのトラップなどは従来の実行経路で処理します。当時は再帰関数が 128 段を越えるとスタックを確認し、上限を 256 段としていました。11 月 28 日の評価スタック更新でこの制限を変更しました。これで外部ベンチの Ackermann 関数も Bash と同じ結果を返しました。[回帰テスト](../tests/shell.py)
 
 GNU Hello's generated configure script is 834,518 bytes. Ordinary noninteractive script files can now look ahead for a complete compound command in their input buffer. Execution still advances one parsed command at a time so that an earlier command can affect how the next one parses. Syntax-only mode streams short complete statements. When an incomplete compound grows beyond 2 KiB in a bounded in-memory script, one parse can finish the remaining source. An unsuccessful attempt uses incremental diagnostics. [Configure timings and release checks](benchmarks.md#external-suites)
 
@@ -1294,3 +1294,10 @@ UTF-8 の IFS と C ロケールでの切り出しを検証器に登録しまし
 The Ubuntu `wait -n` probe waits for a child running `sleep .02`. Its whole-run median is 25.80 ms in Tonari and 26.23 ms in Bash. The requested 20 ms sleep alone exceeds two-thirds of the Bash median, so parity is acceptable for this workload. Startup, interactive response and repeated shell work still have their own measurements. [Ubuntu timings and witnesses](compatibility-2026-11-23/Ubuntu.tsv) · [Performance target](benchmarks.md#performance-target)
 
 Ubuntu の `wait -n` の検証は、子で `sleep .02` を実行します。起動込みの中央値は Tonari が25.80 ms、Bash が26.23 ms で、指定した20 ms の待機だけで Bash の所要時間の 2/3 を超えます。このケースは同等の速さとして許容します。ごく短い単発処理も同じ考え方です。起動や入力応答、反復で積み上がるコストはそれぞれ測定します。[Ubuntu の実測値とスクリプト](compatibility-2026-11-23/Ubuntu.tsv)
+
+
+## November 28 · Evaluation stack and input boundaries / 評価スタックと入力境界
+
+On macOS arm64 the pthread API reported 1 MiB of allocated main stack both before and after raising the soft limit to 8 MiB. Tonari intersects the soft limit with the thread's actual allocation. On Linux musl the main stack can grow. The runtime reads its mapping and the preceding mapping, and uses pthread bounds for worker threads. The parser and evaluator share the cached guard address. A compound command parsed at the prompt checks space again when a function later executes it. Inputs limited by `FUNCNEST=1` exercise the unwind across eval, source, traps and mapfile without exhausting any stack. The outer script reader can proceed to the next complete command, and `-c` ends its argument. [Stack measurements](benchmarks.md#evaluation-stack-interrupt) · [Regression tests](../tests/shell.py)
+
+macOS arm64 では、開始時に 1 MiB だったスタックのソフト上限を 8 MiB に上げても、pthread が返す確保量は 1 MiB のままだった。Tonari は現在の上限と領域の両方に収まる位置で確認する。Linux の musl ビルドでは伸長可能なメインスタックと直前のマッピングを読み、ワーカースレッドでは pthread の境界を使う。プロンプトで解析した複合コマンドも、関数内で実行するときに残量を確認する。`FUNCNEST=1` で別の関数を呼ぶ試験により、eval、source、trap、mapfile をまたいで外側の入力単位に戻ることを確認した。スクリプトは次の完全なコマンドを読み、`-c` はそこで終了する。

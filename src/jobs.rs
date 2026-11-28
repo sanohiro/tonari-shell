@@ -434,6 +434,7 @@ pub struct Jobs {
     pub monitor: bool,
     exit_warning: Option<usize>,
     foreground_notices: Vec<(i32, String)>,
+    pub(crate) foreground_interrupted: bool,
     pub(crate) quiet: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
@@ -557,6 +558,7 @@ impl Jobs {
         }
         self.tty = None;
         self.foreground_notices.clear();
+        self.foreground_interrupted = false;
         self.monitor = false;
         self.table.clear();
         self.detached.clear();
@@ -667,24 +669,34 @@ impl Jobs {
             self.note_foreground_signal(&mut job);
             if job.stopped() {
                 self.store(job);
-                self.report_stopped();
+                self.report_stopped(self.table.len() - 1);
             }
             Ok((code, None))
         }
     }
-    fn report_stopped(&mut self) {
-        if !self.quiet
-            && let Some(job) = self.table.last_mut()
-        {
-            stderr_line!("[{}]+ Stopped  {}", job.id, job.name);
+    fn report_stopped(&mut self, index: usize) {
+        if !self.quiet {
+            let markers = marked_jobs(self.table.iter());
+            let job = &mut self.table[index];
+            let mut out = io::stderr().lock();
+            if self.tty.is_some() {
+                let _ = writeln!(out);
+            }
+            let _ = job_line(&mut out, job, job_marker(job.id, markers), "Stopped");
             job.listed = true;
         }
     }
     fn note_foreground_signal(&mut self, job: &mut Job) {
-        if job.signaled
-            && self.tty.is_some()
-            && !self.quiet
-            && !job.stopped()
+        if !job.signaled || self.tty.is_none() || job.stopped() {
+            return;
+        }
+        // A foreground process group owns the terminal during the wait. The
+        // shell does not receive the keystroke itself. Use waitpid's signal
+        // information so an explicit exit status of 130 remains an ordinary exit.
+        if job.children.iter().find_map(|child| child.signal) == Some(libc::SIGINT) {
+            self.foreground_interrupted = true;
+        }
+        if !self.quiet
             && let Some(sig) = job.children.last().and_then(|c| c.signal)
             && !matches!(sig, libc::SIGINT | libc::SIGPIPE)
         {
@@ -871,9 +883,10 @@ impl Jobs {
     }
 
     pub(crate) fn report_changes(&mut self, posix: bool) {
+        let markers = marked_jobs(self.table.iter());
         for job in &mut self.table {
             if !job.active() && !job.listed {
-                stderr_line!("[{}] {}  {}", job.id, job.display_state(posix), job.name);
+                let _ = job_line(&mut io::stderr().lock(), job, job_marker(job.id, markers), &job.display_state(posix));
                 job.listed = true;
             }
         }
@@ -917,7 +930,7 @@ impl Jobs {
     }
     fn select(&self, spec: &str) -> Option<usize> {
         match spec {
-            "" | "%" | "%+" | "%%" | "%-" => {
+            "%" | "%+" | "%%" | "%-" => {
                 let (current, previous) = marked_jobs(self.table.iter());
                 let id = if spec == "%-" { previous } else { current }?;
                 self.table.iter().position(|job| job.id == id)

@@ -170,10 +170,14 @@ fn may_read_nested_command(value: &str) -> bool {
 }
 
 impl Reader {
-    pub(super) fn alias_newlines(&mut self, protected: &[&str]) -> Result<(), Error> {
+    pub(super) fn alias_newlines(
+        &mut self,
+        command_word: bool,
+        protected: &[&str],
+    ) -> Result<(), Error> {
         loop {
             self.newlines();
-            self.alias_at(false, Some(protected))?;
+            self.alias_at(command_word, Some(protected))?;
             if !matches!(self.peek(), Some(Token::Newline)) {
                 return Ok(());
             }

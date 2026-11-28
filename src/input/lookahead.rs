@@ -182,8 +182,10 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
                 let newline =
                     memchr::memchr(b'\n', buffered.get(end..size).ok_or(size)?).ok_or(size)?;
                 let boundary = end + newline + 1;
-                if boundary >= size {
-                    return Err(size);
+                // The other statements were parsed on the same closing line.
+                // The ordinary line reader executes that entire unit together.
+                if boundary == size && end > 0 {
+                    return Ok(Some((program, size, lines)));
                 }
                 let unit = parse(boundary).map_err(|_| size)?;
                 if !matches!(unit.as_ref(), [s] if s.location.end > first.len()) {
