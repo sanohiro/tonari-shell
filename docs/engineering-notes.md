@@ -1,5 +1,21 @@
 # Engineering notes / 開発知見
 
+## Compound array writes, completion and foreground subshells / 配列追記・補完・前景サブシェル
+
+A compound array assignment takes a working copy of the binding. If the binding and that copy are the only owners of the same array, release the binding's reference before updating the working copy. Repeated explicit-subscript appends then keep the existing allocation. Restore the result even when a later item fails. A saved local can own the global binding, and integer attributes can evaluate expressions that read the array during assignment. The same ownership check applies to `declare -a` and `declare -A`. Reapplying the existing array type must also avoid triggering copy-on-write.
+
+The distributed bash-completion `_filedir` function passes its `compgen` options in a quoted array. Accepting that argument shape lets interactive completion use the same in-memory capture as a literal command. Compare the actual candidates and exercise both zero matches and commands that call user code. Capture a read-only query only after parsing its options. An expansion inside `-W`, a callback, a destination variable or a shadowing function requires child isolation. For a foreground group, only a small list of literal commands can dispense with the child. Output to a pipe may generate SIGPIPE, and a regular file under a file-size limit may generate SIGXFSZ. Keep those writes in a child. Regression tests close the reader of a pipe and exceed a regular file’s size limit. In both cases the parent survives and observes the child’s signal status. An EXIT trap, a directory change or an observable child status can likewise require the ordinary path.
+
+Eligible standalone `read` and `mapfile` operations consume a here-document directly up to 65,536 bytes, including its final newline. Check descriptor availability first. A callback that reads the same descriptor, an explicit input FD or a larger document uses ordinary redirection. On macOS, both `cd -P` and `pwd -P` can request the kernel's physical path and verify that it still identifies the working directory. An unavailable or oversized result falls back to `getcwd`.
+
+For long stored strings, borrow the subject for a static test or terminating case arm. The original value must survive a dynamic pattern or a subsequent pattern test after `;;&`. Check for embedded NUL after a successful glob match so a prefix mismatch can stop immediately. A dense run of single quotes favored counting expansion bytes and copying sequentially over a separate substring search at every quote. Long UTF-8 case conversions can reuse the locale and a small per-call character mapping cache. Test repeated characters and diverse text as well as Turkish casing and characters whose uppercase spelling has multiple code points. [Measured workloads and retained controls](benchmarks.md#round-eight-array-evaluation)
+
+配列の一括追記では、代入先と作業用コピーだけが同じ配列を持つ場合、更新前に代入先の参照を解放して領域を再利用する。途中で添字エラーが出ても、それまでの書き込みを保存する。ローカル変数に隠れたグローバル配列と、評価中に自身を参照する整数配列も検証した。
+
+bash-completion の `_filedir` が実際に使う、引用されたオプション配列を含む `compgen` を測る。候補を列挙するだけならメモリに受け取り、コールバックや変数更新を伴うときは子プロセスの隔離を保つ。前景サブシェルでも、パイプへの出力や書き込みサイズ制限によるシグナルが親に届くのを防ぐ。ヒアドキュメントの 64 KiB は末尾改行を含む。入力を共有するコールバックや明示的な FD 指定は実ディスクリプタで処理する。
+
+長い文字列の比較は、静的な条件やそこで終わる case 節なら元の値を借用できる。動的なパターンや後続の節に進む場合は、評価開始時の文字列を保持する。引用符の密度や UTF-8 の文字種数で最適な処理が変わるため、同じ文字が繰り返すデータと多種類の文字を含むデータの両方を測った。
+
 ## Command substitution, directory scans and shared file offsets / コマンド置換・ディレクトリ走査・共有FD
 
 A query in command substitution can use the builtin's ordinary output routine with a memory destination. A function override, an observable trap or a change to the parent's logical directory invalidates that shortcut. For a helper that evaluates positional arithmetic, inspect the actual argument too. An argument can itself be an arithmetic expression with a side effect. The differential tests cover a renamed working directory, overridden builtins, an unsuccessful lookup and an argument that modifies a variable in the child. A process substitution must still create a child whose PID and exit status are observable through `$!` and `wait`.

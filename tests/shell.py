@@ -80,6 +80,23 @@ unset -f echo; ( printf '%s\\n' hi ) >file; cat file
 ( printf '%s' "$BASH_SUBSHELL" ); echo
 """, 0, b"17/parent\n1\n[child]\nhi\nparent\n1\n", minimum=5)
 
+    def test_array_evaluation_output_signal_stays_in_child(self):
+        reader, writer = os.pipe()
+        os.close(reader)
+        self.addCleanup(os.close, writer)
+        for shell in (BASH, TONARI):
+            with (self.cwd / "output").open("wb") as file:
+                for fd, setup, payload, sig in (
+                    (writer, "", "hi", signal.SIGPIPE),
+                    (file, "ulimit -f 1; ", "a" * 8192, signal.SIGXFSZ),
+                ):
+                    with self.subTest(shell=shell, signal=sig):
+                        script = setup + f"( echo {payload} ); echo survived_$? >&2"
+                        proc = subprocess.run([shell, "-c", script], stdout=fd, stderr=subprocess.PIPE,
+                                              cwd=self.cwd, env=self.env, timeout=5)
+                        self.assertEqual(proc.returncode, 0)
+                        self.assertEqual(proc.stderr.splitlines()[-1], f"survived_{128 + sig}".encode())
+
     def test_array_evaluation_medium_here_input(self):
         self.compare("""printf -v s '%16384s' ''; s+=end
 cb() { IFS= read -r extra; echo "$1/${#2}/$extra"; }
