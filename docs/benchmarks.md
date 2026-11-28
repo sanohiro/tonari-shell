@@ -4,73 +4,73 @@
 
 ## November 28 · Expansion, function loading and history paging / 展開・関数読み込み・履歴のページ送り
 
-Each cell below shows **previous Tonari / current Tonari / Bash**, in milliseconds. Both native hosts built the release at `068e1f0` and the baseline at `207db28`. The driver ran 15 interleaved trials per workload and checked stdout, stderr and status on every trial. M1 ran macOS 27.2.1 with arm64 GNU Bash 5.3.20. Ubuntu 24.04 x86-64 ran on Intel(R) Xeon(R) 6975P-C with distribution Bash 5.2.21. The two current-shell substitutions used Bash 5.3 on Linux because that syntax was introduced in 5.3. Script timings start in an already-running shell and include exit. The two “through return” rows end when `source` hands control back to its caller. [Native Linux run and timing reports](https://github.com/sanohiro/tonari-shell/actions/runs/46091909996) · [Reproduction driver](../tools/ci/runtime-review.sh)
+Each cell below shows **previous Tonari / current Tonari / Bash**, in milliseconds. Both native hosts built the release at `434a8e6` and the baseline at `207db28`. The driver ran 15 interleaved trials per workload and checked stdout, stderr and status on every trial. M1 ran macOS 27.2.1 with arm64 GNU Bash 5.3.20. Ubuntu 24.04 x86-64 ran on Intel(R) Xeon(R) 6975P-C with distribution Bash 5.2.21. The two current-shell substitutions used Bash 5.3 on Linux because that syntax was introduced in 5.3. Script timings start in an already-running shell and include exit. The two “through return” rows end when `source` hands control back to its caller. [Native Linux run and timing reports](https://github.com/sanohiro/tonari-shell/actions/runs/46092615395) · [Reproduction driver](../tools/ci/runtime-review.sh)
 
 各欄は旧Tonari・今回のTonari・Bashの中央値（ms）。ファイル名展開は毎回実際のディレクトリを読み、関数の読み込みでは呼び出し元に戻るまでとプロセス終了までを別々に計測した。OSと参照Bashが異なるため、比率は各マシン内で比較する。
 
 | Audit | Workload | Apple M1 (ms) | Linux x86-64 (ms) |
 |---|---|---:|---:|
-| R6-1 | Current-shell `echo`, 200 | 27.510 / 0.613 / 30.333 | 2.035 / 0.304 / 2.258 |
-|  | Current-shell `printf`, 128 | 17.698 / 0.539 / 19.950 | 1.308 / 0.217 / 1.552 |
-| R6-2 | Comma product, 100 words | 3.562 / 0.482 / 2.673 | 6.540 / 0.425 / 1.878 |
-|  | Three ranges, 100 words | 3.307 / 0.475 / 2.576 | 5.814 / 0.425 / 1.830 |
-|  | Nested brace alternatives | 1.003 / 0.419 / 1.518 | 0.968 / 0.157 / 0.843 |
-| R6-3 | `GLOBIGNORE`, bracket + star | 2.920 / 2.654 / 335.477 | 1.875 / 1.702 / 2.632 |
-|  | Literal filename prefix | 6.016 / 5.908 / 993.507 | 2.473 / 2.302 / 2.849 |
-|  | Case-insensitive filenames | 6.266 / 6.309 / 995.968 | 2.740 / 2.758 / 3.241 |
-|  | Extended filename pattern | 7.245 / 6.679 / 998.270 | 3.591 / 3.102 / 4.749 |
-| R6-4 | Four regular expressions | 4.826 / 4.912 / 30.252 | 5.176 / 5.126 / 32.715 |
-|  | Five regular expressions | 20.865 / 4.945 / 30.448 | 19.844 / 5.171 / 32.549 |
-|  | Twenty regular expressions | 21.468 / 5.086 / 31.034 | 30.371 / 5.415 / 33.166 |
-| R6-5 | `${s^^[aeiou]}` | 9.500 / 3.745 / 12.545 | 8.363 / 3.554 / 11.527 |
-| R6-6 | Character count, 64 KiB ASCII | 0.694 / 0.457 / 1.307 | 0.494 / 0.207 / 0.632 |
-|  | Character count, 64 KiB + UTF-8 | 0.717 / 0.476 / 11.375 | 0.498 / 0.227 / 11.368 |
-| R6-7 | Source 200 functions, through exit | 0.640 / 0.598 / 0.995 | 0.485 / 0.394 / 0.622 |
-|  | Source 400 functions, through exit | 1.569 / 1.306 / 2.498 | 1.970 / 1.512 / 2.265 |
-| R6-8 | Scalar self-append, 10,000 | 4.077 / 1.456 / 381.711 | 4.318 / 1.700 / 126.166 |
-| R6-8/9 | Arithmetic assignment, 10,000 | 5.289 / 1.578 / 15.779 | 5.521 / 1.721 / 15.033 |
-| R6-9 | Compound arithmetic command | 7.643 / 3.653 / 33.925 | 9.110 / 4.233 / 32.341 |
-| R6-10 | Eight literal loop words | 2.576 / 1.999 / 15.725 | 3.230 / 2.588 / 15.105 |
-| R6-11 | Read scalar through nameref | 6.221 / 1.942 / 12.929 | 6.897 / 2.204 / 12.127 |
-|  | Write scalar through nameref | 4.140 / 1.612 / 11.240 | 4.267 / 2.207 / 10.465 |
-| R6-12 | Unset indexed array element | 3.667 / 3.404 / 11.414 | 4.992 / 4.615 / 9.897 |
-|  | Set and unset associative key | 5.458 / 4.471 / 13.440 | 6.258 / 5.438 / 11.363 |
-| R6-14 | `hash -p` | 7.295 / 7.047 / 10.994 | 1.586 / 1.436 / 4.049 |
-|  | `echo -ne` with two operands | 6.158 / 5.870 / 16.010 | 1.862 / 1.737 / 9.976 |
-|  | Read a small file 500 times | 7.378 / 7.428 / 9.222 | 1.352 / 1.341 / 2.402 |
-|  | Split 32 fields, two IFS characters | 4.057 / 1.989 / 17.556 | 3.522 / 1.853 / 12.571 |
-|  | Split 32 fields, three IFS characters | 5.494 / 1.999 / 17.543 | 3.927 / 1.860 / 12.527 |
-|  | Split 32 fields, five IFS characters | 6.565 / 3.144 / 17.628 | 4.770 / 3.255 / 12.832 |
-|  | Split four short fields | 3.002 / 3.063 / 10.414 | 3.572 / 3.777 / 8.593 |
-|  | Six alternating multi-statement evals | 6.126 / 3.582 / 22.330 | 6.179 / 3.818 / 19.365 |
-| R6-7 | Source 200 functions, through return | 0.286 / 0.286 / 0.527 | 0.380 / 0.350 / 0.528 |
-| R6-7 | Source 400 functions, through return | 1.078 / 0.995 / 2.032 | 1.519 / 1.446 / 2.157 |
+| R6-1 | Current-shell `echo`, 200 | 27.260 / 0.598 / 30.345 | 1.977 / 0.309 / 2.223 |
+|  | Current-shell `printf`, 128 | 17.633 / 0.528 / 19.628 | 1.301 / 0.228 / 1.546 |
+| R6-2 | Comma product, 100 words | 3.478 / 0.469 / 2.672 | 6.475 / 0.423 / 1.866 |
+|  | Three ranges, 100 words | 3.298 / 0.466 / 2.582 | 5.781 / 0.419 / 1.829 |
+|  | Nested brace alternatives | 1.001 / 0.414 / 1.524 | 0.960 / 0.160 / 0.841 |
+| R6-3 | `GLOBIGNORE`, bracket + star | 2.911 / 2.629 / 332.059 | 1.878 / 1.738 / 2.625 |
+|  | Literal filename prefix | 5.993 / 5.940 / 995.531 | 2.467 / 2.334 / 2.829 |
+|  | Case-insensitive filenames | 6.295 / 6.277 / 995.308 | 2.702 / 2.698 / 3.241 |
+|  | Extended filename pattern | 7.233 / 6.528 / 996.844 | 3.555 / 3.143 / 4.703 |
+| R6-4 | Four regular expressions | 4.830 / 4.869 / 30.258 | 5.109 / 5.122 / 32.476 |
+|  | Five regular expressions | 20.728 / 4.868 / 30.223 | 19.698 / 5.172 / 32.333 |
+|  | Twenty regular expressions | 21.347 / 5.015 / 30.973 | 30.256 / 5.476 / 32.961 |
+| R6-5 | `${s^^[aeiou]}` | 9.451 / 3.702 / 12.573 | 8.332 / 3.519 / 11.496 |
+| R6-6 | Character count, 64 KiB ASCII | 0.684 / 0.453 / 1.298 | 0.483 / 0.209 / 0.632 |
+|  | Character count, 64 KiB + UTF-8 | 0.697 / 0.458 / 11.332 | 0.496 / 0.225 / 11.330 |
+| R6-7 | Source 200 functions, through exit | 0.635 / 0.588 / 0.983 | 0.470 / 0.387 / 0.613 |
+|  | Source 400 functions, through exit | 1.555 / 1.294 / 2.499 | 1.944 / 1.491 / 2.243 |
+| R6-8 | Scalar self-append, 10,000 | 4.050 / 1.422 / 381.588 | 4.298 / 1.737 / 125.955 |
+| R6-8/9 | Arithmetic assignment, 10,000 | 5.222 / 1.562 / 15.774 | 5.521 / 1.751 / 14.982 |
+| R6-9 | Compound arithmetic command | 7.610 / 3.624 / 33.877 | 9.089 / 4.312 / 32.201 |
+| R6-10 | Eight literal loop words | 2.578 / 2.012 / 15.747 | 3.210 / 2.586 / 15.046 |
+| R6-11 | Read scalar through nameref | 6.216 / 1.948 / 12.928 | 6.866 / 2.231 / 12.031 |
+|  | Write scalar through nameref | 4.124 / 1.625 / 11.264 | 4.228 / 2.227 / 10.379 |
+| R6-12 | Unset indexed array element | 3.670 / 3.427 / 11.444 | 4.987 / 4.644 / 9.892 |
+|  | Set and unset associative key | 5.407 / 4.506 / 13.406 | 6.271 / 5.473 / 11.327 |
+| R6-14 | `hash -p` | 7.248 / 7.001 / 11.024 | 1.591 / 1.462 / 4.063 |
+|  | `echo -ne` with two operands | 6.239 / 5.923 / 16.087 | 1.835 / 1.741 / 9.962 |
+|  | Read a small file 500 times | 7.342 / 7.322 / 9.057 | 1.344 / 1.338 / 2.375 |
+|  | Split 32 fields, two IFS characters | 4.053 / 2.004 / 17.566 | 3.511 / 1.872 / 12.720 |
+|  | Split 32 fields, three IFS characters | 5.503 / 2.020 / 17.571 | 3.892 / 1.885 / 12.467 |
+|  | Split 32 fields, five IFS characters | 6.548 / 3.152 / 17.639 | 4.753 / 3.304 / 12.664 |
+|  | Split four short fields | 3.022 / 3.060 / 10.407 | 3.565 / 3.781 / 8.568 |
+|  | Six alternating multi-statement evals | 6.132 / 3.581 / 22.332 | 6.177 / 3.803 / 19.331 |
+| R6-7 | Source 200 functions, through return | 0.284 / 0.278 / 0.524 | 0.365 / 0.354 / 0.515 |
+| R6-7 | Source 400 functions, through return | 1.071 / 0.979 / 2.025 | 1.510 / 1.442 / 2.152 |
 
 The system Bash 3.2.57 and the separate Bash 5.3.20 build gave very different times for these APFS directory fixtures. A supplementary 15-run comparison used the system binary. The 5.3 column comes from the main comparison above.
 
 | APFS workload | Tonari (ms) | Apple Bash 3.2 (ms) | GNU Bash 5.3 (ms) |
 |---|---:|---:|---:|
-| glob-ignore-simple-class | 2.762 | 4.380 | 335.477 |
-| runtime-glob-prefix | 6.277 | 6.775 | 993.507 |
-| runtime-glob-nocase | 6.658 | 7.037 | 995.968 |
-| runtime-glob-ext | 7.117 | 10.071 | 998.270 |
+| glob-ignore-simple-class | 2.575 | 4.048 | 332.059 |
+| runtime-glob-prefix | 5.783 | 6.407 | 995.531 |
+| runtime-glob-nocase | 6.140 | 6.526 | 995.308 |
+| runtime-glob-ext | 6.395 | 9.276 | 996.844 |
 
 **Interactive response.** The same PTY operation requests the 129th distinct match after 100,000 duplicates. The mixed fixture alternates the journal version, timestamp, PID, status and directory. Every sample checks the selected command. Each pair gives median/p95 in milliseconds. The arrow goes from the previous release to this release. Bash has no equivalent fragment picker.
 
 | Operation | Apple M1, previous → current | Linux x86-64, previous → current |
 |---|---:|---:|
-| R6-13 · Down past identical records | 11.202/11.702 → 0.602/0.678 | 9.165/9.208 → 0.963/1.263 |
-| R6-13 · Down past matching commands with different metadata | 13.222/13.704 → 5.254/5.473 | 9.638/9.704 → 1.755/1.797 |
-| Echo a query during queued typing | 0.050/0.059 → 0.048/0.060 | 0.073/0.089 → 0.079/0.099 |
-| Show an old Japanese match | 0.466/0.541 → 0.464/0.511 | 0.132/0.163 → 0.135/0.166 |
+| R6-13 · Down past identical records | 11.131/11.542 → 0.618/0.688 | 9.081/9.220 → 0.941/1.148 |
+| R6-13 · Down past matching commands with different metadata | 13.125/13.835 → 5.238/5.548 | 9.585/9.824 → 2.674/2.832 |
+| Echo a query during queued typing | 0.050/0.075 → 0.051/0.060 | 0.068/0.111 → 0.081/0.106 |
+| Show an old Japanese match | 0.477/0.510 → 0.455/0.504 | 0.139/0.180 → 0.141/0.171 |
 
-On M1, a one-character terminal commit took 0.043/0.049 ms (median/p95, Bash 0.054/0.059) and a 16 KiB bracketed paste plus a marker took 2.237/2.259 ms (Bash 16.887/17.079) across 21 sessions. With 61 warm starts, exec to first prompt took 2.717 / 2.621 / 7.324 ms. With real nvm loading an installed Node, first prompt took 166.583/173.755 / 167.609/172.066 / 216.589/226.530 ms across 15 trials. Switching installed Node versions took 105.845/107.487 / 106.406/107.376 / 129.824/138.928 ms. These full hook measurements include external processes.
+On M1, a one-character terminal commit took 0.043/0.059 ms (median/p95, Bash 0.055/0.061) and a 16 KiB bracketed paste plus a marker took 2.345/2.388 ms (Bash 17.080/17.185) across 21 sessions. With 61 warm starts, exec to first prompt took 2.720 / 2.616 / 7.284 ms. With real nvm loading an installed Node, first prompt took 164.926/167.538 / 164.664/166.403 / 214.594/219.050 ms across 15 trials. Switching installed Node versions took 104.657/105.855 / 105.092/106.111 / 128.992/130.840 ms. These full hook measurements include external processes.
 
-**Two-thirds target.** On M1, reading a small file 500 times took 0.805× the Bash time. On Linux, three medians exceeded the target: sourcing 400 functions through exit (0.668×), a literal filename prefix (0.808×), and case-insensitive filename expansion (0.851×). Through source return, the 200/400-function ratios on Linux were 0.663× and 0.670×. The direct C read loop took 6.610 ms on M1 and 0.928 ms on Linux for the same 500 small-file reads, including the final EOF read. Counting matching names directly in C over the same 15 directory passes took 5.738 / 2.148 ms on M1 / Linux for the literal prefix and 5.879 / 2.171 ms for the folded prefix. The shell also materializes and sorts the matching arguments.
+**Two-thirds target.** Reading a small file 500 times took 0.808× Bash on M1. Three filename expansions exceeded the goal on Linux, with ratios of 0.825× for a literal prefix, 0.832× for case-insensitive matching and 0.668× for an extended pattern. Through source return, the 200/400-function ratios on Linux were 0.687× and 0.670×. The direct C read loop took 6.579 ms on M1 and 0.929 ms on Linux for the same 500 small-file reads, including the final EOF read. Counting matching names directly in C over the same 15 directory passes took 5.763 / 2.163 ms on M1 / Linux for the literal prefix and 5.806 / 2.146 ms for the folded prefix. The shell also materializes and sorts the matching arguments.
 
-履歴は同一レコードの連続と、時刻やディレクトリが変わった重複を別々に確認した。測定はキー送信から候補表示まで。小さなファイルの読み込みではCの対照群にも最終のEOF確認を含めた。nvmの値にはNodeなどの外部プロセスの時間も含む。M1でBash比2/3を超えたのは小さなファイル500回の読み込み。Linuxでは400関数の読み込みが呼び出し元に戻るまでで0.670倍、通常のファイル名前方一致と大文字小文字を区別しない展開がそれぞれ0.808倍・0.851倍だった。
+履歴は同一レコードの連続と、時刻やディレクトリが変わった重複を別々に確認した。測定はキー送信から候補表示まで。小さなファイルの読み込みではCの対照群にも最終のEOF確認を含めた。nvmの値にはNodeなどの外部プロセスの時間も含む。M1では小さなファイル500回の読み込みがBash比0.808倍。Linuxでは3種のファイル名展開が0.668〜0.832倍だった。関数定義の読み込みは終了までの測定で2/3を達成したが、呼び出し元に戻るまでで測ると200関数で0.687倍、400関数で0.670倍だった。
 
-The arm64 Mach-O grew from 1,814,752 to 1,847,824 bytes and links to libSystem. The stripped, static x86-64 Linux PIE grew from 2,429,976 to 2,462,776 bytes. [Engineering notes / 開発知見](engineering-notes.md)
+The arm64 Mach-O grew from 1,814,752 to 1,847,824 bytes and links to libSystem. The stripped, static x86-64 Linux PIE grew from 2,429,976 to 2,463,992 bytes. [Engineering notes / 開発知見](engineering-notes.md)
 
 <a id="expansion-command-review"></a>
 
