@@ -17,6 +17,56 @@ fn write_replacement(out: &mut String, template: &str, matched: &str, expand_amp
     }
 }
 
+pub(super) fn literal(
+    text: &str,
+    needle: &str,
+    template: &str,
+    mode: ReplaceMode,
+    amp: bool,
+) -> String {
+    use ReplaceMode::*;
+    let mut rendered = String::new();
+    let replacement = if amp && template.contains(['\\', '&']) {
+        write_replacement(&mut rendered, template, needle, true);
+        &rendered
+    } else {
+        template
+    };
+    if needle == replacement {
+        return text.to_owned();
+    }
+    let finder = memchr::memmem::Finder::new(needle.as_bytes());
+    let first = match mode {
+        Prefix => text.starts_with(needle).then_some(0),
+        Suffix => text.strip_suffix(needle).map(str::len),
+        First | All => finder.find(text.as_bytes()),
+    };
+    let Some(index) = first else {
+        return text.to_owned();
+    };
+    let mut out = String::with_capacity(text.len() - needle.len() + replacement.len());
+    out.push_str(&text[..index]);
+    out.push_str(replacement);
+    let mut end = index + needle.len();
+    if mode == All {
+        while end < text.len() {
+            let rest = &text[end..];
+            let next = if rest.starts_with(needle) {
+                0
+            } else if let Some(i) = finder.find(rest.as_bytes()) {
+                i
+            } else {
+                break;
+            };
+            out.push_str(&rest[..next]);
+            out.push_str(replacement);
+            end += next + needle.len();
+        }
+    }
+    out.push_str(&text[end..]);
+    out
+}
+
 pub(super) fn substitute(
     mut text: String,
     compiled: &crate::pattern::ParameterPattern<'_>,

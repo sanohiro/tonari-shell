@@ -202,9 +202,10 @@ impl<'a> Filter<'a> {
                 // Duplicate commands also occur with different timestamps, PIDs and
                 // directories. Verify the delimiter count so a suffix of a command
                 // containing literal tabs cannot hide a distinct entry.
-                if !recent[0].is_empty()
-                    && let Some(metadata) = rows.strip_suffix(recent[0].as_bytes())
-                    && metadata.last() == Some(&b'\t')
+                if let Some(metadata) = recent
+                    .iter()
+                    .filter(|cmd| !cmd.is_empty())
+                    .find_map(|cmd| rows.strip_suffix(cmd.as_bytes())?.strip_suffix(b"\t"))
                 {
                     let start = memrchr(b'\n', metadata).map_or(0, |i| i + 1);
                     let header = &metadata[start..];
@@ -213,7 +214,7 @@ impl<'a> Filter<'a> {
                         Some(b'2') => 5,
                         _ => 0,
                     };
-                    if header.iter().filter(|&&c| c == b'\t').count() == fields {
+                    if fields != 0 && memchr::memchr_iter(b'\t', header).count() == fields - 1 {
                         rows = &rows[..start.saturating_sub(1)];
                         continue;
                     }

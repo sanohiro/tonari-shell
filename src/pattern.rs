@@ -202,14 +202,20 @@ impl<T: AsRef<str>> Matcher<T> {
         }
     }
 
-    pub(crate) fn insensitive(&self, value: &str, extended: bool, locale: CharacterLocale) -> bool {
+    pub(crate) fn insensitive(
+        &self,
+        value: &str,
+        extended: bool,
+        session: &crate::Session,
+    ) -> bool {
         if matches!(self, Self::Invalid) {
             return false;
         }
         if !extended && let Self::Literal(text) = self {
-            return folded_prefix(value, text.as_ref(), locale) == Some(value.len());
+            return folded_prefix(value, text.as_ref(), session.character_locale())
+                == Some(value.len());
         }
-        extended::insensitive_match(value, self.source(), extended, locale)
+        extended::insensitive_session(value, self.source(), extended, session)
     }
 
     pub(crate) fn matches_session(&self, value: &str, session: &crate::Session) -> bool {
@@ -238,6 +244,23 @@ impl<T: AsRef<str>> Matcher<T> {
             self.accepts(value.as_bytes(), false, None)
         }
     }
+}
+
+// Once a multibyte character is reached the locale-aware matcher decides
+// its width and case mapping (e.g. Kelvin sign and ASCII K).
+fn possible_folded_prefix(name: &[u8], prefix: &[u8]) -> bool {
+    for (i, p) in prefix.iter().enumerate() {
+        let Some(b) = name.get(i) else {
+            return false;
+        };
+        if !b.is_ascii() {
+            return true;
+        }
+        if !p.eq_ignore_ascii_case(b) {
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) fn bracket_end(after_open: &str) -> Option<usize> {
@@ -396,7 +419,7 @@ pub fn trim(
     value
 }
 
-fn trim_boundary(
+pub(crate) fn trim_boundary(
     value: &str,
     compiled: &ParameterPattern<'_>,
     prefix: bool,
@@ -772,13 +795,10 @@ fn paths(
         let extended = (grouped || options.nocaseglob)
             .then(|| extended::Pattern::for_path(part, grouped, options.nocaseglob, locale));
         let matcher = extended.is_none().then(|| Matcher::compile(part, true));
-        let literal_prefix = if options.nocaseglob {
-            ""
-        } else {
-            part.split(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '.' | '-'))
-                .next()
-                .unwrap_or("")
-        };
+        let literal_prefix = part
+            .split(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '.' | '-'))
+            .next()
+            .unwrap_or("");
         // A final dot followed only by ASCII letters or digits is literal,
         // even if earlier characters require fnmatch. Check it once per name.
         let required_extension = if matches!(matcher, Some(Matcher::Native(_))) {
@@ -797,8 +817,17 @@ fn paths(
                 dir,
                 !rest.is_empty(),
                 options.globskipdots || options.ignore.is_some(),
-                literal_prefix.as_bytes(),
+                if options.nocaseglob {
+                    b""
+                } else {
+                    literal_prefix.as_bytes()
+                },
                 |raw, _| {
+                    if options.nocaseglob
+                        && !possible_folded_prefix(raw.to_bytes(), literal_prefix.as_bytes())
+                    {
+                        return;
+                    }
                     if required_extension.is_some_and(|suffix| !raw.to_bytes().ends_with(suffix)) {
                         return;
                     }

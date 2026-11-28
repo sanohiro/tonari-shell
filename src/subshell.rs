@@ -583,6 +583,63 @@ fn safe_capture_word(
     })
 }
 
+fn capture_query(
+    session: &mut Session,
+    cmd: &parser::SimpleCommand<parser::Word>,
+    last: u8,
+) -> Option<Result<(String, u8), &'static str>> {
+    let (name, operands) = cmd.words.split_first()?;
+    let name = name.as_literal()?;
+    if !matches!(name, "pwd" | "type" | "command")
+        || session.functions.contains_key(name)
+        || session.disabled_builtins.contains(name)
+        || session.keyword && !cmd.keyword_args.is_empty()
+        || session.noexec
+        || session.traps.has_explicit_traps()
+        || !can_elide_child(session)
+    {
+        return None;
+    }
+    let mut output = Vec::new();
+    let status = if name == "pwd" {
+        // POSIX logical pwd can repair the shell's directory cache after a rename.
+        if session.posix {
+            return None;
+        }
+        let physical = match operands {
+            [] => session.physical,
+            [opt] => match opt.as_literal()? {
+                "-P" => true,
+                "-L" => false,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        session.write_pwd(physical, &mut output).ok()?;
+        0
+    } else {
+        if name == "command"
+            && !operands.first()?.as_literal().is_some_and(|opt| {
+                opt.strip_prefix('-').is_some_and(|s| {
+                    s.contains(['v', 'V']) && s.bytes().all(|b| matches!(b, b'v' | b'V' | b'p'))
+                })
+            })
+        {
+            return None;
+        }
+        let words = capture_arguments(&cmd.words, session, last)?;
+        crate::execute::describe_words(&words, false, session, |chunk| {
+            if output.is_empty() {
+                std::mem::swap(&mut output, chunk);
+            } else {
+                output.append(chunk);
+            }
+            0
+        })
+    };
+    Some(captured_output(output, status))
+}
+
 fn capture_simple(
     session: &mut Session,
     body: &[parser::Statement],
@@ -619,6 +676,11 @@ fn capture_simple(
             session.posix,
         );
         return Some(captured_output(out, status));
+    }
+    if let Some(cmd) = sole_plain_command(body)
+        && let Some(result) = capture_query(session, cmd, last)
+    {
+        return Some(result);
     }
     let capture_line = std::cell::Cell::new(None);
     let command = |cmd: &parser::SimpleCommand<Word>| {

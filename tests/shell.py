@@ -38,6 +38,46 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_shell_paths_capture_queries(self):
+        self.compare("""mkdir -p real; ln -s real link; cd link
+a=$(pwd); b=$(pwd -P); echo "${a##*/} ${b##*/}"
+x=$(command -v printf); echo "$x $?"
+x=$(type -t no-such-r7-name); echo "<$x> $?"
+f() { :; }; x=$(type -t f); echo "$x"
+type() { echo override; }; x=$(type -t ls); echo "$x"
+command() { echo override2; }; x=$(command -v printf); echo "$x"
+pwd() { echo override3; }; x=$(pwd); echo "$x"
+""", 0, b"link real\nprintf 0\n<> 1\nfunction\noverride\noverride2\noverride3\n")
+
+    def test_shell_paths_helper_isolation(self):
+        self.compare("""set -- outside; a=original; n=100; count=0
+f() { local a=$1; if [ "$a" = "x y" ]; then echo "$a"; else echo no; fi; }
+x=$(f 'x y'); printf '<%s,%s,%s>\\n' "$x" "$a" "$1"
+g() { local n=$(($1 + 1)); echo "$n"; }; x=$(g 12); echo "$x $n"
+x=$(g 'count++'); echo "$x $count"
+h() { if [[ $1 == foo* ]]; then echo yes; else echo no; fi; }
+echo "$(h foobar) $(h no)"
+""", 0, b"<x y,original,outside>\n13 100\n1 0\nyes no\n")
+
+    def test_shell_paths_expansions(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare("""printf -v pad '%1100s' ''; s=雪${pad}🐟${pad}桜
+echo "${s:1101:1} ${s: -1102:1} ${s:1101:-1101}"
+a=(x '' z); IFS=雪; echo "${a[*]}"; unset 'a[1]'; echo "${a[*]}"; printf '%s ' "${!a[@]}"; echo
+s=ababa; echo "${s//ab/\\&} ${s#a*b} ${s%*ba}"
+s=abcd; unset v; echo "${s/${v:=ab}/X} $v"
+shopt -s nocasematch; for v in a7X aX; do case $v in A*[0-9]*x) echo yes;; *) echo no;; esac; done
+v=old; case "$v" in old) v=new; echo 1;;& old) echo 2;; esac
+""", 0, "🐟 🐟 🐟\nx雪雪z\nx雪z\n0 2 \n&&a aba aba\nXcd ab\nyes\nno\n1\n2\n".encode(), minimum=5)
+
+    def test_shell_paths_fields_and_formats(self):
+        self.compare("""printf 'a:b::c:d:e:f:g:h:i:j:\\nsecond\\n' >records
+{ IFS=: read -r a b c d e f g h; read -r next; } <records
+echo "$a|$c|$h|$next"
+printf '<%+08d><%08x><%08X><%08o><%08.3d>\\n' -3 31 31 8 9
+v=x; declare -p v; f() { local v=L; declare -p v; }; f; declare -p v
+""", 0, b"a||g:h:i:j:|second\n<-0000003><0000001f><0000001F><00000010><     009>\ndeclare -- v=\"x\"\ndeclare -- v=\"L\"\ndeclare -- v=\"x\"\n", minimum=5)
+
     def test_runtime_review_cached_lengths_and_references(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         self.compare('''s=abc; out=${#s}; echo "$out"

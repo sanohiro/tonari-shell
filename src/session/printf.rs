@@ -501,6 +501,27 @@ impl Spec {
             .expect("writing to Vec cannot fail");
             return Ok(());
         }
+        if self.width <= 4096
+            && self.precision.is_none()
+            && self.has(b'0')
+            && self.flags & !(flag_bit(b'0') | flag_bit(b'+')) == 0
+            && b"diuxXo".contains(&conversion)
+        {
+            let width = self.width as usize;
+            output
+                .try_reserve(width.max(24))
+                .map_err(|_| "field too large")?;
+            match conversion {
+                b'd' | b'i' if self.has(b'+') => write!(output, "{:+0width$}", args.signed()),
+                b'd' | b'i' => write!(output, "{:0width$}", args.signed()),
+                b'u' => write!(output, "{:0width$}", args.unsigned()),
+                b'x' => write!(output, "{:0width$x}", args.unsigned()),
+                b'X' => write!(output, "{:0width$X}", args.unsigned()),
+                _ => write!(output, "{:0width$o}", args.unsigned()),
+            }
+            .expect("writing to Vec cannot fail");
+            return Ok(());
+        }
         // Only a validated numeric conversion reaches libc. Build its exact
         // argument type explicitly; user-provided C length modifiers are discarded.
         // Six distinct flags and two nonnegative i32 fields fit in 32 bytes,
@@ -722,7 +743,12 @@ fn render(
                     _ => return Err("unsupported conversion"),
                 }
             }
-            _ => out.push(byte),
+            _ => {
+                out.push(byte);
+                let n = memchr::memchr2(b'%', b'\\', input).unwrap_or(input.len());
+                out.extend_from_slice(&input[..n]);
+                input = &input[n..];
+            }
         }
     }
     Ok(true)

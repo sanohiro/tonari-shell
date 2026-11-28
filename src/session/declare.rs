@@ -281,6 +281,28 @@ fn print_variables(
     } else {
         operands
     };
+    if let [name] = operands
+        && name != "-"
+        && local_scope.is_none_or(|s| s.variables.contains_key(name))
+        && !matches!(name.as_str(), "BASHOPTS" | "SHELLOPTS")
+        && let Some(var) = session.scoped_variable(name, flags.global)
+        && var.declared
+        && !var.dynamic
+        && var.elements.is_none()
+    {
+        let mut bytes = Vec::with_capacity(64);
+        let result = print_attribute(
+            &mut bytes,
+            name,
+            var,
+            (attribute && session.posix).then_some(command),
+        );
+        return crate::Flow::Continue(if result.is_err() {
+            1
+        } else {
+            crate::builtins::write_stdout_for(command, &bytes)
+        });
+    }
     let mut out = crate::builtins::listing_stdout(command);
     let mut status = 0;
     if local

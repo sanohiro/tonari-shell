@@ -777,9 +777,13 @@ fn executable(
 ) -> bool {
     entry.is_none_or(|(path, kind)| {
         matches!(kind, libc::DT_REG | libc::DT_LNK | libc::DT_UNKNOWN)
-            && candidate
-                .join(path, name)
-                .is_some_and(|path| crate::execute::check_candidate(path).unwrap_or(false))
+            && candidate.join(path, name).is_some_and(|path| {
+                #[cfg(target_os = "linux")]
+                if kind == libc::DT_REG {
+                    return unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 };
+                }
+                crate::execute::check_candidate(path).unwrap_or(false)
+            })
     })
 }
 

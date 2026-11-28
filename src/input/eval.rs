@@ -110,22 +110,12 @@ pub(super) fn parse(
     if session.reads_aliases() || source.contains('<') {
         return parser::session_source_at(source, eof, session, line).map(Program::Fresh);
     }
-    let extglob = session.shopt.glob.extglob;
-    let comments = session.read_comments();
-    if let Some(entry) = session.eval_cache.parsed.iter().rev().find(|entry| {
-        entry.line == line
-            && entry.eof == eof
-            && entry.extglob == extglob
-            && entry.extquote == session.shopt.extquote
-            && entry.posix == session.posix
-            && entry.legacy_time == (session.posix && session.shopt.compat <= 41)
-            && entry.comments == comments
-            && &*entry.source == source
-    }) {
-        return Ok(Program::Cached(entry.clone()));
+    if let Some(program) = cached(session, source, eof, line) {
+        return Ok(program);
     }
     let program = parser::session_source_at(source, eof, session, line)?;
     if let Some(statement) = program.first() {
+        let comments = session.read_comments();
         let cache = &mut session.eval_cache;
         let text = statement.location.full_source();
         if cache.seen.iter().rev().any(|seen| &**seen == source) {
@@ -134,7 +124,7 @@ pub(super) fn parse(
                 program,
                 line,
                 eof,
-                extglob,
+                extglob: session.shopt.glob.extglob,
                 extquote: session.shopt.extquote,
                 posix: session.posix,
                 legacy_time: session.posix && session.shopt.compat <= 41,
@@ -149,4 +139,42 @@ pub(super) fn parse(
         }
     }
     Ok(Program::Fresh(program))
+}
+
+fn cached(session: &Session, source: &str, eof: bool, line: usize) -> Option<Program> {
+    let extglob = session.shopt.glob.extglob;
+    let comments = session.read_comments();
+    session
+        .eval_cache
+        .parsed
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.line == line
+                && entry.eof == eof
+                && entry.extglob == extglob
+                && entry.extquote == session.shopt.extquote
+                && entry.posix == session.posix
+                && entry.legacy_time == (session.posix && session.shopt.compat <= 41)
+                && entry.comments == comments
+                && &*entry.source == source
+        })
+        .cloned()
+        .map(Program::Cached)
+}
+
+// A previously parsed single-line trap can execute its cached program directly.
+// Changes to aliases, parser options or verbose input use the normal reader.
+pub(crate) fn trap_text(session: &mut Session, source: &str, status: u8) -> Flow {
+    if !session.verbose
+        && !source.contains('\n')
+        && !session.reads_aliases()
+        && let Some(program) = cached(session, source, true, 1)
+    {
+        return match program.run(session, status, false) {
+            Flow::Discard(code) => Flow::Continue(code),
+            other => other,
+        };
+    }
+    super::text(session, source, status, false, false, Some(1))
 }

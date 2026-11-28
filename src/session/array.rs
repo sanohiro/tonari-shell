@@ -532,6 +532,18 @@ impl Session {
         }
     }
 
+    pub(crate) fn join_dense_array(&self, name: &str, separator: &str) -> Option<String> {
+        let name = self.reference_name(name).ok()?;
+        if name == "PIPESTATUS" {
+            return None;
+        }
+        match self.variables.get(name.as_ref())?.elements.as_deref()? {
+            Elements::Dense(values) => Some(values.join(separator)),
+            Elements::Records(records) if separator.is_empty() => Some(records.text.clone()),
+            _ => None,
+        }
+    }
+
     pub fn append_array_fields(&self, name: &str, keys: bool, fields: &mut Vec<String>) -> bool {
         let Ok(resolved) = self.reference_name(name) else {
             return false;
@@ -552,6 +564,19 @@ impl Session {
                 return false;
             }
             let mut decimal = itoa::Buffer::new();
+            if name != "PIPESTATUS"
+                && let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref())
+            {
+                let count = match elements {
+                    Elements::Dense(values) => Some(values.len()),
+                    Elements::Records(records) => Some(records.ends.len()),
+                    _ => None,
+                };
+                if let Some(count) = count {
+                    fields.extend((0..count).map(|i| decimal.format(i).to_owned()));
+                    return true;
+                }
+            }
             fields.extend(
                 self.indices(name)
                     .into_iter()

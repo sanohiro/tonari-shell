@@ -18,7 +18,7 @@ pub(crate) mod process_substitution;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
-pub(crate) use lookup::{Candidate, IgnoredExecutables, check_candidate};
+pub(crate) use lookup::{Candidate, IgnoredExecutables, check_candidate, describe_words};
 mod spawn;
 pub(crate) use spawn::inherited_env;
 

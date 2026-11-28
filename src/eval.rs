@@ -505,14 +505,11 @@ fn run_case(
             for pattern in patterns {
                 matched = match pattern {
                     CasePattern::Fixed(matcher) if session.shopt.nocasematch => {
-                        matcher.insensitive(&value, false, session.character_locale())
+                        matcher.insensitive(&value, false, session)
                     }
-                    CasePattern::Extended(_, matcher) if session.shopt.nocasematch => matcher
-                        .insensitive(
-                            &value,
-                            session.shopt.glob.extglob,
-                            session.character_locale(),
-                        ),
+                    CasePattern::Extended(_, matcher) if session.shopt.nocasematch => {
+                        matcher.insensitive(&value, session.shopt.glob.extglob, session)
+                    }
                     CasePattern::Fixed(matcher) => matcher.matches_session(&value, session),
                     CasePattern::Extended(group, basic) => {
                         if session.shopt.glob.extglob {

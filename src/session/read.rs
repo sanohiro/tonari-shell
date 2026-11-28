@@ -395,7 +395,10 @@ pub(super) fn run(
     {
         eprint!("{prompt}");
     }
-    let mut line = Vec::new();
+    // A pending signal may run another read. Take ownership until assignment
+    // completes and only retain buffers suitable for ordinary line input.
+    thread_local! {static LINE: std::cell::Cell<Vec<u8>> = const {std::cell::Cell::new(Vec::new())};}
+    let mut line = LINE.take();
     let mut escaped = Vec::new();
     let mut slash = false;
     let mut chars = 0;
@@ -535,11 +538,17 @@ pub(super) fn run(
         chars += usize::from(b & 0xc0 != 0x80);
         line.push(b);
     };
-    let Ok(line) = String::from_utf8(line) else {
+    drop(input); // Subscript expansion during assignment can read this fd.
+    let Ok(record) = std::str::from_utf8(&line) else {
         diagnostic!("read: expected UTF-8 input");
         return Flow::Continue(1);
     };
-    assign_fields(session, &opts, &line, &escaped, status)
+    let flow = assign_fields(session, &opts, record, &escaped, status);
+    if line.capacity() <= 8192 {
+        line.clear();
+        LINE.set(line);
+    }
+    flow
 }
 
 fn assign_fields(
@@ -560,10 +569,10 @@ fn assign_fields(
         };
     }
     let ifs = if opts.exact {
-        String::new()
+        std::borrow::Cow::Borrowed("")
     } else {
         session
-            .get("IFS")
+            .scalar_setting("IFS")
             .unwrap_or_else(|| crate::word::DEFAULT_IFS.into())
     };
     if opts.array.is_none()
@@ -580,7 +589,20 @@ fn assign_fields(
         }
         return Flow::Continue(status);
     }
-    let (spans, end) = field_ranges(line, escaped, &ifs);
+    let mut small = [(0, 0); 8];
+    let mut large = Vec::new();
+    let mut count = 0;
+    let use_stack = opts.array.is_none() && opts.names.len() <= small.len();
+    let end = scan_fields(line, escaped, &ifs, |range| {
+        if use_stack {
+            if let Some(slot) = small.get_mut(count) {
+                *slot = range;
+            }
+        } else {
+            large.push(range);
+        }
+        count += 1;
+    });
     if let Some(target) = opts.array {
         let target = match session.indexed_receiver(target, false) {
             Ok(target) => target,
@@ -591,7 +613,7 @@ fn assign_fields(
         };
         if session.integer(&target) {
             session.replace_array(&target, Vec::new());
-            for (index, (s, e)) in spans.into_iter().enumerate() {
+            for (index, (s, e)) in large.into_iter().enumerate() {
                 if let Err(error) = session.assign_input_element(&target, index as i64, &line[s..e])
                 {
                     diagnostic!("read: {error}");
@@ -601,15 +623,21 @@ fn assign_fields(
         } else {
             session.replace_array(
                 &target,
-                spans.into_iter().map(|(s, e)| line[s..e].into()).collect(),
+                large.into_iter().map(|(s, e)| line[s..e].into()).collect(),
             );
         }
         return Flow::Continue(status);
     }
+    let spans = if use_stack {
+        &small[..count.min(small.len())]
+    } else {
+        &large[..]
+    };
+    let fields = count;
     let count = opts.names.len();
     for (i, name) in opts.names.iter().enumerate() {
         let value = spans.get(i).map_or("", |&(start, finish)| {
-            let finish = if i + 1 == count && spans.len() > count {
+            let finish = if i + 1 == count && fields > count {
                 end
             } else {
                 finish
@@ -645,8 +673,12 @@ fn input_assignment_error(
 
 // Store spans into the original line so the last named variable can retain
 // separators between the remaining fields (e.g. "a  b  c").
-fn field_ranges(line: &str, escaped: &[usize], ifs: &str) -> (Vec<(usize, usize)>, usize) {
-    let mut spans = Vec::new();
+fn scan_fields(
+    line: &str,
+    escaped: &[usize],
+    ifs: &str,
+    mut push: impl FnMut((usize, usize)),
+) -> usize {
     let mut start = 0;
     let mut end = 0;
     let mut after_space = false;
@@ -656,12 +688,12 @@ fn field_ranges(line: &str, escaped: &[usize], ifs: &str) -> (Vec<(usize, usize)
         }
         let space = matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c");
         if start < offset {
-            spans.push((start, offset));
+            push((start, offset));
             end = offset;
             after_space = space;
         } else if !space {
             if !after_space {
-                spans.push((offset, offset));
+                push((offset, offset));
             }
             after_space = false;
         }
@@ -671,15 +703,21 @@ fn field_ranges(line: &str, escaped: &[usize], ifs: &str) -> (Vec<(usize, usize)
         }
     });
     if start < line.len() {
-        spans.push((start, line.len()));
+        push((start, line.len()));
         end = line.len();
     }
-    (spans, end)
+    end
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn field_ranges(line: &str, escaped: &[usize], ifs: &str) -> (Vec<(usize, usize)>, usize) {
+        let mut fields = Vec::new();
+        let end = scan_fields(line, escaped, ifs, |field| fields.push(field));
+        (fields, end)
+    }
 
     #[test]
     fn read_retains_the_last_variables_original_separators() {

@@ -783,7 +783,7 @@ fn action_text(session: &mut Session, sig: i32, status: u8) -> Flow {
     let command = session.traps.entries[&sig].command.clone();
     let previous = session.pipe_status.clone();
     let flow = with_trapsig(session, sig, status, |session| {
-        crate::input::text(session, &command, status, false, false, Some(1))
+        crate::input::trap_text(session, &command, status)
     });
     session.pipe_status = previous;
     flow

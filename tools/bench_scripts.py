@@ -50,6 +50,36 @@ def listing_loop(command, count):
 
 
 CASES = {
+    **{f"r7-query-{label}": eval_loop(f'x=$({command})', check, expected, count=50)
+       for label, command, check, expected in [
+           ("pwd", "pwd", '[[ $x == "$PWD" ]] && echo yes', "yes"),
+           ("physical", "pwd -P", '[[ -d $x && $x -ef . ]] && echo yes', "yes"),
+           ("command", "command -v printf", 'echo "$x"', "printf"),
+           ("type", "type -t ls", 'echo "$x"', "file")]},
+    **{f"r7-helper-{label}": eval_loop('x=$(f "$i")', 'echo "$x"', expected, f'f() {{ {body}; }}', 50)
+       for label, body, expected in [
+           ("direct", 'local a=$1; echo "$a"', "49"),
+           ("math", 'local n=$(($1 + 1)); echo "$n"', "50"),
+           ("test", 'local a=$1; if [ "$a" = 49 ]; then echo yes; else echo no; fi', "yes"),
+           ("glob", 'if [[ $1 == 4* ]]; then echo yes; else echo no; fi', "yes")]},
+    "r7-source-case": ("".join(f"f{k}() {{\n case $1 in\n a) echo a;;\n b|c) echo bc;;\n esac\n}}\n" for k in range(400)) + "f399 c", "bc"),
+    "r7-trim": eval_loop('x=${s##*tail}', 'echo "$x"', "ok", "printf -v s '%65536s' ''; s+=tailok", 500),
+    "r7-replace": eval_loop('x=${s//0000/1111}', 'echo "${#x} ${x: -4}"', "65536 1111",
+                            "printf -v s '%065536d' 0", 20),
+    "r7-replace-miss": eval_loop('x=${s//ZZZZ/1111}', 'echo "${#x}"', "65536", "printf -v s '%65536s' ''", 500),
+    "r7-slice": eval_loop('x=${s:60000:10}', 'echo "${#x}"', "10", "export LC_ALL=C.UTF-8; printf -v s '%65536s' ''; s=雪$s", 500),
+    "r7-array-join": eval_loop('x="${a[*]}"', 'echo "${#x}"', "1889", "a=({0..499})", 500),
+    "r7-array-keys": eval_loop('set -- "${!a[@]}"', 'echo "$# ${500}"', "500 499", "a=({0..499})", 500),
+    "r7-case-fold": eval_loop('case $s in foo*[0-9]*bar) x=y;; *) exit 1;; esac', 'echo "$x"', "y",
+                              'shopt -s nocasematch; s=Foo_x7x_Bar', 5000),
+    "r7-test-fold": eval_loop('[[ $s == foo*[0-9]*bar ]] || exit 1', 'echo "$i"', "5000",
+                              'shopt -s nocasematch; s=Foo_x7x_Bar', 5000),
+    "r7-declare": ("v=abc; " + listing_loop("declare -p v", 5000)[0], "5000"),
+    "r7-read": ('printf "%s\\n" {1..10000}:x:y:z >records; n=0; while IFS=: read -r a b c; do ((++n)); done <records; echo "$n"', "10000"),
+    "r7-trap": eval_loop('x=$i', 'trap - DEBUG; echo "$x"', "1999", "trap ':' DEBUG", 2000),
+    "r7-prompt": eval_loop('x=${p@P}', '[[ -n $x ]] && echo yes', "yes", r"p='\w\$ '", 5000),
+    **{f"r7-printf-{label}": eval_loop(f'printf -v x "{fmt}" "$i"', 'echo "$x"', expected, count=10000)
+       for label, fmt, expected in [("decimal", "%08d", "00009999"), ("hex", "0x%08x", "0x0000270f")]},
     "runtime-current-echo": eval_loop('x=${ echo "v_$i"; }', 'echo "$x"', "v_199", count=200),
     "runtime-brace-comma": eval_loop('set -- {a,b,c,d,e}_{1,2,3,4,5}_{x,y,z,w}', 'echo "$# ${100}"', "100 e_5_w", count=100),
     "runtime-brace-range": eval_loop('set -- {1..5}_{1..5}_{1..4}', 'echo "$# ${100}"', "100 5_5_4", count=100),

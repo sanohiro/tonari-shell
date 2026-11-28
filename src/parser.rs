@@ -974,7 +974,7 @@ impl Reader {
             if matches!(self.peek(), Some(Token::LeftParen)) {
                 self.tokens.pop_front();
             }
-            let mut patterns = Vec::new();
+            let mut patterns = Vec::with_capacity(1);
             loop {
                 self.alias_at(false, Some(&[]))?;
                 match self.operand() {
