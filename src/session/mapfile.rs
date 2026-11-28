@@ -229,9 +229,12 @@ pub(crate) fn run(
     {
         let signals = watch.then_some(&session.traps);
         let result = if options.origin.is_some() {
-            let mut var = session
-                .declared_variable(options.name, false)
-                .unwrap_or_default();
+            let mut var = if letter_case.is_none() {
+                session.variables.remove(options.name)
+            } else {
+                session.declared_variable(options.name, false)
+            }
+            .unwrap_or_default();
             var.declared = true;
             var.array_assigned = true;
             let elements = var.make_array();
@@ -272,13 +275,12 @@ pub(crate) fn run(
     if options.origin.is_none() {
         session.replace_array(options.name, Vec::new());
     } else {
-        let mut var = session
-            .declared_variable(options.name, false)
-            .unwrap_or_default();
-        var.make_array();
+        let var = session.variables.entry(options.name.into()).or_default();
+        if var.elements.is_none() {
+            var.make_array();
+        }
         var.declared = true;
         var.array_assigned = true;
-        session.variables.insert(options.name.into(), var);
     }
     let mut skip = options.skip;
     let mut count = 0u64;

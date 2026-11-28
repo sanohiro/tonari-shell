@@ -1,5 +1,19 @@
 # Engineering notes / 開発知見
 
+## Scaling of input, shell patterns and mutable state / 入力・パターン・状態更新の計算量
+
+A shell must finish the current parse unit before executing it, but a physical newline need not trigger another parse of everything buffered. Use the incomplete parser result to skip simple lines inside a known open construct. For buffered parenthesized input with inner closing parentheses, probe at geometrically increasing distances and verify the command boundary with the parser. For a streamed subshell, the lexer can identify a complete line of ordinary shell words, including a balanced expansion inside an assignment. Such a line cannot close the enclosing subshell. Keep history expansion, alias expansion, here-documents, syntax errors, EOF and shared stdin observable. A stack of open braces and direct commas identifies the leftmost valid choice even inside an unclosed outer brace.
+
+For long parameter patterns composed of supported literals, character classes, stars and single-character repetitions, compute matching ends backwards. A row stores the best reachable end for each start of the remaining pattern. The same calculation handles greedy substitution, shortest or longest trim, and a match anchored at the end. UTF-8 advances at character boundaries. Case folding may change byte width. A required literal that is absent can reject the entire subject before allocating the row. Invalid escapes, unsupported patterns and short inputs use the ordinary matcher. For general extglobs, share reached boundaries between repeated alternatives. For a negative group, after the first start, only the excluded endpoints can still add matches. Propagate the resulting endpoints through the remaining pattern.
+
+An element declaration can release its table's reference to the array **after** subscript evaluation, integer conversion and fallible attribute checks. At that point a subsequent write can reuse the allocation without hiding the old value during expansion. Limited mapfile reads update the active binding and still run callbacks against the live array. A literal array self-append can borrow the existing element once its subscript and attributes are known to be inert. A dynamic subscript, integer, nameref or trace still uses ordinary assignment.
+
+History deduplication uses a hash count only while `erasedups` is active. A new fingerprint skips the scan. A hit always checks the complete command, so a hash collision cannot remove a different command. Counts track deletion and trimming and are rebuilt after a multiline import edits an existing entry. Removing a duplicate in the middle still moves part of the contiguous window. Measured PTY actions include pressing Enter on a command already in a 10,000-entry history and immediately recalling it with Up. [Native scaling measurements](benchmarks.md#shell-scaling)
+
+複数行入力ではパーサーが返した「何が閉じていないか」を利用し、閉じる可能性のある行まで読み進める。括弧が内側にも現れる場合は、読み取った範囲が倍になる間隔でパーサーに境界を確認させる。パイプからの入力でも、サブシェル内の代入に現れる `$((…))` と外側の `)` を字句解析で識別し、子プロセスが読む標準入力を確保する。ヒアドキュメント、構文エラーの扱いも試験する。
+
+長い文字列の置換・トリムでは、後ろから到達できる終端を求めて各開始位置で共有する。UTF-8 の文字境界と大小文字変換後のバイト幅を区別する。配列宣言では添字や属性の評価が終わってから格納領域を再利用する。履歴はハッシュが一致したときに元の文字列も比較し、削除・切り詰め・複数行の読み込み後も順序を維持する。
+
 ## Compound array writes, completion and foreground subshells / 配列追記・補完・前景サブシェル
 
 A compound array assignment takes a working copy of the binding. If the binding and that copy are the only owners of the same array, release the binding's reference before updating the working copy. Repeated explicit-subscript appends then keep the existing allocation. Restore the result even when a later item fails. A saved local can own the global binding, and integer attributes can evaluate expressions that read the array during assignment. The same ownership check applies to `declare -a` and `declare -A`. Reapplying the existing array type must also avoid triggering copy-on-write.

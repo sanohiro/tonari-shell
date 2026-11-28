@@ -439,6 +439,16 @@ pub(super) fn prepare_expanded(
                 }
             }
             Assignment::Scalar(mut word) => {
+                if direct_assignment && key.ends_with(']') {
+                    let suffix = if append {
+                        word.as_literal()
+                    } else {
+                        word.literal_element_suffix(&key)
+                    };
+                    if suffix.is_some_and(|s| exp.session.append_literal_element(&key, s)) {
+                        continue;
+                    }
+                }
                 let append =
                     append || direct_assignment && word.take_append_suffix(&key, exp.session);
                 let value = exp.scalar(word)?;

@@ -75,6 +75,9 @@ pub(super) fn substitute(
     expand_amp: bool,
 ) -> String {
     let pattern = compiled.text;
+    if crate::pattern::unfinished_star_escape(pattern) {
+        return text;
+    }
     let fold = compiled.fold;
     let extglob = compiled.extended;
     use ReplaceMode::*;
@@ -246,6 +249,41 @@ pub(super) fn substitute(
         }
         out.push_str(&text[copied..]);
         return out;
+    }
+    if let Some(ends) =
+        crate::pattern::extended::spans::match_ends(compiled, &text, mode == Suffix, true)
+    {
+        if ends.is_empty() {
+            return text;
+        }
+        // Offsets inside a multibyte character are marked as misses.
+        while i < text.len() {
+            let end = ends[i];
+            if end != crate::pattern::extended::spans::MISS {
+                out.push_str(&text[copied..i]);
+                write_replacement(&mut out, template, &text[i..end], expand_amp);
+                copied = end;
+                if mode != All {
+                    break;
+                }
+                i = end.max(i + 1);
+            } else {
+                if mode == Prefix {
+                    break;
+                }
+                i += 1;
+            }
+        }
+        if copied == 0 && out.is_empty() {
+            // Nullable tail matches have additional shell-specific rules.
+            if mode != Suffix || ends[text.len()] == crate::pattern::extended::spans::MISS {
+                return text;
+            }
+        } else {
+            out.push_str(&text[copied..]);
+            return out;
+        }
+        i = 0;
     }
     let bounds: Vec<_> = text
         .char_indices()

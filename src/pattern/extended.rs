@@ -3,6 +3,8 @@
 // Evaluate each alternative as a set of reachable character boundaries.
 // Empty alternatives and nested repetition can reach the same boundary more
 // than once. Each repetition visits a reachable boundary only once.
+pub(crate) mod spans;
+
 use super::{Matcher, bracket};
 
 #[derive(Debug)]
@@ -85,6 +87,10 @@ fn sequence<const PATHNAME: bool>(
             b'?' => (Atom::Any, 1),
             b'*' => (Atom::Star, 1),
             b'[' if depth != 0 => return None,
+            // An unfinished escape after a wildcard has no matching alternative.
+            b'\\' if bytes.len() == 1 && matches!(atoms.last(), Some(Atom::Star)) => {
+                (Atom::Choice(Vec::new()), 1)
+            }
             b'\\' if bytes.len() > 1 => {
                 let end = 1 + rest[1..].chars().next()?.len_utf8();
                 (Atom::Text(rest[1..end].into()), end)
@@ -168,6 +174,71 @@ fn one_character<const PATHNAME: bool>(atom: &Atom, value: &str, pos: usize) -> 
     Some(end)
 }
 
+// Repetition from several starting offsets is one reachability problem. A
+// boundary can be both an original start and the result of a nonempty path.
+fn repeat_ends<const PATHNAME: bool>(
+    options: &[Vec<Atom>],
+    value: &str,
+    starts: &[usize],
+    period: bool,
+    empty: bool,
+    out: &mut Vec<usize>,
+) {
+    let mut visited = vec![0u8; value.len() - starts[0] + 1];
+    let mut pending = starts.to_vec();
+    let first = starts[0];
+    for &i in starts {
+        visited[i - first] = if empty { 3 } else { 1 };
+    }
+    while let Some(i) = pending.pop() {
+        let mut reach = |end: usize| {
+            let entry = &mut visited[end - first];
+            if *entry == 0 {
+                pending.push(end);
+            }
+            *entry = 3;
+        };
+        for branch in options {
+            match branch.as_slice() {
+                [] => reach(i),
+                [Atom::Text(text)] => {
+                    if value[i..].starts_with(&**text) {
+                        reach(i + text.len());
+                    }
+                }
+                [Atom::FoldedText(text, locale)] => {
+                    if let Some(n) = super::folded_prefix(&value[i..], text, *locale) {
+                        reach(i + n);
+                    }
+                }
+                [Atom::Choice(words)] => {
+                    for text in words {
+                        if value[i..].starts_with(&**text) {
+                            reach(i + text.len());
+                        }
+                    }
+                }
+                [a @ (Atom::Any | Atom::Class(..) | Atom::CharacterClass(_))] => {
+                    if (!period || i != 0)
+                        && let Some(end) = one_character::<PATHNAME>(a, value, i)
+                    {
+                        reach(end);
+                    }
+                }
+                _ => endings::<PATHNAME>(branch, value, i, period)
+                    .into_iter()
+                    .for_each(&mut reach),
+            }
+        }
+    }
+    out.extend(
+        visited
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, state)| (state == 3).then_some(first + i)),
+    );
+}
+
 fn endings<const PATHNAME: bool>(
     atoms: &[Atom],
     value: &str,
@@ -175,10 +246,10 @@ fn endings<const PATHNAME: bool>(
     period: bool,
 ) -> Vec<usize> {
     let mut points = vec![start];
-    let mut matched_end = false;
     let mut next = Vec::new();
     for (i, atom) in atoms.iter().enumerate() {
         next.clear();
+        let mut holes: Option<Vec<usize>> = None;
         for &pos in &points {
             if period
                 && pos == 0
@@ -230,8 +301,11 @@ fn endings<const PATHNAME: bool>(
                     // empty input its own result for a following negation.
                     match atoms.get(i + 1) {
                         Some(Atom::Group(b'!' | b'+' | b'@', _) | Atom::Choice(_)) => {
-                            matched_end |= matches!(atoms.get(i + 1), Some(Atom::Group(b'!', _)))
-                                && points.last() == Some(&value.len());
+                            if matches!(atoms.get(i + 1), Some(Atom::Group(b'!', _)))
+                                && points.last() == Some(&value.len())
+                            {
+                                next.push(value.len());
+                            }
                         }
                         _ => next.push(value.len()),
                     }
@@ -240,7 +314,9 @@ fn endings<const PATHNAME: bool>(
                 }
                 Atom::Group(op, alternatives) => {
                     if let [sequence] = alternatives.as_slice()
-                        && let [unit @ (Atom::Any | Atom::Class(..))] = sequence.as_slice()
+                        && let [unit @ (Atom::Any | Atom::Class(..) | Atom::CharacterClass(_))] =
+                            sequence.as_slice()
+                        && points.len() == 1
                         && matches!(op, b'+' | b'*')
                     {
                         if *op == b'*' {
@@ -261,48 +337,63 @@ fn endings<const PATHNAME: bool>(
                             .flat_map(move |seq| endings::<PATHNAME>(seq, value, from, period))
                     };
                     if *op == b'!' {
+                        // The first start reaches every boundary except its
+                        // excluded ends. Later starts need only fill those holes.
+                        if holes
+                            .as_ref()
+                            .is_some_and(|v| v.last().is_none_or(|&end| end < pos))
+                        {
+                            break;
+                        }
                         let mut excluded = options(pos).collect::<Vec<_>>();
                         excluded.sort_unstable();
-                        next.extend(
-                            value[pos..]
-                                .char_indices()
-                                .map(|(i, _)| pos + i)
-                                .chain(std::iter::once(value.len()))
-                                .filter(|i| excluded.binary_search(i).is_err()),
-                        );
+                        if let Some(missing) = &mut holes {
+                            missing.retain(|&end| {
+                                let keep = end < pos || excluded.binary_search(&end).is_ok();
+                                if !keep {
+                                    next.push(end);
+                                }
+                                keep
+                            });
+                        } else {
+                            next.extend(
+                                value[pos..]
+                                    .char_indices()
+                                    .map(|(i, _)| pos + i)
+                                    .chain(std::iter::once(value.len()))
+                                    .filter(|i| excluded.binary_search(i).is_err()),
+                            );
+                            excluded.dedup();
+                            holes = Some(excluded);
+                        }
                     } else {
-                        if matches!(op, b'?' | b'*') {
+                        if matches!(op, b'+' | b'*') {
+                            repeat_ends::<PATHNAME>(
+                                alternatives,
+                                value,
+                                &points,
+                                period,
+                                *op == b'*',
+                                &mut next,
+                            );
+                            break;
+                        }
+                        if *op == b'?' {
                             next.push(pos);
                         }
-                        if matches!(op, b'+' | b'*') {
-                            let mut seen = std::collections::BTreeSet::new();
-                            let mut pending = vec![pos];
-                            while let Some(p) = pending.pop() {
-                                for end in options(p) {
-                                    if seen.insert(end) && end != p {
-                                        pending.push(end);
-                                    }
-                                }
-                            }
-                            next.extend(seen);
-                        } else {
-                            next.extend(options(pos));
-                        }
+                        next.extend(options(pos));
                     }
                 }
             }
         }
         if next.is_empty() {
-            return if matched_end { vec![value.len()] } else { next };
+            return next;
         }
         if next.len() > 1 {
             next.sort_unstable();
             next.dedup();
         }
         std::mem::swap(&mut points, &mut next);
-    }
-    if matched_end && points.last() != Some(&value.len()) {
-        points.push(value.len());
     }
     points
 }
@@ -596,6 +687,12 @@ impl Pattern {
         let units = pathname_units(value, self.bytewise_path);
         let value = units.as_ref();
         let period = period && value.starts_with('.');
+        // A nullable group cannot consume the literal required after it.
+        if let Some(tail @ (Atom::Text(_) | Atom::FoldedText(..))) = self.atoms.last()
+            && matches!(literal_edge(tail, value, false), Ok(None))
+        {
+            return false;
+        }
         if let Some(result) = self.match_star::<PATHNAME>(value, period) {
             return result;
         }

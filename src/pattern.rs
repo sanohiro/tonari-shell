@@ -91,6 +91,13 @@ pub(crate) enum Matcher<T> {
     Invalid,
 }
 
+// A wildcard followed by an unfinished escape cannot match. Native fnmatch
+// implementations disagree when the subject itself ends in a backslash.
+pub(crate) fn unfinished_star_escape(text: &str) -> bool {
+    text.strip_suffix("*\\")
+        .is_some_and(|prefix| prefix.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0)
+}
+
 impl<T: AsRef<str>> Matcher<T> {
     pub(crate) fn new(pattern: T) -> Self {
         Self::compile(pattern, false)
@@ -109,6 +116,9 @@ impl<T: AsRef<str>> Matcher<T> {
                     return Self::Star(pattern, star);
                 }
             }
+        }
+        if unfinished_star_escape(text) {
+            return Self::Invalid;
         }
         if let Some(list) = text.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
             && !list.is_empty()
@@ -425,6 +435,9 @@ pub(crate) fn trim_boundary(
     longest: bool,
 ) -> Option<usize> {
     let pattern = compiled.text;
+    if unfinished_star_escape(pattern) {
+        return None;
+    }
     let group = compiled.group.as_ref();
     // A question mark consumes one character. An ASCII boundary has the
     // same width in every supported locale.
@@ -446,9 +459,6 @@ pub(crate) fn trim_boundary(
         pattern.strip_suffix('*')
     };
     let literal = star.unwrap_or(pattern);
-    if prefix && let Some(end) = group.and_then(|g| g.run_prefix(value, longest)) {
-        return end;
-    }
     let plain = group.is_none()
         && !literal
             .bytes()
@@ -502,6 +512,22 @@ pub(crate) fn trim_boundary(
         .char_indices()
         .map(|(i, _)| i)
         .chain(std::iter::once(value.len()));
+    if let Some(ends) = extended::spans::match_ends(compiled, value, !prefix, longest) {
+        if ends.is_empty() {
+            return None;
+        }
+        let miss = extended::spans::MISS;
+        return if prefix {
+            (ends[0] != miss).then_some(ends[0])
+        } else if longest {
+            ends.iter().position(|&end| end != miss)
+        } else {
+            ends.iter().rposition(|&end| end != miss)
+        };
+    }
+    if prefix && let Some(end) = group.and_then(|g| g.run_prefix(value, longest)) {
+        return end;
+    }
     let basic = group.is_none().then(|| compiled.basic());
     if let Some(matcher) = &basic
         && let Some(fixed) = compiled.width()

@@ -244,6 +244,23 @@ impl Word {
         text.drain(..length);
     }
 
+    pub(crate) fn literal_element_suffix(&self, key: &str) -> Option<&str> {
+        let Self::Expanded(parts) = self else {
+            return None;
+        };
+        let parts = match parts.as_slice() {
+            [Part::Text(empty), rest @ ..] if empty.is_empty() => rest,
+            rest => rest,
+        };
+        match parts {
+            [
+                Part::Parameter { name, .. } | Part::BraceParameter(name),
+                Part::Text(suffix) | Part::Pattern(suffix),
+            ] if name == key => Some(suffix),
+            _ => None,
+        }
+    }
+
     /// A plain scalar can keep its allocation for a self-prefixed assignment.
     /// Evaluate the suffix normally. Expressions capable of changing the old
     /// value (including indexed name references) require the original snapshot.

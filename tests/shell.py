@@ -38,6 +38,84 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_scaling_multiline_readers_leave_following_input(self):
+        source = ("a=(\n" + "entry\n" * 300 +
+                  ")\nx=$(\n:\necho one\n); y=\"first\nsecond\"\n" +
+                  "(\n" + "x=$((1))\n" * 300 + "echo \"$x\"\n)\n" +
+                  "a0=ab\\\ncd\n" +
+                  "read -r v\nfrom-stdin\necho \"${#a[@]}/$x/$a0/$v\"\n")
+        for shell in (BASH, TONARI):
+            proc = subprocess.run([shell], input=source.encode(), capture_output=True,
+                                  cwd=self.cwd, env=self.env, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                             (0, b"1\n300/one/abcd/from-stdin\n", b""))
+
+    def test_scaling_array_updates_keep_declaration_and_callback_scope(self):
+        script = r"""declare -A m=([k]=old); a=(two 2 three)
+f() { local -A m=([k]=inner); declare -g 'm[k]=new'; echo "${m[k]}"; }
+f; declare 'a[a[1]]=third'; declare 'a[0]+=!'; echo "${a[*]}/${m[k]}"
+cb() { if [[ $1 == 3 ]]; then a[0]=changed; fi; }
+mapfile -O3 -t -c1 -C cb a <<<$'next\nlast'
+echo "${a[*]}"
+declare -ia n=([0]=2); n[0]="${n[0]}3"; echo "${n[0]}"
+declare -A h=([k]=x); for i in 1 2 3; do h[k]="${h[k]}y"; done; echo "${h[k]}"
+"""
+        for shell in self.shells_for(5):
+            proc = self.command(shell, script)
+            # Bash redirects this element assignment into the local despite -g.
+            scopes = b"new\ntwo! 2 third/old" if shell == BASH else b"inner\ntwo! 2 third/new"
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                             (0, scopes + b"\nchanged 2 third next last\n23\nxyyy\n", b""))
+
+    def test_scaling_unicode_spans_and_required_suffix(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        script = r"""shopt -s extglob; s=; for ((i=0;i<130;i++)); do s+=雪桜; done
+for p in '+(雪|桜)z' '*[[:digit:]]' '雪*1' '*ァ' '+(雪)桜'; do
+v=${s}1z; printf '<%s>\n' "${v//$p/R}" "${v/%$p/R}" "${v##$p}" "${v%%$p}"
+done
+shopt -s nocasematch; s=${s}K; echo "${s//*k/ok}"
+"""
+        ref = self.command(BASH, script)
+        result = self.command(TONARI, script)
+        self.assertEqual((ref.returncode, ref.stderr), (0, b""))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, ref.stdout, b""))
+        mismatch = self.command(TONARI, "s=aaa; [[ $s == !(z)*!(z)*[y] ]]")
+        self.assertEqual(mismatch.returncode, 1)
+
+    def test_scaling_incomplete_escape_in_pattern(self):
+        script = r"""p='*\'; printf -v s '%0300d' 0; s=${s//0/\\}
+for option in -u -s; do
+    shopt "$option" nocasematch
+    v=${s//$p/X}; x=${s##$p}; [[ $s == $p ]]; echo "$? ${#v} ${#x}"
+done
+p='*\\'; v=${s//$p/X}; x=${s##$p}; echo "$v ${#x}" """
+        self.compare(script, 0, b"1 300 300\n1 300 300\nX 0\n")
+
+    def test_scaling_erasedups_tracks_trim_delete_and_import(self):
+        (self.cwd / "history-data").write_text("aa\nbb\naa\n")
+        script = r"""HISTSIZE=6; HISTCONTROL=erasedups
+history -s one; history -s two; history -s one; history -r history-data
+history -s zz; history -d 2; history -s aa
+history | sed -E 's/^ *[0-9]+ +//'
+history -c; history -s one; history -s one; history | sed -E 's/^ *[0-9]+ +//'"""
+        ref = self.command(BASH, script)
+        proc = self.command(TONARI, script)
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (ref.returncode, ref.stdout, ref.stderr))
+        self.assertIn(b"aa\n", proc.stdout)
+
+    def test_scaling_pattern_edges_and_braces(self):
+        script = r"""shopt -s extglob
+printf -v pad '%0300d' 0; s="a${pad}b1z"
+for p in '*z' '[a-z]*z' '*[0-9]' '[0-9]*' '+(a|b)z' '+([0-9])b' '*(a|b)z'; do
+printf '<%s>\n' "${s#$p}" "${s##$p}" "${s%$p}" "${s%%$p}" "${s//$p/X}" "${s/%$p/X}"
+done
+shopt -s nocasematch; echo "${s//*Z/ok}"
+printf '%s\n' {outer,{one,two}} {unclosed{inner,a} {x{1..2},y}
+"""
+        ref = self.command(BASH, script)
+        proc = self.command(TONARI, script)
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (ref.returncode, ref.stdout, ref.stderr))
+
     def test_array_evaluation_append_keeps_scope_and_partial_writes(self):
         self.compare("""declare -A m=([old]=one); m+=([new]=two [old]+=!)
 a=(2 4); a+=([a[0]]=six [-1]+=!); declare -n ref=a; ref+=([4]=eight)
@@ -3780,9 +3858,14 @@ case '*(a|b[)' in *(a|b[)) echo literal;; esac""", 0,
                      b"[!([*)*][+(a|b[)*]\nliteral\n", minimum=5)
 
     def test_plain_star_followed_by_nullable_extended_group(self):
-        self.compare(r"""for p in '*!(a)' '*!(*)b' '*@(a|)' '?*@([ab]|*)'; do
-for v in '' a b x aa; do [[ $v == $p ]] && printf 1 || printf 0; done; echo; done""",
-                     0, b"10111\n10000\n01001\n00001\n", minimum=5)
+        script = r"""for p in '*!(a)' '*!(*)b' '*@(a|)' '?*@([ab]|*)'; do
+for v in '' a b x aa; do [[ $v == $p ]] && printf 1 || printf 0; done; echo; done"""
+        for shell in self.shells_for(5):
+            # Bash accepts an empty subject despite the required trailing b.
+            negative = b"10000" if shell == BASH else b"00000"
+            proc = self.command(shell, script)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                             (0, b"10111\n" + negative + b"\n01001\n00001\n", b""))
 
     def test_generated_extended_patterns_against_bash(self):
         if BASH not in self.shells_for(5):
@@ -3802,6 +3885,10 @@ for v in '' a b x aa; do [[ $v == $p ]] && printf 1 || printf 0; done; echo; don
         self.assertEqual((proc.returncode, proc.stderr, ref.returncode, ref.stderr), (0, b"", 0, b""))
         self.assertEqual(len(proc.stdout.splitlines()), len(patterns))
         for p, expected, actual in zip(patterns, ref.stdout.splitlines(), proc.stdout.splitlines(), strict=True):
+            # None can accept empty: b and ? require input, and the middle
+            # negation in the second pattern explicitly excludes empty.
+            if p in ("*!(*)b", "*!(|@(|b)[ab][[:digit:]])*", "*!(b[ab])?"):
+                expected = b"0" + expected[1:]
             self.assertEqual(actual, expected, p)
 
     def test_extglob_at_parse_time_and_invocation(self):

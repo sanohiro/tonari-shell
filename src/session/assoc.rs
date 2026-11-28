@@ -23,6 +23,10 @@ impl Associative {
         self.entries.get(key).map(|(value, _)| value)
     }
 
+    pub(super) fn get_mut(&mut self, key: &str) -> Option<&mut String> {
+        self.entries.get_mut(key).map(|(value, _)| value)
+    }
+
     pub(super) fn insert(&mut self, key: String, value: String) {
         use std::collections::hash_map::Entry;
         match self.entries.entry(key) {

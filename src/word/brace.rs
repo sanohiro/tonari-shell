@@ -107,35 +107,47 @@ enum Choice {
 }
 
 fn choice(parts: &[Part]) -> Option<Choice> {
-    for (open, part) in parts.iter().enumerate() {
+    if !parts.iter().any(|p| matches!(p, Part::Brace("}"))) {
+        return parts
+            .iter()
+            .position(|p| matches!(p, Part::Range(_)))
+            .map(Choice::Range);
+    }
+    let mut stack = Vec::<(usize, Vec<usize>)>::new();
+    let mut first = None;
+    let mut best = usize::MAX;
+    for (index, part) in parts.iter().enumerate() {
         match part {
-            Part::Range(_) => return Some(Choice::Range(open)),
-            Part::Brace("{") => {
-                let mut depth = 0;
-                let mut commas = Vec::new();
-                for (close, part) in parts.iter().enumerate().skip(open + 1) {
-                    match part {
-                        Part::Brace("{") => depth += 1,
-                        Part::Brace("}") if depth > 0 => depth -= 1,
-                        Part::Brace("}") => {
-                            if !commas.is_empty() {
-                                return Some(Choice::Alternatives {
-                                    open,
-                                    close,
-                                    commas,
-                                });
-                            }
-                            break;
-                        }
-                        Part::Brace(",") if depth == 0 => commas.push(close),
-                        _ => {}
-                    }
+            Part::Brace("{") => stack.push((index, Vec::new())),
+            Part::Brace(",") => {
+                if let Some((_, commas)) = stack.last_mut() {
+                    commas.push(index);
                 }
+            }
+            Part::Brace("}") => {
+                if let Some((open, commas)) = stack.pop()
+                    && open < best
+                    && !commas.is_empty()
+                {
+                    best = open;
+                    first = Some(Choice::Alternatives {
+                        open,
+                        close: index,
+                        commas,
+                    });
+                }
+            }
+            Part::Range(_) if index < best => {
+                best = index;
+                first = Some(Choice::Range(index));
             }
             _ => {}
         }
+        if first.is_some() && stack.is_empty() {
+            break;
+        }
     }
-    None
+    first
 }
 
 // Unquoted $name{x,y} spells $namex and $namey after brace expansion.

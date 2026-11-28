@@ -114,7 +114,7 @@ pub(crate) fn prompt_word(
     Ok(builder.finish())
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Incomplete {
     Message(&'static str),
     SingleQuote,
@@ -257,6 +257,17 @@ pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize)
         Reader::new(tokens, spans, source)
             .read_list(&[], true)
             .is_ok()
+    })
+}
+
+// A line made only of complete shell words cannot close an open subshell.
+pub(crate) fn word_line(source: &str, session: &crate::Session) -> bool {
+    with_read_options(session, 1, || {
+        lex(source, false, false).is_ok_and(|(tokens, _, _)| {
+            tokens
+                .iter()
+                .all(|token| matches!(token, Token::Word(_) | Token::Newline))
+        })
     })
 }
 

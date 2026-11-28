@@ -1,5 +1,68 @@
 # Startup and execution / 起動と実行性能
 
+<a id="shell-scaling"></a>
+
+## November 28 · Scaling of shell input, matching, arrays and history / 入力・照合・配列・履歴の計算量
+
+Cells are **previous Tonari / current Tonari / Bash** in milliseconds. N is 1,000 and 2N is 2,000. The source rows measure the interval from an already-running shell starting the fixture until it exits. The pipe row includes process creation, writing the script to stdin and waiting for exit. The driver checks the output and status. Shells rotate order across two warmups and seven measurements. For a sample taking at least one second, the driver reports that observation and stops repeating it. `>12000` indicates a 12-second timeout. The binaries were built from `4148b46` and `ea746bb` on an Apple M1 with native GNU Bash 5.3.20, and on an AMD EPYC 7763 running Ubuntu 24.04 with Bash 5.2.21. [Native Linux measurements](https://github.com/sanohiro/tonari-shell/actions/runs/46125786404) · [Executable fixtures](../tools/ci/shell-scaling.py)
+
+N は入力の行数・文字数・要素数。表は旧 Tonari・今回の Tonari・同じ実機の Bash の順で、単位は ms。宣言は N 要素の配列を準備して同じ要素を200回更新し、自己連結は 4N 回実行する。計測には準備処理も含む。通常は7回の中央値を使い、1秒以上かかった試行は単回の値、12秒を超えた試行は打ち切りとして示した。
+
+| Workload | M1, N | M1, 2N | Linux x86-64, N | Linux x86-64, 2N |
+|---|---:|---:|---:|---:|
+| array literal | 32.985 / 0.628 / 1.363 | 126.358 / 0.747 / 1.925 | 52.016 / 0.487 / 1.255 | 208.046 / 0.836 / 2.389 |
+| subshell | 72.978 / 1.551 / 2.669 | 281.843 / 1.874 / 3.689 | 113.707 / 1.367 / 2.333 | 508.344 / 2.342 / 4.120 |
+| substitution | 22.145 / 0.915 / 3.019 | 85.108 / 1.332 / 4.350 | 38.220 / 1.065 / 2.758 | 147.501 / 2.002 / 4.798 |
+| subshell with inner closers | 99.154 / 2.022 / 3.033 | 380.070 / 2.776 / 4.470 | 169.281 / 2.269 / 3.074 | 726.208 / 4.018 / 5.344 |
+| subshell from pipe | 102.809 / 7.881 / 13.649 | 386.672 / 11.361 / 17.427 | 174.772 / 6.574 / 8.090 | 736.193 / 12.166 / 14.492 |
+| UTF-8 array | 48.939 / 0.635 / 1.563 | 187.715 / 0.851 / 2.229 | 66.399 / 0.573 / 1.415 | 267.545 / 0.919 / 2.777 |
+| continued word | 5.976 / 0.493 / 0.688 | 21.360 / 0.592 / 0.805 | 9.987 / 0.226 / 0.289 | 38.300 / 0.295 / 0.363 |
+| double quote | 1.572 / 0.486 / 0.699 | 4.338 / 0.519 / 0.741 | 1.338 / 0.199 / 0.303 | 3.992 / 0.239 / 0.366 |
+| arithmetic | 1.939 / 0.561 / 0.716 | 5.505 / 0.643 / 0.876 | 1.606 / 0.279 / 0.346 | 5.110 / 0.372 / 0.475 |
+| braces | 2.249 / 1.040 / 6.821 | 6.925 / 2.313 / 24.019 | 2.410 / 1.124 / 5.558 | 8.295 / 3.259 / 21.117 |
+| braces with a close | 1.484 / 0.869 / 4.334 | 3.998 / 1.826 / 14.361 | 1.493 / 0.849 / 3.681 | 4.754 / 2.286 / 13.572 |
+| repeated extglob miss | 125.842 / 0.531 / 2811.152 | 488.305 / 0.516 / >12000 | 110.152 / 0.232 / 3034.917 | 483.909 / 0.217 / >12000 |
+| extglob alternatives hit | 2.781 / 1.426 / 16.872 | 1.426 / 0.576 / 38.494 | 0.520 / 0.204 / 8.698 | 0.909 / 0.244 / 33.166 |
+| extglob suffix | 118.529 / 0.447 / 2814.311 | 492.786 / 0.481 / >12000 | 107.381 / 0.214 / 3077.108 | 482.463 / 0.251 / >12000 |
+| extglob trim | 118.592 / 0.456 / 2593.339 | 569.837 / 0.487 / >12000 | 113.470 / 0.213 / 3067.135 | 484.608 / 0.249 / >12000 |
+| star replace | 0.712 / 0.442 / 0.655 | 2.196 / 0.768 / 1.128 | 0.497 / 0.174 / 0.319 | 1.172 / 0.197 / 0.382 |
+| folded star | 35.943 / 0.434 / 0.635 | 155.892 / 0.523 / 0.820 | 30.418 / 0.187 / 0.348 | 120.279 / 0.244 / 0.437 |
+| class star | 6.296 / 0.451 / 0.693 | 25.826 / 0.538 / 0.772 | 16.750 / 0.183 / 0.327 | 65.960 / 0.243 / 0.411 |
+| class prefix trim | 11.207 / 0.469 / 22.025 | 46.183 / 0.588 / 92.229 | 22.202 / 0.227 / 25.398 | 87.682 / 0.311 / 100.065 |
+| class suffix trim | 11.273 / 0.469 / 22.466 | 45.743 / 0.562 / 88.285 | 22.373 / 0.239 / 25.400 | 87.549 / 0.295 / 100.234 |
+| class suffix replace | 11.150 / 0.496 / 0.722 | 45.829 / 0.544 / 0.839 | 22.599 / 0.216 / 0.366 | 89.127 / 0.289 / 0.464 |
+| UTF-8 repeat | 0.599 / 0.464 / 5.742 | 0.781 / 0.548 / 20.188 | 0.316 / 0.224 / 3.648 | 0.481 / 0.314 / 12.495 |
+| UTF-8 class trim | 0.485 / 0.480 / 0.853 | 0.550 / 0.550 / 0.952 | 0.271 / 0.234 / 0.653 | 0.386 / 0.324 / 0.874 |
+| negated extglob | 5.711 / 0.475 / >12000 | 34.571 / 0.928 / >12000 | 7.026 / 0.166 / >12000 | 29.079 / 0.201 / >12000 |
+| negation with match | 5.529 / 0.481 / 0.689 | 32.690 / 0.862 / 1.105 | 7.124 / 0.206 / 0.287 | 29.933 / 0.247 / 0.331 |
+| indexed declaration | 3.781 / 0.556 / 1.359 | 8.203 / 0.663 / 1.830 | 8.503 / 0.366 / 1.283 | 17.096 / 0.538 / 1.765 |
+| assoc declaration | 8.536 / 1.174 / 2.936 | 17.578 / 1.729 / 4.400 | 19.254 / 1.334 / 3.164 | 40.386 / 2.381 / 5.517 |
+| mapfile origin | 11.401 / 2.411 / 4.862 | 39.314 / 4.314 / 8.892 | 25.245 / 2.910 / 5.700 | 93.887 / 5.654 / 11.129 |
+| history erasedups | 4.437 / 2.927 / 7.876 | 7.083 / 4.036 / 15.264 | 5.254 / 1.931 / 6.088 | 11.240 / 2.926 / 14.845 |
+| indexed self append | 3.438 / 1.825 / 71.264 | 6.936 / 3.217 / 262.299 | 4.414 / 1.876 / 42.834 | 9.276 / 3.619 / 142.112 |
+| assoc self append | 3.690 / 1.814 / 71.290 | 7.233 / 3.170 / 260.228 | 4.390 / 1.970 / 42.301 | 9.265 / 3.789 / 141.378 |
+
+The negative extglob miss requires a final `y`. Bash and the previous release can accept the subject without it. The small differential test records that difference. A timeout above has no observed result within the time limit. The adjacent positive control exercises the same negative groups with the literal present. [Compatibility rationale](compatibility.md)
+
+The original 4,000-line array also ran as a named script and as a command string. Including launch and exit, M1 measured 522.287 / 4.735 / 12.096 ms as a file and 524.212 / 4.735 / 11.783 ms through `-c`. A ready shell executing `echo ok` and exiting measured 0.402 / 0.394 / 0.624 ms. In the streamed subshell fixture the parent's input remains available to commands such as `read` at their original position.
+
+A follow-up compared the first working M1 implementation, the final build and GNU Bash on identical inputs. A sourced subshell with 2,000 nested arithmetic expansions took 390.208 / 3.260 / 4.625 ms. Early rejection of an unfinished escape after a wildcard took 49.746 / 0.453 / 0.818 ms for two substitutions and trims on 300 backslashes. Both ordinary and case-insensitive matching preserve the subject. The shell tests also check that an escaped literal backslash still matches. [Regression tests](../tests/shell.py)
+
+4,000行の配列はファイルとして起動する場合と `-c` の両方で出力を照合した。パイプ入力では、サブシェル内に2,000個の内側の括弧があっても、子コマンドが使う入力位置を維持したまま全体の再解析を省ける。
+
+The isolated PTY test imports 10,000 entries with `HISTCONTROL=erasedups`, submits a duplicate from the middle, then presses Up and verifies the recalled text. Times run from the key to the visible response. Each cell gives the median for previous Tonari / current Tonari / Bash across 15 trials after three warmups. [PTY driver](../tools/ci/scaling-history.py)
+
+| PTY action | M1 (ms) | Linux x86-64 (ms) |
+|---|---:|---:|
+| Enter to prompt | 0.043 / 0.049 / 0.115 | 0.056 / 0.054 / 0.164 |
+| Up to recalled command | 0.053 / 0.036 / 0.023 | 0.154 / 0.102 / 0.057 |
+
+At 2N the cases above two-thirds of Bash time were continued word (0.74×), double quote (0.70×), arithmetic (0.73×), star replace (0.68×), class star (0.70×), negation with match (0.78×) on M1 and subshell with inner closers (0.75×), subshell from pipe (0.84×), continued word (0.81×), arithmetic (0.78×), negation with match (0.75×) on Linux. A sub-millisecond result includes shell dispatch and process exit. The history index skips searches for previously unseen commands. An exact duplicate in the middle still requires moving part of the live window. Compound or side-effecting subscripts still require ordinary evaluation. The timing data cover the listed pattern shapes and input sizes. [Implementation notes and controls](engineering-notes.md)
+
+The native arm64 release measured 1,880,896 → 1,913,968 bytes and uses libSystem. The stripped Linux x86-64 static PIE measured 2,505,560 → 2,529,112 bytes. No crate or shared-library dependency was added.
+
+履歴は既出コマンドを実際に Enter で確定した後、↑で同じ内容を呼び戻すまで確認した。履歴の途中にある重複行を消す際には、後続要素の移動が残る。パターンは終端が必要なケース、失敗するケース、UTF-8 の文字幅が異なるケースを個別に比較した。
+
 <a id="round-eight-array-evaluation"></a>
 
 ## November 28 · Array growth, completion and shell evaluation / 配列追記・補完・シェル評価
