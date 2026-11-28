@@ -116,6 +116,11 @@ def terminal_rule(shell, root, key):
             t.send(b'jobs; wait "$p"; printf "\\036%s\\037" "$?"\n')
             data = t.read(b"\x1f")
             return b"Done(17)" not in data and b"\x1e17\x1f" in data
+        for settings in (b"set -b", b"set +o posix; set +b"):
+            t.send(settings + b"; " + command + b"; printf '\\036'; :\n")
+            before, marker, after = t.read(b"READY>").partition(b"\x1e")
+            if not marker or report not in before or report in after:
+                return False
         return True
     finally:
         t.close()

@@ -188,7 +188,7 @@ pub enum Error {
     ArithmeticClose,
     HereDoc(HereDocHint),
     Invalid(&'static str),
-    ArrayToken,
+    ArrayToken(u8),
 }
 
 impl Error {
@@ -225,7 +225,7 @@ impl Error {
             Self::NulByte => "NUL in command text",
             Self::ArithmeticClose => "invalid closing parenthesis in arithmetic expression",
             Self::HereDoc(_) => "unterminated here-document",
-            Self::ArrayToken => "unexpected token in array assignment",
+            Self::ArrayToken(_) => "unexpected token in array assignment",
         }
     }
 }
@@ -327,7 +327,7 @@ pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize)
             return false;
         };
         let mut reader = Reader::new(tokens, spans, source);
-        reader.read_list(&[], true).is_ok() && !reader.invalid_array
+        reader.read_list(&[], true).is_ok() && reader.invalid_array_status.is_none()
     })
 }
 
@@ -597,7 +597,7 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
 
 struct Reader {
     here_extents: Vec<(usize, usize)>,
-    invalid_array: bool,
+    invalid_array_status: Option<u8>,
     depth: usize,
     first_line: usize,
     source: Rc<str>,
@@ -665,7 +665,7 @@ impl Reader {
             first_line: source_line(source),
             line_index: std::cell::Cell::new(0),
             here_extents: Vec::new(),
-            invalid_array: false,
+            invalid_array_status: None,
             depth: 0,
             spans,
             alias_source: None,
@@ -800,8 +800,10 @@ impl Reader {
 
     fn list(&mut self, stops: &[&str]) -> Result<Vec<Statement>, Error> {
         let statements = self.nested(|r| r.read_list(stops, false))?;
-        if self.depth == 0 && self.invalid_array {
-            Err(Error::ArrayToken)
+        if self.depth == 0
+            && let Some(status) = self.invalid_array_status
+        {
+            Err(Error::ArrayToken(status))
         } else {
             Ok(statements)
         }

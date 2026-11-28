@@ -179,6 +179,7 @@ impl Reader {
                 Some(unexpected) => {
                     // Resume only after the matching closing parenthesis. A later
                     // physical line is still array text until that delimiter.
+                    let status = if self.depth > 1 { 2 } else { 1 };
                     let mut depth = 1;
                     let mut token = Some(unexpected);
                     while let Some(current) = token {
@@ -187,7 +188,7 @@ impl Reader {
                             Token::RightParen => {
                                 depth -= 1;
                                 if depth == 0 {
-                                    self.invalid_array = true;
+                                    self.invalid_array_status = Some(status);
                                     return Ok(items);
                                 }
                             }
@@ -196,7 +197,7 @@ impl Reader {
                         token = self.tokens.pop_front();
                     }
                     return Err(if self.final_input {
-                        Error::ArrayToken
+                        Error::ArrayToken(status)
                     } else {
                         Error::incomplete_message("unfinished array assignment")
                     });

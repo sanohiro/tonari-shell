@@ -333,6 +333,17 @@ printf '%s\n' "${!a[@]}" """
             r = self.command(shell, '[[ ${BASH_VERSINFO[-1]} == "${BASH_VERSINFO[5]}" && -n ${BASH_VERSINFO[-1]} ]]')
             self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b'', b''))
 
+    def test_printf_overflowing_literal_quote_fields(self):
+        source = r"""printf 'head\n[%.9223372036854775825Q]/[%s]\n' 'a b' next
+echo "status:$?"
+printf -v out '[%9223372036854775825q][%.9223372036854775825b]' 'a b' text
+echo "status:$?/$out" """
+        for shell in (TONARI, BASH) if bash_version() >= (5, 3) else (TONARI,):
+            result = self.command(shell, source)
+            self.assertEqual((result.returncode, result.stdout),
+                             (0, b"head\n[a\\ b]/[next]\nstatus:1\nstatus:1/[a\\ b][]\n"), result.stderr)
+            self.assertEqual(result.stderr.count(b"9223372036854775825"), 3, result.stderr)
+
     def test_second_review_printf_merged_output(self):
         cases = [
             (r"%d\n", b"ERR\n5\n6\nERR\n1\n"),

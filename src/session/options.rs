@@ -195,7 +195,7 @@ set_options! {
     "noexec" ('n') => noexec,
     "noglob" ('f') => noglob,
     "nolog" => shopt.nolog,
-    "notify" ('b') => notify,
+    "notify" ('b') => jobs.notify,
     "nounset" ('u') => nounset,
     "onecmd" ('t') => onecmd,
     "physical" ('P') => physical,
@@ -343,6 +343,7 @@ impl Session {
         self.posix = enabled;
         self.shopt.shift_verbose = enabled;
         self.jobs.quiet = enabled && !self.interactive;
+        self.jobs.posix_interactive = enabled && self.interactive;
         self.shopt.expand_aliases = enabled || self.interactive;
         if enabled {
             self.shopt.interactive_comments = true;

@@ -154,6 +154,7 @@ pub(super) fn interactive_loop(
             return Ok(code);
         }
         session.jobs.poll();
+        session.jobs.report_foreground_notices();
         if session.jobs.monitor {
             session.jobs.report_changes(session.posix);
         }
@@ -242,7 +243,7 @@ pub(super) fn interactive_loop(
             stderr.write_all(prompt.as_bytes())?;
             stderr.flush()?;
             drop(stderr);
-            let ready = if session.notify && terminal_input {
+            let ready = if session.jobs.notify && terminal_input {
                 wait_for_job_notice(&mut session.jobs, |jobs| {
                     let mut out = io::stderr().lock();
                     writeln!(out)?;

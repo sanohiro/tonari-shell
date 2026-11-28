@@ -387,7 +387,7 @@ fn apply_invocation_options(
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
     session.allexport = invocation.options.allexport;
-    session.notify = invocation.options.notify;
+    session.jobs.notify = invocation.options.notify;
     session.noexec = invocation.options.check;
     if let Some(enabled) = invocation.options.ignoreeof {
         if enabled {

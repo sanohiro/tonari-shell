@@ -31,6 +31,9 @@ def main():
             assert (result.returncode, result.stdout) == expected, (shell, argv, result)
             return result
 
+        version = run(reference, "-c", 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
+        modern = tuple(map(int, version.stdout.strip().split(b"."))) >= (5, 3)
+
         numeric = r"""
 n=' 1 '; zero=' 0 '
 mapfile -O "$n" -s "$n" -n "$n" -u ' 4 ' -c "$n" -t a 4<<<$'a\nb'
@@ -43,7 +46,10 @@ g(){ return "$1"; }; g '　3' 2>/dev/null; echo "$?"
 set -- x; shift '　1' 2>/dev/null; echo "$?/$#"
 """
         for shell in (reference, candidate):
-            checked(shell, ["-c", numeric], (0, b"b\n0\n0\nTERM\ntrap -- ':' SIGTERM\n0\n2\n2/1\n"))
+            # GNU Bash 5.2 returns 1 for a nonnumeric shift. Both versions
+            # preserve the positional argument, and GNU 5.3 returns 2.
+            shift = b"2/1\n" if shell == candidate or modern else b"1/1\n"
+            checked(shell, ["-c", numeric], (0, b"b\n0\n0\nTERM\ntrap -- ':' SIGTERM\n0\n2\n" + shift))
 
         (root / "tonari-review-completion").mkdir()
         for prefix in ("~/", "~//"):
@@ -153,8 +159,6 @@ outer a b"""
 
         # Bash 5.3 reports a saturated conversion as an error. Its predecessor
         # returns success for the same bytes. Check the reference version's contract.
-        version = run(reference, "-c", 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
-        modern = tuple(map(int, version.stdout.strip().split(b"."))) >= (5, 3)
         for shell, status in ((candidate, 1), (reference, int(modern))):
             out = checked(shell, ["-c", r"printf '%d\n' 99999999999999999999999999999"],
                           (status, b"9223372036854775807\n"))

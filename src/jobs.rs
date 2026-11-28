@@ -476,6 +476,9 @@ impl Job {
 #[derive(Clone, Default)]
 pub struct Jobs {
     pub monitor: bool,
+    pub notify: bool,
+    pub(crate) posix_interactive: bool,
+    pending_foreground: String,
     exit_warning: Option<usize>,
     pub(crate) foreground_interrupted: bool,
     pub(crate) quiet: bool,
@@ -614,6 +617,8 @@ impl Jobs {
             crate::traps::reset_caught_signals(&[libc::SIGTSTP]);
         }
         self.tty = None;
+        self.pending_foreground.clear();
+        self.posix_interactive = false;
         self.foreground_interrupted = false;
         self.monitor = false;
         self.table.clear();
@@ -754,12 +759,26 @@ impl Jobs {
         }
     }
 
-    pub(crate) fn report_signal(&self, signal: i32, command: &str) {
+    pub(crate) fn report_signal(&mut self, signal: i32, command: &str) {
         if !self.quiet
             && !matches!(signal, libc::SIGINT | libc::SIGPIPE)
             && let Some(reason) = signal_description(signal)
         {
-            stderr_line!("{reason:<26} {command}");
+            if self.posix_interactive && self.monitor && !self.notify {
+                use std::fmt::Write as _;
+                let _ = writeln!(self.pending_foreground, "{reason:<26} {command}");
+            } else {
+                stderr_line!("{reason:<26} {command}");
+            }
+        }
+    }
+
+    pub(crate) fn report_foreground_notices(&mut self) {
+        if !self.pending_foreground.is_empty() {
+            let _ = io::stderr()
+                .lock()
+                .write_all(self.pending_foreground.as_bytes());
+            self.pending_foreground.clear();
         }
     }
 

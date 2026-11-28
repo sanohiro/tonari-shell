@@ -902,7 +902,7 @@ pub fn line(
             screen.cancel(prompt, &text)?;
             return Ok(Input::Cancel);
         }
-        if session.notify && keys.queued.is_empty() {
+        if session.jobs.notify && keys.queued.is_empty() {
             crate::wait_for_job_notice(&mut session.jobs, |jobs| {
                 screen.draw("", "", 0, "")?;
                 jobs.report_changes(session.posix);

@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## Foreground signal notices at the prompt / フォアグラウンドのシグナル通知
+
+In an interactive POSIX shell with monitor mode enabled and asynchronous notices disabled, GNU Bash 5.3.20 reports a foreground command's terminating signal immediately before the next prompt. Subsequent commands on the same input line can print first. Tonari collects these notices in wait order and flushes them before the prompt. A forked shell drops inherited notices. With asynchronous notifications enabled or POSIX mode disabled, the notice appears immediately. The PTY check uses a byte marker between the signal and prompt to verify each ordering.
+
+対話 POSIX モードで `set +b` のときは、前景プロセスの終了通知を次のプロンプト直前に表示する。同じ行で後続のコマンドが出力した印より後に通知が来ることと、`set -b` または通常モードでは印より先になることを端末上で検証する。[Terminal rule 26](../tests/compat/posix_rules.py)
+
 ## Shebangless replacement and comparison fixtures / インタプリタを指定しないコマンドの置換と比較試験
 
 An executable text file reached through a symbolic working directory must see the shell's exported logical PWD when it enters a fresh Tonari interpreter. We found that the replacement path prepared a correct exec environment, then lost its changes when running the interpreter in the same process. The ENOEXEC regression runs the file twice, first by PATH and finally by a relative pathname after unsetting OLDPWD.

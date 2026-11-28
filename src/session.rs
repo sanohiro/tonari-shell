@@ -323,7 +323,6 @@ pub struct Session {
     pub keyword: bool,
     pub logout_started: bool,
     pub allexport: bool,
-    pub notify: bool,
     pub noexec: bool,
     pub ignoreeof: bool,
     pub ignoreeof_limit: usize,

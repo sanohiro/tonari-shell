@@ -201,6 +201,29 @@ impl<'a> Arguments<'a> {
         }
     }
 
+    #[cold]
+    fn literal_field_overflow(
+        &mut self,
+        digits: &[u8],
+        conversion: u8,
+        fallback: i32,
+        output: &[u8],
+    ) -> Result<i32, &'static str> {
+        // %n stores the number already written and ignores the field format.
+        if conversion == b'n' {
+            return Ok(fallback);
+        }
+        if !matches!(conversion, b'b' | b'q' | b'Q' | b'(') {
+            return Err("field width or precision out of range");
+        }
+        self.flush_lines(output);
+        let value = std::str::from_utf8(digits).expect("decimal field digits");
+        let error = std::io::Error::from_raw_os_error(libc::ERANGE);
+        diagnostic!("printf: {value}: {}", crate::builtins::os_message(&error));
+        self.status = 1;
+        Ok(fallback)
+    }
+
     fn next(&mut self) -> &'a str {
         if let Some((first, rest)) = self.values.split_first() {
             self.values = rest;
@@ -386,19 +409,11 @@ impl Spec {
             flags |= bit;
             *input = rest;
         }
-        let mut width = amount(input, args, 0, output)?;
-        if width < 0 {
-            flags |= flag_bit(b'-');
-            width = width.checked_abs().ok_or("field width too large")?;
-        }
-        let mut precision = None;
-        if input.first() == Some(&b'.') {
-            *input = &input[1..];
-            let p = amount(input, args, -1, output)?;
-            if p >= 0 {
-                precision = Some(p);
-            }
-        }
+        let width = amount(input, args, 0, output);
+        let precision = input.strip_prefix(b".").map(|rest| {
+            *input = rest;
+            amount(input, args, -1, output)
+        });
         let mut wide = false;
         while let Some((&len, rest)) = input.split_first() {
             if !LENGTH_MODIFIERS.contains(&len) {
@@ -409,17 +424,33 @@ impl Spec {
         }
         let (conversion, rest) = input.split_first().ok_or("`%': missing format character")?;
         *input = rest;
+        let conversion = if wide && matches!(conversion, b'c' | b's') {
+            conversion.to_ascii_uppercase()
+        } else {
+            *conversion
+        };
+        let mut field = |amount, fallback| match amount {
+            Ok(n) => Ok(n),
+            Err(digits) => args.literal_field_overflow(digits, conversion, fallback, output),
+        };
+        let mut width = field(width, 0)?;
+        if width < 0 {
+            flags |= flag_bit(b'-');
+            width = width.checked_abs().ok_or("field width too large")?;
+        }
+        // Bash's %Q applies precision before quoting. An overflowing literal
+        // leaves its input intact. The other shell string conversions use zero.
+        let precision = precision
+            .map(|p| field(p, if conversion == b'Q' { -1 } else { 0 }))
+            .transpose()?
+            .filter(|&p| p >= 0);
         Ok((
             Self {
                 flags,
                 width,
                 precision,
             },
-            if wide && matches!(conversion, b'c' | b's') {
-                conversion.to_ascii_uppercase()
-            } else {
-                *conversion
-            },
+            conversion,
         ))
     }
 
@@ -695,12 +726,12 @@ fn append_number(
     Ok(())
 }
 
-fn amount(
-    input: &mut &[u8],
+fn amount<'a>(
+    input: &mut &'a [u8],
     args: &mut Arguments<'_>,
     overflow: i32,
     output: &[u8],
-) -> Result<i32, &'static str> {
+) -> Result<i32, &'a [u8]> {
     if input.first() == Some(&b'*') {
         *input = &input[1..];
         return Ok(i32::try_from(args.signed(output)).unwrap_or_else(|_| {
@@ -710,16 +741,22 @@ fn amount(
             overflow
         }));
     }
+    let digits = *input;
     let mut amount = 0i32;
     while let Some((&digit, rest)) = input.split_first() {
         if !digit.is_ascii_digit() {
             break;
         }
-        amount = amount
+        *input = rest;
+        let Some(next) = amount
             .checked_mul(10)
             .and_then(|n| n.checked_add(i32::from(digit - b'0')))
-            .ok_or("field width or precision out of range")?;
-        *input = rest;
+        else {
+            let tail = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+            *input = &rest[tail..];
+            return Err(&digits[..digits.len() - input.len()]);
+        };
+        amount = next;
     }
     Ok(amount)
 }

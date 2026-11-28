@@ -34,7 +34,7 @@ fn run_statements<'a>(
         if session.noexec {
             return Flow::Continue(0);
         }
-        if session.notify
+        if session.jobs.notify
             && session.jobs.monitor
             && !session.jobs.is_empty()
             && session.traps.notification_pending()

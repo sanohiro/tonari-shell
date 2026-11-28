@@ -188,11 +188,13 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
         && matches!(problem, parser::Error::NulByte)
     {
         Flow::Exit(126)
-    } else if matches!(problem, parser::Error::ArrayToken) && !session.errexit {
+    } else if let parser::Error::ArrayToken(status) = problem
+        && !session.errexit
+    {
         if session.posix && !session.interactive {
-            Flow::Exit(1)
+            Flow::Exit(status)
         } else {
-            Flow::Continue(1)
+            Flow::Continue(status)
         }
     } else if session.posix && !session.interactive {
         Flow::Exit(2)
@@ -403,12 +405,12 @@ impl ScriptState {
                 Parsed::ReadMore
             }
             Err(parser::Error::Incomplete(_)) if more => Parsed::ReadMore,
-            Err(e @ parser::Error::ArrayToken)
+            Err(e @ parser::Error::ArrayToken(status))
                 if !check && !session.posix && !session.errexit && !session.noexec =>
             {
                 syntax_error(session, e, line);
-                self.record(1);
-                session.pipe_status.single(1);
+                self.record(status);
+                session.pipe_status.single(status);
                 Parsed::Skip
             }
             Err(e) => Parsed::Failed(syntax_error(session, e, line)),

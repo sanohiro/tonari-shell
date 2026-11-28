@@ -193,7 +193,7 @@ NEW = {
     "posix-trap-display": "set -o posix; trap ':' USR1; trap -p USR1; trap USR1; echo after",
     "alias-display-selected": "set -o posix; alias demo='echo hi'; alias demo; alias -p demo",
     "posix-substitution-status": "set -o posix; false; echo \"$(true)/$?\"; x=$(exit 7); echo \"$?\"",
-    "nameref-element-length": "a=(zero abc); declare -n r='a[$(printf 1)]'; declare -n all='a[@]'; printf '%s/%s/%s\\n' \"${#r}\" \"$r\" \"${#all}\"",
+    "nameref-element-length": "a=(zero abc); k=1; declare -n r='a[k]'; declare -n all='a[@]'; printf '%s/%s/%s\\n' \"${#r}\" \"$r\" \"${#all}\"",
     "array-single-evaluation-option": "shopt -s assoc_expand_once; shopt -q array_expand_once; echo $?; a=(one two); i=0; echo \"${a[i++]}:$i\"; shopt -u array_expand_once; shopt -q assoc_expand_once; echo $?",
     "lazy-malformed-operand": "a=4\necho \"${a-'$('\\'}\"\necho \"${a+'$('\\'}\"\necho survived",
     "posix-command-precedence": "break(){ echo fn; }; set -o posix; type -t break; type -at break; command -V break",
@@ -852,6 +852,12 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
         assert run(shells[1], sparse)[0] == (0, b"<y><x><x>", False)
         prompt = r"""x='\D{%H:%M'; printf '%s' "${x@P}" """
         assert run(shells[1], prompt)[0] == (0, b"\\D{%H:%M", False)
+        # A stored indexed nameref is arithmetic data. GNU Bash reparses the
+        # command substitution in this spelling; Tonari reports an invalid index.
+        stored_index = "a=(zero abc); declare -n r='a[$(printf 1)]'; declare -n all='a[@]'; printf '%s/%s/%s\\n' \"${#r}\" \"$r\" \"${#all}\""
+        if modern:
+            assert run(shells[0], stored_index)[0] == (0, b"3/abc/2\n", False)
+        assert run(shells[1], stored_index)[0] == (1, b"", True)
         # Preserve valid data and bindings when an operation cannot succeed.
         for code, output in [
             ('readonly fd=42; printf keep >protected; { : {fd}>protected; } 2>/dev/null; printf "%s/" "$?"; cat protected', b"1/keep"),
