@@ -55,7 +55,13 @@ f; echo "${m[outer]}/${m[new]}"
     def test_array_evaluation_partial_append_before_error(self):
         script = """a=(old); trap 'echo "${a[*]}"' EXIT
 a+=([1]=first [-99]=invalid)"""
-        self.compare(script, 1, b"old first\n", minimum=5)
+        for shell in self.shells_for(minimum=5):
+            with self.subTest(shell=shell):
+                proc = self.command(shell, script)
+                expected_status = 0 if shell == BASH and self.bash_before_53() else 1
+                self.assertEqual(proc.returncode, expected_status)
+                self.assertEqual(proc.stdout, b"old first\n")
+                self.assertTrue(proc.stderr.strip())
 
     def test_array_evaluation_completion_observes_child_state(self):
         self.compare("""v=parent; wl='${v:=wrong}'; unset side

@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Failed compound array assignment / 配列の一括代入中のエラー
+
+With `a=(old); a+=([1]=first [-99]=invalid)`, the second subscript lies outside the array. An EXIT trap sees `old first` and the shell emits a diagnostic. Tonari and GNU Bash 5.3 exit with status 1. Ubuntu's Bash 5.2.21 exits successfully despite the error. Tonari keeps the failure visible to callers and preserves the preceding successful write. [Regression test](../tests/shell.py)
+
+配列への追記で後続の添字が範囲外になった場合、それまでに成功した代入は EXIT トラップからも見える。Tonari と GNU Bash 5.3 は終了値 1 を返す。Ubuntu の Bash 5.2.21 は診断を出しても終了値 0 を返す。
+
 ## File offsets during read and process substitution status / read のファイル位置とプロセス置換の終了値
 
 When `read -r` assigns to an associative-array key that reads the next record from the same descriptor, GNU Bash and Tonari both consume the records in order. The regression test verifies the value, the key and the third record left for the caller. For an indexed array, a command substitution supplied inside a destination **string** is outside Tonari's arithmetic subscript support. This distinction concerns the evaluation of an indirect destination. [Read comparison](../tests/shell.py)
