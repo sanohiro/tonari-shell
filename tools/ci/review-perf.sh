@@ -10,9 +10,9 @@ perf version > "$out/perf-version.txt"
 perf list > "$out/perf-list.txt"
 events=()
 for event in task-clock cycles:u instructions:u branches:u branch-misses:u cache-misses:u; do
-  probe="$out/probe-$event.txt"
+  probe="$out/probe-${event%:u}.txt"
   if LC_ALL=C perf stat --no-big-num -x ';' -e "$event" -- true 2>"$probe" &&
-     awk -F';' -v event="$event" '$3 == event && $1 ~ /^[0-9]+([.][0-9]+)?$/ {found=1} END {exit !found}' "$probe"; then
+     awk -F';' '$1 ~ /^[0-9]+([.][0-9]+)?$/ && $3 != "" && $4 + 0 > 0 {found=1} END {exit !found}' "$probe"; then
     events+=("$event")
   fi
 done
