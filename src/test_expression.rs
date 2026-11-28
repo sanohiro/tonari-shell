@@ -552,6 +552,7 @@ pub struct Compiled {
     pattern: String,
     regex: Result<Box<libc::regex_t>, String>,
     captures: usize,
+    suffix_len: usize,
 }
 
 impl Compiled {
@@ -589,14 +590,21 @@ impl Compiled {
                     }
                 }),
                 captures: 0,
+                suffix_len: 0,
             });
         }
         let captures = capture_count(&pattern) + 1;
+        let suffix_len = if ignore_case {
+            0
+        } else {
+            required_suffix(&pattern)
+        };
         Ok(Self {
             pattern,
             locale,
             regex: Ok(unsafe { regex.assume_init() }),
             captures,
+            suffix_len,
         })
     }
 
@@ -607,6 +615,17 @@ impl Compiled {
                 self.pattern
             );
         })?;
+        if self.suffix_len != 0 {
+            let end = self.pattern.len() - 1;
+            if !text.ends_with(&self.pattern[end - self.suffix_len..end]) {
+                // Keep the native C-string input contract even on early misses.
+                return if memchr::memchr(0, text.as_bytes()).is_some() {
+                    Err(())
+                } else {
+                    Ok(None)
+                };
+            }
+        }
         let mut small_text = [0u8; 256];
         let allocated;
         let encoded = if text.len() < small_text.len() {
@@ -651,6 +670,25 @@ impl Compiled {
             _ => Err(()),
         }
     }
+}
+
+// These EREs contain only concatenation, single-atom quantifiers and anchors.
+// Every valid match must end with the final run of literal ASCII characters.
+// More expressive syntax and case folding continue through the POSIX engine.
+fn required_suffix(pattern: &str) -> usize {
+    let Some(body) = pattern.strip_suffix('$') else {
+        return 0;
+    };
+    if !body
+        .bytes()
+        .all(|c| c.is_ascii_alphanumeric() || b"_. /-^$+?*".contains(&c))
+    {
+        return 0;
+    }
+    body.bytes()
+        .rev()
+        .take_while(u8::is_ascii_alphanumeric)
+        .count()
 }
 
 impl Drop for Compiled {

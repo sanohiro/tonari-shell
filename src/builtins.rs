@@ -15,23 +15,37 @@ use crate::Session;
 // A shell must observe write errors even when fd 1 was closed by its caller.
 pub(crate) struct StdoutFd<'a>(pub Option<&'a str>);
 
-impl Write for StdoutFd<'_> {
+pub(crate) struct OutputFd(pub libc::c_int);
+
+impl Write for OutputFd {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         if bytes.is_empty() {
             return Ok(0);
         }
-        let n = unsafe { libc::write(libc::STDOUT_FILENO, bytes.as_ptr().cast(), bytes.len()) };
+        let n = unsafe { libc::write(self.0, bytes.as_ptr().cast(), bytes.len()) };
         if n >= 0 {
-            return Ok(n as usize);
+            Ok(n as usize)
+        } else {
+            Err(io::Error::last_os_error())
         }
-        let error = io::Error::last_os_error();
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Write for StdoutFd<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let result = OutputFd(libc::STDOUT_FILENO).write(bytes);
+        let Err(error) = &result else { return result };
         if error.kind() != io::ErrorKind::Interrupted
             && !(error.kind() == io::ErrorKind::BrokenPipe && crate::traps::terminating_pipe())
             && let Some(name) = self.0.take()
         {
-            diagnostic!("{name}: write error: {}", os_message(&error));
+            diagnostic!("{name}: write error: {}", os_message(error));
         }
-        Err(error)
+        result
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -115,7 +129,7 @@ pub(crate) fn echo_into(args: &[String], out: &mut Vec<u8>, session: &Session) {
             out.push(b' ');
         }
         if escapes && memchr::memchr(b'\\', arg.as_bytes()).is_some() {
-            if !escapes::decode(arg.as_bytes(), out, escapes::Mode::Echo) {
+            if !escapes::decode(arg.as_bytes(), out, escapes::Mode::Echo, |_| {}) {
                 newline = false;
                 break;
             }

@@ -822,7 +822,7 @@ pub(super) fn prepare_redirects(
                     };
                     crate::expansion::Error::from(reason).in_expression(&label)
                 })?;
-            if r.target == Target::MoveWord {
+            if r.target == Target::MoveWord && (r.variable.is_some() || fd != r.fd) {
                 moved = Some(fd);
             }
         }
@@ -831,7 +831,7 @@ pub(super) fn prepare_redirects(
         }
         redirects.push(Redirect {
             line: r.line,
-            variable: None,
+            variable: r.variable,
             fd: r.fd,
             target,
             word,

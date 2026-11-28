@@ -25,6 +25,12 @@ case "$SUITE" in
   whole-startup)
     python3 tests/shell.py "$current" -v -k whole_audit
     python3 tools/ci/whole-startup.py "$baseline" "$current" "$ref" > "$out/startup.jsonl"
+    if [[ -f /usr/share/bash-completion/bash_completion ]]; then
+      rc="$RUNNER_TEMP/completion.rc"
+      printf '%s\n' '. /usr/share/bash-completion/bash_completion' 'declare -F _init_completion >/dev/null || declare -F _comp_initialize >/dev/null || exit 1' > "$rc"
+      sha256sum /usr/share/bash-completion/bash_completion > "$out/completion-source.txt"
+      python3 tools/bench_login.py "$current" --previous "$baseline" --bash "$ref" --rcfile "$rc" --runs 21 > "$out/completion-rc.txt"
+    fi
     if [[ $RUNNER_OS == Linux ]] && command -v strace >/dev/null; then
       # Attribute system-profile work on a real PTY. Keep traced runs out of
       # the timing table because ptrace changes launch and wait costs.
@@ -54,8 +60,29 @@ case "$SUITE" in
     ;;
   whole-language)
     python3 tools/ci/whole-language.py "$baseline" "$current" "$ref" > "$out/language.tsv"
+    regex_locale=C.UTF-8
+    if [[ $RUNNER_OS == macOS ]]; then regex_locale=en_US.UTF-8; fi
+    cc -O2 tools/ci/regex-engine.c -o "$RUNNER_TEMP/regex-engine"
+    LC_ALL="$regex_locale" "$RUNNER_TEMP/regex-engine" > "$out/host-libc-regex.tsv"
+    if [[ $RUNNER_OS == Linux ]] && command -v musl-gcc >/dev/null; then
+      musl-gcc -O2 -static tools/ci/regex-engine.c -o "$RUNNER_TEMP/musl-regex"
+      LC_ALL=C.UTF-8 "$RUNNER_TEMP/musl-regex" > "$out/musl-regex.tsv"
+    fi
+    if [[ $RUNNER_OS == Linux ]] && command -v strace >/dev/null; then
+      python3 - <<'PY' > "$RUNNER_TEMP/quote-pipe.sh"
+import runpy
+cases = runpy.run_path("tools/ci/whole-language.py")["workloads"]()
+print(next(source for label, n, source, _, _ in cases if label == "double quote $v/pipe" and n == 768))
+PY
+      for program in current ref; do
+        cat "$RUNNER_TEMP/quote-pipe.sh" |
+          strace -qq -c -e read -o "$out/quote-pipe-reads-$program.txt" "${!program}" --noprofile --norc > "$out/quote-output-$program.txt"
+      done
+      cmp "$out/quote-output-current.txt" "$out/quote-output-ref.txt"
+    fi
     ;;
   whole-process)
+    python3 tests/shell.py "$current" -v -k read_uses_tmout
     python3 tests/review_whole_process.py "$current" "$ref"
     python3 tools/ci/whole-process.py "$baseline" "$current" "$ref" > "$out/process.tsv"
     python3 tools/bench_streams.py "$baseline" "$current" "$ref" --case redirect --case pipe --case 'quoted heredoc' --runs 7 --sizes 0 1 4096 262144 4194304 > "$out/streams.txt"

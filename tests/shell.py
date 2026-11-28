@@ -75,6 +75,36 @@ class ShellTests(unittest.TestCase):
                         else:
                             self.assertEqual(result.stderr, b"")
 
+    def test_whole_audit_exec_hands_the_terminal_back(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                controller, master = pty.fork()
+                if controller == 0:
+                    try:
+                        original = os.getpgrp()
+                        check_parent = 'import os; p=os.getppid(); print(int(os.getpgid(p)==p))'
+                        cases = [
+                            ('exec "$1" -c "import os; print(os.getpgrp())"',
+                             f"{original}\n".encode()),
+                            ('exec ./missing-program; "$1" -c "$2"; :', b"1\n"),
+                        ]
+                        for source, expected in cases:
+                            result = subprocess.run(
+                                [shell, "--norc", "-ic", source, "sh", sys.executable, check_parent],
+                                cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL,
+                                capture_output=True, timeout=4)
+                            if (result.returncode, result.stdout, os.tcgetpgrp(0)) != (
+                                    0, expected, original):
+                                os._exit(1)
+                        os._exit(0)
+                    except BaseException:
+                        os._exit(2)
+                try:
+                    _, status = os.waitpid(controller, 0)
+                    self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+                finally:
+                    os.close(master)
+
     def test_whole_audit_job_control_without_controlling_terminal(self):
         command = 'case $- in *m*) echo on;; *) echo off;; esac; set -m; shopt -qo monitor'
         for shell in self.shells_for(5):
@@ -2131,8 +2161,9 @@ for TMOUT in 0 invalid -1; do
     value=before; read value <<<ready; echo "$?/$value"
 done
 TMOUT=.01 read -r -u 7 value 7<&- 2>/dev/null; echo "$?"
+value=old; TMOUT=.01 read -r value </dev/null; echo "$?/$value"
 { sleep .08; echo later; } | { TMOUT=.001 read -t 2 value; echo "$?/$value"; }
-""", 0, b"0/8192\n0/8192\n0/ready\n0/ready\n0/ready\n1\n0/later\n", minimum=5)
+""", 0, b"0/8192\n0/8192\n0/ready\n0/ready\n0/ready\n1\n1/\n0/later\n", minimum=5)
 
         for shell in self.shells_for(5):
             read_fd, write_fd = os.pipe()
@@ -2140,13 +2171,13 @@ TMOUT=.01 read -r -u 7 value 7<&- 2>/dev/null; echo "$?"
                 writer.write(b"ready\npartial")
                 result = subprocess.run(
                     [shell, "-c", 'read -r line; echo "$?/$line"; '
-                     'read -r line; (( $? > 128 )) && echo "expired/$line"; '
+                     'read -r line; echo "$?/$line"; '
                      'read -r -t 0 line; echo "$?/$line"'],
                     stdin=source, capture_output=True, cwd=self.cwd,
                     env=self.env | {"TMOUT": ".05"}, timeout=3,
                 )
                 self.assertEqual((result.returncode, result.stdout, result.stderr),
-                                 (0, b"0/ready\nexpired/partial\n1/partial\n", b""))
+                                 (0, f"0/ready\n{128 + signal.SIGALRM}/partial\n1/partial\n".encode(), b""))
 
     def test_set_prints_reusable_scalars_and_arrays(self):
         self.compare(r"""__plain=yes

@@ -66,3 +66,28 @@ The first correct numerical comparator inspected both names on every comparison.
 The two largest multiline and borrowed-string comparisons separate the avoided work from launch time. In the ordinary numeric pathname controls, the corrected sorter took 9.566, 12.947 and 19.250 ms against 9.020, 12.562 and 18.837 ms for the original sorter. Its added cost buys the verified ordering of oversized numbers. For a missing dynamic case pattern at 128 arms, direct comparison reduced the measured time from 7.713 to 4.826 ms. The fixed-pattern and regex controls continue to cover the already faster paths.
 
 大きな複数行入力と長い文字列の反復で、不要な再解析とコピーの影響が見える。通常桁数の数値ファイル名では正しいソートの追加費用も表に示した。128分岐の変数パターンで不一致の場合は 7.713 ms から 4.826 ms になった。静的な分岐・glob・正規表現・置換も同じ手順で測定した。
+
+## Regex misses and shared stdin, 2026-11-29 / 正規表現の不一致と標準入力
+
+On the native Linux x86-64 runner, the original 2,048-character regex miss took 3.931 ms for the candidate and 3.606 ms for Bash. At 512 characters the same measurements were 1.287 and 1.957 ms. This reversal prompted a separate measurement of `regexec` and of the shell code surrounding it.
+
+The static conditional borrows the stored UTF-8 subject. Up to 255 bytes, the regex adapter adds a terminator in a stack buffer. Larger subjects go into a new `CString`. A regex with up to 15 capture groups uses stack storage for the offsets. A failed match creates no captured strings and clears `BASH_REMATCH`. The raw C fixture compiles `^f+hit$` once, then runs 1,000 validated misses on the same string, with or without copying that string before each call. On the M1 the two curves nearly overlapped. These are medians from seven alternating measurements in milliseconds. [C fixture](../tools/ci/regex-engine.c)
+
+| Leading `f` characters | 0 | 512 | 1,024 | 2,048 | 8,192 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Precompiled libc, caller's string | 0.303 | 10.424 | 21.487 | 42.300 | 166.563 |
+| Precompiled libc, fresh copy | 0.389 | 10.815 | 21.367 | 41.944 | 168.746 |
+
+The candidate checks a required trailing literal after successful compilation. The optimization accepts case-sensitive EREs ending in `$` whose preceding bytes are ASCII letters, digits, space, underscore, period, slash, hyphen, caret, dollar sign, plus, question mark or asterisk. Concatenation makes the final uninterrupted run of letters and digits mandatory, and the final anchor fixes its position. An absent suffix gives the ordinary miss result and clears the match array. Inputs passing that test still execute the compiled POSIX expression. Alternation, quoting escapes, bracket expressions, parentheses, non-ASCII patterns, case folding and invalid expressions follow the native path. The helper preserves the previous error for a subject containing NUL.
+
+On the M1, nine interleaved end-to-end measurements used the preceding language candidate, the suffix check, and GNU Bash 5.3.20. Each process evaluated the regex 150 times. The capture control verified the matched length and the subgroup bytes. The native library still determines both control results. Both isolated Tonari executables occupied 2,129,664 bytes. [Public workloads and capture checks](../tools/ci/whole-language.py)
+
+| Workload | Leading characters | Before (ms) | After (ms) | Bash (ms) |
+| --- | --- | --- | --- | --- |
+| Missing suffix | 512 / 1,024 / 2,048 | 6.908 / 8.186 / 11.298 | 5.224 / 4.833 / 5.159 | 13.191 / 14.443 / 18.897 |
+| Correct suffix, mismatch before it | 512 / 1,024 / 2,048 | 6.922 / 8.480 / 11.542 | 6.481 / 8.545 / 11.743 | 13.240 / 14.773 / 18.715 |
+| Successful grouped match | 512 / 1,024 / 2,048 | 6.192 / 7.506 / 9.871 | 5.963 / 7.685 / 10.015 | 12.710 / 14.569 / 16.939 |
+
+The 768-line pipe case supplied 13,090 bytes. The same Linux runner measured 3.345 ms for Tonari and 3.794 ms for Bash. Tonari's `input::stdin_reader` and GNU's `fd_to_buffered_stream` both use one-byte reads on a nonseekable command input. An external command inheriting the pipe must be able to consume the bytes following its command line. The native job compares read counts under `strace` separately from wall timings when the tracer is available. [Native job](../tools/ci/whole-audit.sh)
+
+Linux x86-64 で長い文字列では当初の正規表現照合が Bash の時間を超えた。C の単体測定では、文字列のコピー以外の `regexec` 自体の時間が長さに応じて増えていた。コンパイルが成功した単純な式だけ、末尾のアンカーと必須リテラルを先に調べる。候補が通った場合や、選択・引用・文字クラス・キャプチャ・大小文字を無視する式では POSIX 実装が照合を行う。接尾辞が正しく途中だけ異なる例、キャプチャ内容、無効な式の終了値 2、直前の照合結果の保持、不一致後の配列クリアを個別に検証した。パイプ入力の1バイト読み取りは、子プロセスが後続入力を同じ記述子から読めるようにするためで、GNU Bash も同じ方式を使う。

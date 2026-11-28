@@ -15,6 +15,15 @@ def shell_cases(n, size):
     def loop(body):
         return f"for ((i=0;i<{n};i++)); do {body}; done"
 
+    for name, setup, read in (
+        ("read regular", "", "IFS= read -r -u 7 row"),
+        ("read regular with TMOUT", "TMOUT=1; ", "IFS= read -r -u 7 row"),
+        ("read here string", "", "IFS= read -r row <<<ok"),
+    ):
+        lines = 125 * n
+        source = (setup + f"exec 7<records; for ((i=0;i<{lines};i++)); do {read} || exit 9; "
+                  + 'done; echo "$i/$row"')
+        yield name, source, f"{lines}/ok", None
     yield "assignment pipeline", loop("x=ok | :") + "; echo $i", str(n), None
     yield "integer pipeline", ("declare -i x=5; count=0; " + loop("x=count++ | :")
                                + '; echo "$count:$x"'), "0:5", f"{n}:5"
@@ -51,6 +60,35 @@ def report(name, size, programs, sample, runs, rng):
         print(f"{name}\t{size}\t{label}\t{median(times):.3f}\t{min(times):.3f}\t{max(times):.3f}", flush=True)
 
 
+def descriptor_controls(root, env, shells, runs, rng):
+    path = root / "redirected"
+    for n in (1024, 2048, 4096):
+        data = b"abc\n" * n
+        for label, body, redirect, expected in [
+            ("loop without writes", ":", "", b""),
+            ("one stdout redirect around loop", "echo abc", ">&7", data),
+            ("stdout redirected per write", "echo abc >&7", "", data),
+        ]:
+            source = f'exec 7>redirected; for ((i=0;i<{n};i++)); do {body}; done {redirect}; echo "$i"'
+
+            def sample(_label, shell):
+                p = subprocess.run([shell, "--noprofile", "--norc", "-c", source],
+                                   cwd=root, env=env, capture_output=True, timeout=10)
+                if (p.returncode, p.stdout, p.stderr) != (0, f"{n}\n".encode(), b"") or path.read_bytes() != expected:
+                    raise RuntimeError(f"{label} N={n} {shell}: {p.returncode, p.stdout, p.stderr}")
+
+            report(label, n, shells, sample, runs, rng)
+
+        def write_control(_label, _):
+            with path.open("wb", buffering=0) as output:
+                for _ in range(n):
+                    os.write(output.fileno(), b"abc\n")
+            if path.read_bytes() != data:
+                raise RuntimeError(f"write control N={n}: wrong file contents")
+
+        report("direct regular-file writes", n, {"native": None}, write_control, runs, rng)
+
+
 def main():
     if len(sys.argv) != 4:
         raise SystemExit("usage: whole-process.py BEFORE AFTER BASH")
@@ -72,6 +110,8 @@ else:
     print(count)
 """
         (root / "reader.py").write_text(consumer)
+        (root / "records").write_bytes(b"ok\n" * 4000)
+        descriptor_controls(root, env, shells, runs, rng)
         for n in (8, 16, 32):
             size = n * 32768
             payload = root / "payload"

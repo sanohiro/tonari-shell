@@ -60,6 +60,34 @@ g(){ /usr/bin/printenv SHLVL; }; f(){ g; }
 exec 7<input; exec 8<&7; { IFS= read -ru8 a; : <&9; } 2>errors
 printf '%s/%s\n' "$?" "$a"; cat <&7; echo 'outside'
 """, "1/first\nsecond\noutside"
+    yield "duplicate output, failed writes and parent stdout", """
+exec 7>out 8<input
+echo one >&7; printf '%s\\n' two >&7; echo parent
+{ echo denied >&8; } 2>err; echo "read-only:$?"; grep -q 'echo: write error: Bad file descriptor' err && echo reported
+{ printf '' >&9; } 2>err; echo "missing:$?"; grep -q '9: Bad file descriptor' err && echo reported
+printf '' >&8; echo "empty:$?"; cat out
+trap '' PIPE; exec 7> >(true); wait "$!"
+{ echo closed >&7; } 2>err; echo "pipe:$?"; grep -q 'echo: write error: Broken pipe' err && echo reported
+""", "parent\nread-only:1\nreported\nmissing:1\nreported\nempty:0\none\ntwo\npipe:1\nreported"
+    yield "self duplicate and move", """
+exec 7>out; exec 7>&7-; echo kept >&7; cat out
+exec 7>&-; : 7>&7; echo "$?"; /usr/bin/true 7>&7-; echo "$?"
+exec 8>&1 1>&-; printf '' >&1; r=$?; echo "empty:$r" >&8
+{ echo denied >&1; } 2>err; r=$?; echo "closed:$r" >&8
+grep -q 'echo: write error: Bad file descriptor' err && echo reported >&8
+""", "kept\n0\n0\nempty:0\nclosed:1\nreported"
+    yield "duplicate output at the descriptor limit", """
+( exec 7>out 3>/dev/null; ulimit -n 4; echo dropped >&7; echo "full:$?" ) 2>err
+grep -q 'Too many open files' err && echo reported; [ ! -s out ] && echo empty
+( exec 7>out 3>/dev/null 0<&-; ulimit -n 4; echo kept >&7; echo "spare:$?" ); cat out
+( exec 7>out 3>/dev/null 1>&-; ulimit -n 4; echo kept >&7 ); echo "closed:$?"; cat out
+""", "full:1\nreported\nempty\nspare:0\nkept\nclosed:0\nkept"
+    yield "printf escape diagnostic follows completed lines", r"""
+{ printf 'first\n\x' >&2; } 2>err
+sed 's/^.*printf: /printf: /' err; echo
+{ printf 'second\n%b' 'arg\n\u' >&2; } 2>err
+sed 's/^.*printf: /printf: /' err; echo
+""", "first\nprintf: missing hex digit for \\x\n\\x\nsecond\nprintf: missing unicode digit for \\u\narg\n\\u"
     yield "pipeline early reader", """
 set -o pipefail; a=$(<large); printf '%s' "$a" | "$1" -c 'import os; print(os.read(0, 1).decode())'
 echo "${PIPESTATUS[*]}"

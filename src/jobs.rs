@@ -628,7 +628,7 @@ impl Jobs {
         self.detached.clear();
         self.finished.clear();
     }
-    pub(crate) fn restore_initial_group(&self) {
+    pub(crate) fn restore_initial_group(&self) -> bool {
         if let Some(tty) = self.terminal()
             && tty.shell_group != tty.original_group
             && unsafe {
@@ -638,7 +638,17 @@ impl Jobs {
             && unsafe { libc::setpgid(0, tty.original_group) } == 0
         {
             give_terminal(tty.fd.as_raw_fd(), tty.original_group);
+            return true;
         }
+        false
+    }
+
+    pub(crate) fn leave_for_exec(&mut self) -> bool {
+        if !self.restore_initial_group() {
+            return false;
+        }
+        self.tty = None;
+        true
     }
 
     pub(crate) fn detach_started(&mut self, pids: impl Iterator<Item = pid_t>) {

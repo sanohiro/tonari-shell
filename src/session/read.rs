@@ -387,6 +387,16 @@ pub(super) fn run(
             return Flow::Continue(code);
         }
     };
+    if opts.timeout.is_some_and(|duration| !duration.is_zero()) {
+        // A positive read deadline applies to a terminal or pipe. Regular
+        // files complete at filesystem speed even with a very short timeout.
+        let mut stat = std::mem::MaybeUninit::uninit();
+        if unsafe { libc::fstat(opts.fd, stat.as_mut_ptr()) } == 0
+            && unsafe { stat.assume_init() }.st_mode & libc::S_IFMT == libc::S_IFREG
+        {
+            opts.timeout = None;
+        }
+    }
     if crate::execute::fd::is_private(opts.fd)
         || (opts.max_chars == Some(0)
             || opts.timeout.is_some()
@@ -417,16 +427,6 @@ pub(super) fn run(
                 Flow::Continue(1)
             }
         };
-    }
-    if opts.timeout.is_some() {
-        // A positive read deadline applies to a terminal or pipe. Regular
-        // files complete at filesystem speed even with a very short timeout.
-        let mut stat = std::mem::MaybeUninit::uninit();
-        if unsafe { libc::fstat(opts.fd, stat.as_mut_ptr()) } == 0
-            && unsafe { stat.assume_init() }.st_mode & libc::S_IFMT == libc::S_IFREG
-        {
-            opts.timeout = None;
-        }
     }
     // The normal redirect installed a fresh descriptor. A plain assignment
     // has no callback or subscript that could observe its file position.

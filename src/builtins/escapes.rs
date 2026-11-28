@@ -6,11 +6,16 @@ pub(crate) enum Mode {
     Argument,
 }
 
-pub(crate) fn decode(mut input: &[u8], out: &mut Vec<u8>, mode: Mode) -> bool {
+pub(crate) fn decode(
+    mut input: &[u8],
+    out: &mut Vec<u8>,
+    mode: Mode,
+    mut before_warning: impl FnMut(&[u8]),
+) -> bool {
     while let Some((&byte, rest)) = input.split_first() {
         input = rest;
         if byte == b'\\' {
-            if !one(&mut input, out, mode) {
+            if !one(&mut input, out, mode, &mut before_warning) {
                 return false;
             }
         } else {
@@ -20,7 +25,12 @@ pub(crate) fn decode(mut input: &[u8], out: &mut Vec<u8>, mode: Mode) -> bool {
     true
 }
 
-pub(crate) fn one(input: &mut &[u8], out: &mut Vec<u8>, mode: Mode) -> bool {
+pub(crate) fn one(
+    input: &mut &[u8],
+    out: &mut Vec<u8>,
+    mode: Mode,
+    before_warning: impl FnOnce(&[u8]),
+) -> bool {
     let Some((&escape, rest)) = input.split_first() else {
         out.push(b'\\');
         return true;
@@ -56,6 +66,7 @@ pub(crate) fn one(input: &mut &[u8], out: &mut Vec<u8>, mode: Mode) -> bool {
             let (value, count) = digits(input, 16, limit, 0);
             if count == 0 {
                 if mode != Mode::Echo {
+                    before_warning(out);
                     let kind = if escape == b'x' { "hex" } else { "unicode" };
                     diagnostic!("printf: missing {kind} digit for \\{}", escape as char);
                 }

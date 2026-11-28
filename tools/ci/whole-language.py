@@ -36,6 +36,16 @@ def state_checks(shells, env, root):
             'p="w*"; case $subject in "$p") exit 2;; $p) :;; *) exit 3;; esac; '
             'p=WORD; shopt -s nocasematch; case $subject in $p) :;; *) exit 4;; esac; '
             'p=none; case $subject in w*) p=word ;;& $p) echo live;; esac', "live\n"),
+        "regex suffix, captures and errors": (
+            r'''match(){ [[ $1 =~ $2 ]] 2>/dev/null; printf '%s/%s/<%s>/<%s>\n' "$?" "${#BASH_REMATCH[@]}" "${BASH_REMATCH[0]}" "${BASH_REMATCH[1]}"; }
+match ffhit '^f+hit$'; BASH_REMATCH[7]=old; match ffhix '^f+hit$'
+match ffxhit '^f+hit$'; match foo 'foo|barhit$'; match barhit '^(foo|bar)hit$'
+match xxhit '^[[:alpha:]]+hit$'; match 'hit$' '^hit\$$'; match $'ffhit\n' '^f+hit$'
+shopt -s nocasematch; match FFHIT '^f+hit$'; match x '['; shopt -u nocasematch
+match ffhit '^f+(hit)$'; match 'f.hit' '^f\.hit$' ''',
+            "0/1/<ffhit>/<>\n1/0/<>/<>\n1/0/<>/<>\n0/1/<foo>/<>\n0/2/<barhit>/<bar>\n"
+            "0/1/<xxhit>/<>\n0/1/<hit$>/<>\n1/0/<>/<>\n0/1/<FFHIT>/<>\n"
+            "2/1/<FFHIT>/<>\n0/2/<ffhit>/<hit>\n0/1/<f.hit>/<>\n"),
         "quoted comparison and side effects": (
             'set -- "a*b"; left=ab; right="a*b"; declare -n r=right; '
             '[[ $left == $r && $left != "$r" && $1 == "$r" ]] || exit 1; '
@@ -69,7 +79,11 @@ def state_checks(shells, env, root):
     for label, (script, expected) in checks.items():
         for shell in shells:
             check(f"{label}/{shell}", launch(shell, ["-c", script], env, root), expected)
+    pipe_script = (b'v=blue\ns="start\n$v\nend"\nread -r item\nrecord for read\n'
+                   b'printf "<%s>\\n" "$item"\ncat\nrecord for child\n')
     for i, shell in enumerate(shells):
+        check(f"shared command pipe/{shell}", launch(shell, [], env, root, pipe_script),
+              "<record for read>\nrecord for child\n")
         script = 'w=(雪); declare -n elt="w[0]"; n=${#elt}; echo "$n"'
         result = launch(shell, ["-c", script], env, root)
         if i == 2 and not have_numeric[i] and result.stdout == b"0\n":
@@ -143,6 +157,13 @@ def workloads():
                            ("regex", "[[ $s =~ ^f+hit$ ]]")):
             script = start + f"for ((i=0;i<150;i++)); do {expr} && exit 1; done; echo miss"
             yield f"near-tail miss {kind}", n, script, "miss", "file"
+        start = "s=" + "f" * n
+        yield "regex present suffix/internal miss", n, (
+            start + 'xhit; for ((i=0;i<150;i++)); do [[ $s =~ ^f+hit$ ]] && exit 1; done; '
+            'echo "${#BASH_REMATCH[@]}"'), "0", "file"
+        yield "regex capture hit", n, (
+            start + 'hit; for ((i=0;i<150;i++)); do [[ $s =~ ^f+(hit)$ ]] || exit 1; done; '
+            'echo "${#BASH_REMATCH[0]}/${BASH_REMATCH[1]}"'), f"{n + 3}/hit", "file"
     for axis, sizes in (("matches", (128, 256, 512)), ("replacement bytes", (8, 16, 32))):
         for n in sizes:
             matches = n if axis == "matches" else 128

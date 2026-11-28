@@ -772,7 +772,9 @@ fn render(
         input = rest;
         match byte {
             b'\\' => {
-                escapes::one(&mut input, out, Mode::Format);
+                escapes::one(&mut input, out, Mode::Format, |output| {
+                    args.flush_lines(output)
+                });
             }
             b'%' if input.first() == Some(&b's') => {
                 out.extend_from_slice(args.next().as_bytes());
@@ -840,8 +842,12 @@ fn render(
                     }
                     b'b' => {
                         let mut bytes = Vec::new();
-                        let complete =
-                            escapes::decode(args.next().as_bytes(), &mut bytes, Mode::Argument);
+                        let complete = escapes::decode(
+                            args.next().as_bytes(),
+                            &mut bytes,
+                            Mode::Argument,
+                            |_| args.flush_lines(out),
+                        );
                         spec.bytes(&bytes, out)?;
                         if !complete {
                             return Ok(false);
