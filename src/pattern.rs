@@ -1,5 +1,5 @@
 mod bracket;
-pub(crate) use bracket::portable_symbol;
+pub(crate) use bracket::{portable_symbol,posix_list_item};
 pub(crate) mod directory;
 pub(crate) mod extended;
 mod glob_locale;
@@ -217,6 +217,11 @@ impl<T: AsRef<str>> Matcher<T> {
                 };
                 match c_name {
                     Some(name) => test(name),
+                    None if value.len() < 256 => {
+                        let mut local=[0u8;256];
+                        local[..value.len()].copy_from_slice(value);
+                        CStr::from_bytes_with_nul(&local[..=value.len()]).is_ok_and(test)
+                    }
                     None => CString::new(value).is_ok_and(|name| test(&name)),
                 }
             }
@@ -262,8 +267,7 @@ impl<T: AsRef<str>> Matcher<T> {
         if let Self::Bracket(compiled, source) = self
             && compiled.utf8 != bracket::BracketPattern::utf8_locale()
         {
-            return bracket::BracketPattern::new(source.as_ref().as_bytes())
-                .is_some_and(|p| p.accepts(value.as_bytes(), false));
+            return extended::session_match(value,source.as_ref(),false,session);
         }
         self.matches(value)
     }
@@ -870,6 +874,7 @@ fn paths(
             None
         };
         let mut matched = Vec::new();
+        let trailing = !rest.is_empty() && rest.bytes().all(|b|b==b'/');
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
             visit_names(
@@ -881,7 +886,7 @@ fn paths(
                 } else {
                     directory::Prefix::Exact(literal_prefix.as_bytes())
                 },
-                |raw, _| {
+                |raw, kind| {
                     if required_extension.is_some_and(|suffix| !raw.to_bytes().ends_with(suffix)) {
                         return;
                     }
@@ -915,6 +920,10 @@ fn paths(
                     );
                     path.push_str(&prefix);
                     path.push_str(name);
+                    if trailing {
+                        if kind != libc::DT_DIR && !std::path::Path::new(&path).is_dir() { return; }
+                        path.push_str(rest);
+                    }
                     matched.push(path);
                 },
             );
@@ -924,6 +933,7 @@ fn paths(
         }
         expanded = true;
         paths = matched;
+        if trailing { rest=""; }
         known_existing = true;
     }
     // A literal suffix must exist. A trailing slash asks the OS for a directory.

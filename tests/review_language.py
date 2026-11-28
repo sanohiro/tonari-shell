@@ -67,6 +67,13 @@ def main():
         "continued array name": 'a\\\nb=(q)x; printf "%s" "$ab"',
         "alias print with operands": 'alias existing=value; alias -p next=item >/dev/null; alias next',
         "here document function": 'f() { cat <<END; }\nshell data\nEND\ndefinition=$(declare -f f); unset -f f; eval "$definition"; f',
+        "two substitution documents": 'printf "<%s>" "$(cat <<A)" "$(cat <<B)"\n# first\nA\n# second\nB\n',
+        "suffix outside document": 'printf "<%s>" "$(cat <<B)" <<A\n# inner\nB\n# outer\nA\n',
+        "arithmetic sequence subscript": 'a=(5); echo "$((a[@]+1))"; declare -A m=([@]=7); echo "$((m[@]))"',
+        "brace tilde after alternatives": 'printf "%s\n" ~+{,/x} ~ro{ot,ot}',
+        "brace groups in current substitution": 'printf "%s" "${ { echo one; }; { echo two; }; }"',
+        "wildcard literal escape": r"""p='a\';v='a\'; [[ $v == $p ]]; printf "%s/%s/%s" "$?" "${v/$p/X}" "${v%%$p}" """,
+        "nested extended groups": "p='@" + "(@" * 70 + "(a|b)" + ")" * 71 + "'; [[ a == $p ]]; echo $?",
         "two here document functions": 'f() { cat <<A; }; g() { cat <<B; }\none\nA\ntwo\nB\nfirst=$(declare -f f); second=$(declare -f g); unset -f f g; eval "$first"; eval "$second"; f; g',
     }
     sh, bash = args.tonari.resolve(), args.bash.resolve()
@@ -83,6 +90,8 @@ def main():
             if name == "alias print with operands":
                 options = dict(env, BASH_COMPAT=version)
 
+            if name == "brace groups in current substitution" and tuple(map(int,version.split("."))) < (5,3):
+                continue
             observed = [
                 subprocess.run([exe, "--noprofile", "--norc", "-c", script],
                                env=options, cwd=scratch, capture_output=True, timeout=10)

@@ -20,8 +20,7 @@ pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
     }
     with_tokens(text, |tokens, spans| {
         if tokens.iter().any(|t| {
-            matches!(t, Token::ArrayStart | Token::EndArm(_))
-                || matches!(t.keyword(), Some("case" | "[[" | "function"))
+            t.preserve_layout() || t.keyword()==Some("function")
         }) {
             return Cow::Borrowed(text);
         }
@@ -129,7 +128,7 @@ pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize,
     }) {
         return history_word_spans(line);
     }
-    let _extglob = crate::ScopedCell::enter(&EXTGLOB, extglob);
+    let _extglob = crate::ScopedCell::enter(&READ_OPTIONS, ReadOptions {extglob, ..READ_OPTIONS.get()});
     with_tokens(line, |tokens, spans| {
         let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
         for (i, (token, &(mut start, end))) in tokens.iter().zip(spans).enumerate() {

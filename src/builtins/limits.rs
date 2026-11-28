@@ -237,7 +237,7 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
                 None => limit.report(out, &values, hard && !soft, label),
             });
             if let Err(error) = result {
-                diagnostic!("ulimit: {}: {}", limit.name, crate::startup::error_message(&error));
+                diagnostic!("ulimit: {}: {}", limit.name, crate::builtins::os_message(&error));
                 return 1;
             }
         }

@@ -18,6 +18,7 @@ pub(crate) mod process_substitution;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
+pub(crate) use lookup::search_directories;
 pub(crate) use lookup::{Candidate, IgnoredExecutables, check_candidate, describe_words};
 mod spawn;
 pub(crate) use spawn::inherited_env;
@@ -337,6 +338,17 @@ fn start_raw(
     Ok(Stage::Child(pid))
 }
 
+// A missing command commonly writes to a tty, log or /dev/null. Those
+// descriptors cannot send SIGPIPE. On a pipe/socket (or with observers) a
+// real child owns the diagnostic and signal exactly as for a failed exec.
+#[cold]
+fn parent_reports_exec_error(session: &Session) -> bool {
+    if session.traps.observes_commands() { return false; }
+    let mut stat = std::mem::MaybeUninit::uninit();
+    if unsafe { libc::fstat(2, stat.as_mut_ptr()) } < 0 { return errno() == libc::EBADF; }
+    matches!(unsafe { stat.assume_init() }.st_mode & libc::S_IFMT, libc::S_IFREG | libc::S_IFCHR)
+}
+
 fn start(
     cmd: &mut PreparedCommand,
     input: Option<OwnedFd>,
@@ -480,6 +492,12 @@ fn start(
                 });
             }
             Err(e) if e.raw_os_error().is_some_and(|code| matches!(code, libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE)) => return Err(e),
+            Err(e) if launch.group.is_none() && e.raw_os_error() != Some(libc::ENOEXEC) && parent_reports_exec_error(session) => {
+                let name = &cmd.words[0];
+                let path = cmd.cached_path(session, name).unwrap_or_else(|| std::path::Path::new(name));
+                let code = external::report_exec_error(session, name.as_bytes(), path, e.raw_os_error().unwrap_or(libc::EIO));
+                return Ok(Stage::Status(code));
+            }
             // A child owns both ENOEXEC script fallback and execution errors.
             // Recheck the path there to match a racing unlink or replacement.
             Err(_) => {}
@@ -913,6 +931,11 @@ fn run_external(
                     .contains_key(PreparedCommand::MISSING_HOOK) =>
             {
                 cmd.select_missing_hook();
+            }
+            Err(hash::Absent) if cmd.redirects.is_empty() && launch.group.is_none() && parent_reports_exec_error(session) => {
+                let name = &cmd.words[0];
+                let code = external::report_exec_error(session, name.as_bytes(), std::path::Path::new(name), libc::ENOENT);
+                return Ok(Flow::Continue(code));
             }
             // Failed lookup diagnostics belong to a child. A closed pipeline
             // on stderr must not deliver the command's SIGPIPE to this shell.

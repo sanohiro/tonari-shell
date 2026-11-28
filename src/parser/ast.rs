@@ -179,7 +179,7 @@ impl CasePattern {
                     .iter()
                     .all(|p| matches!(p, Part::Text(_) | Part::Pattern(_))) =>
             {
-                if EXTGLOB.get() && parts.iter().any(|part| matches!(part, Part::Pattern(s) if crate::pattern::extended::has_group(s))) {
+                if READ_OPTIONS.get().extglob && parts.iter().any(|part| matches!(part, Part::Pattern(s) if crate::pattern::extended::has_group(s))) {
                     let text = word.extended_pattern(&|_| None, &[]);
                     return Self::Extended(text);
                 }

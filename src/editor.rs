@@ -716,6 +716,7 @@ fn read_trap(
     session: &mut Session,
     status: u8,
     screen: &mut Screen,
+    recall: &mut recall::Recall,
 ) -> io::Result<Option<Input>> {
     // A handler may run another terminal program, including a nested read.
     drop(term.take());
@@ -727,6 +728,8 @@ fn read_trap(
     if !matches!(flow, crate::Flow::Continue(_)) {
         return Ok(Some(Input::Control(flow)));
     }
+    // A handler may clear or replace the history table while editing.
+    *recall = recall::Recall::new(session.history_lines().len());
     *term = Some(Terminal::enter(session.bindings.paste())?);
     screen.row = 0;
     screen.resize();
@@ -787,7 +790,7 @@ pub fn line(
                             screen.draw(prompt, &text, cursor, "")?;
                         } else if session.traps.read_pending() {
                             if let Some(outcome) =
-                                read_trap(&mut term, session, status, &mut screen)?
+                                read_trap(&mut term, session, status, &mut screen, &mut recall)?
                             {
                                 session.editor_queue = std::mem::take(&mut keys.queued);
                                 return Ok(outcome);
@@ -804,7 +807,7 @@ pub fn line(
     }
     loop {
         if session.traps.read_pending()
-            && let Some(outcome) = read_trap(&mut term, session, status, &mut screen)?
+            && let Some(outcome) = read_trap(&mut term, session, status, &mut screen, &mut recall)?
         {
             session.editor_queue = std::mem::take(&mut keys.queued);
             return Ok(outcome);

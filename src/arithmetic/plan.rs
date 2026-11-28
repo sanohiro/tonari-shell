@@ -21,11 +21,7 @@ impl Program {
         if source.len() > 256 || source.contains(['$', '[', '\\', '"', '`']) {
             return None;
         }
-        let mut parser = Parser {
-            source,
-            tokens: None,
-            token: Token::End,
-        };
+        let mut parser = Parser::new(source);
         let mut ops = Vec::new();
         let mut operators = Vec::new();
         let mut target = None;

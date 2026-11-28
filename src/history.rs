@@ -447,6 +447,10 @@ impl InitialJournal {
     }
 }
 
+struct HistoryInsertion {
+    erase_duplicates: bool,
+}
+
 impl Session {
     pub(crate) fn history_number(&self) -> usize {
         self.history
@@ -518,15 +522,15 @@ impl Session {
         } else {
             text
         };
-        if !self.history_matches_rules(text, self.history_lines().last()) {
+        let Some(policy) = self.history_insertion(text, self.history_lines().last()) else {
             return false;
-        }
+        };
         if !text.contains('\n') || self.shopt.cmdhist {
-            self.push_history_limited(text, true, limit);
+            self.push_history_limited(text, true, limit, &policy);
         } else {
             let mut count = 0;
             for line in text.split('\n').filter(|s| !s.is_empty()) {
-                self.push_history_limited(line, true, limit);
+                self.push_history_limited(line, true, limit, &policy);
                 count += 1;
             }
             self.history_mut().current_lines = count;
@@ -536,18 +540,28 @@ impl Session {
     #[cfg(test)]
     fn push_history(&mut self, text: &str, current: bool) {
         let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
-        self.push_history_limited(text, current, limit);
+        self.push_history_limited(
+            text,
+            current,
+            limit,
+            &HistoryInsertion {
+                erase_duplicates: false,
+            },
+        );
     }
 
-    fn push_history_limited(&mut self, text: &str, current: bool, limit: usize) {
+    fn push_history_limited(
+        &mut self,
+        text: &str,
+        current: bool,
+        limit: usize,
+        policy: &HistoryInsertion,
+    ) {
         if limit == 0 {
             return;
         }
-        let erase = self
-            .scalar_setting("HISTCONTROL")
-            .is_some_and(|v| v.split(':').any(|w| w == "erasedups"));
         let h = self.history_mut();
-        h.append_line(text.into(), erase, true);
+        h.append_line(text.into(), policy.erase_duplicates, true);
         h.timestamps
             .push(unsafe { libc::time(std::ptr::null_mut()) });
         h.trim_to(limit);
@@ -586,32 +600,42 @@ impl Session {
 
     fn accept_history(&self, source: &str, previous: Option<&String>) -> bool {
         self.history_limit("HISTSIZE", DEFAULT_HISTSIZE) > 0
-            && self.history_matches_rules(source, previous)
+            && self.history_insertion(source, previous).is_some()
     }
 
     fn record_replay(&mut self, text: &str) -> bool {
         let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
-        if limit != 0 && self.history_matches_rules(text, self.history_lines().last()) {
-            self.push_history_limited(text, false, limit);
+        if limit != 0
+            && let Some(policy) = self.history_insertion(text, self.history_lines().last())
+        {
+            self.push_history_limited(text, false, limit, &policy);
             return true;
         }
         false
     }
 
-    fn history_matches_rules(&self, source: &str, previous: Option<&String>) -> bool {
+    fn history_insertion(
+        &self,
+        source: &str,
+        previous: Option<&String>,
+    ) -> Option<HistoryInsertion> {
         let session = self;
         let text = source.strip_suffix('\n').unwrap_or(source);
         if text.is_empty() || session.interactive && text.trim().is_empty() {
-            return false;
+            return None;
         }
         let previous = previous.map(String::as_str);
         let control = session.scalar_setting("HISTCONTROL").unwrap_or_default();
+        let mut erase_duplicates = false;
         for rule in control.split(':') {
+            if rule == "erasedups" {
+                erase_duplicates = true;
+            }
             if matches!(rule, "ignorespace" | "ignoreboth") && text.starts_with(' ') {
-                return false;
+                return None;
             }
             if matches!(rule, "ignoredups" | "ignoreboth") && previous == Some(text) {
-                return false;
+                return None;
             }
         }
         if session.scalar_setting("HISTIGNORE").is_some_and(|s| {
@@ -624,9 +648,9 @@ impl Session {
                     })
             })
         }) {
-            return false;
+            return None;
         }
-        true
+        Some(HistoryInsertion { erase_duplicates })
     }
 }
 
@@ -861,7 +885,10 @@ impl History {
         // A writer that exited mid-record left no complete newline. Discard
         // just that suffix while holding the same lock used by every writer.
         let mut len = meta.len();
-        if len != 0 {
+        // A matching copy already contains the committed final newline. Its
+        // stamp is checked against the metadata obtained under the writer lock.
+        let tracked = window.filter(|cache| cache.committed_tail(&meta));
+        if len != 0 && tracked.is_none() {
             let mut last = [0];
             if journal.read_exact_at(&mut last, len - 1).is_err() {
                 return;
@@ -884,7 +911,6 @@ impl History {
                 }
             }
         }
-        let tracked = window.filter(|cache| cache.tracks(&journal));
         if journal.write_all(entry.as_bytes()).is_err() {
             // Keep the next writer from joining its record to a partial write.
             let _ = journal.set_len(len);

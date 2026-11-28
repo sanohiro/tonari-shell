@@ -673,7 +673,7 @@ impl Session {
         {
             return false;
         }
-        let Some(v) = self.variables.get_mut(name) else {
+        let Some(v) = self.variables.value_mut(name, false) else {
             return false;
         };
         if v.dynamic || v.nameref || v.readonly || v.integer || v.letter_case.is_some() {
@@ -810,7 +810,7 @@ impl Session {
         if append
             && !global
             && let ArrayItems::Indexed(words) = items
-            && let Some(var) = self.variables.get_mut(name)
+            && let Some(var) = self.variables.value_mut(name, false)
             && !var.dynamic
             && !var.readonly
             && !var.integer
@@ -1194,14 +1194,14 @@ impl Session {
                 .insert(name.into(), Variable::scalar(inherited, exported));
         }
         let value = self.convert_case(value, self.variables[name].letter_case);
-        let var = self.variables.get_mut(name).unwrap();
+        let var = self.variables.value_mut(name, false).unwrap();
         var.declared = true;
         var.array_assigned = true;
         var.make_array().insert(index, value);
     }
 
     pub(super) fn unset_element(&mut self, name: &str, index: i64) {
-        if let Some(var) = self.variables.get_mut(name) {
+        if let Some(var) = self.variables.value_mut(name, false) {
             if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
                 array.remove(index);
             } else if index == 0 {

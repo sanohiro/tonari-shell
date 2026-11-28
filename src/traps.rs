@@ -366,7 +366,9 @@ impl Traps {
             original = *old;
         } else if real {
             original = disposition(sig)?;
-            if original.sa_sigaction == libc::SIG_IGN {
+            if original.sa_sigaction == libc::SIG_IGN
+                || sig == libc::SIGCHLD && INHERITED_CHLD_IGNORED.load(Relaxed)
+            {
                 if !interactive
                     && !self.interactive_origin
                     && self.async_resettable & (signal_bit(sig)) == 0

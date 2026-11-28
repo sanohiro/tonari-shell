@@ -44,9 +44,7 @@ impl Reader {
         }
         match self.operand() {
             Some(Token::Word(word)) => Ok(word.word),
-            None => Err(Error::Incomplete(Incomplete::Message(
-                "unfinished conditional expression",
-            ))),
+            None => Err(Error::incomplete_message("unfinished conditional expression")),
             _ => Err(Error::Invalid("expected a conditional operand")),
         }
     }
@@ -63,9 +61,7 @@ impl Reader {
             match self.tokens.pop_front() {
                 Some(Token::RightParen) => return Ok(e),
                 None => {
-                    return Err(Error::Incomplete(Incomplete::Message(
-                        "unclosed conditional grouping",
-                    )));
+                    return Err(Error::incomplete_message("unclosed conditional grouping"));
                 }
                 _ => return Err(Error::Invalid("expected ')' in conditional expression")),
             }

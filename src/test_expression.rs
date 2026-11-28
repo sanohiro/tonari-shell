@@ -354,7 +354,7 @@ fn ere_list_end(body: &[u8]) -> Option<usize> {
             return Some(i);
         }
         if byte == b'['
-            && let Some((length, _)) = list_item(&body[i..])
+            && let Some((length, _)) = pattern::posix_list_item(&body[i..])
         {
             i += length;
         } else {
@@ -364,13 +364,7 @@ fn ere_list_end(body: &[u8]) -> Option<usize> {
     None
 }
 
-fn list_item(input: &[u8]) -> Option<(usize, u8)> {
-    let [b'[', mark @ (b'=' | b'.' | b':'), tail @ ..] = input else {
-        return None;
-    };
-    let end = tail.windows(2).position(|w| w == [*mark, b']'])?;
-    Some((end + 4, *mark))
-}
+
 
 fn open_list(pattern: &str) -> Option<usize> {
     let bytes = pattern.as_bytes();
@@ -451,7 +445,7 @@ fn portable_list(body: &str) -> Option<String> {
     use Member::*;
     let (negative, mut rest) = body.strip_prefix('^').map_or((false, body), |s| (true, s));
     if !negative
-        && let Some((n, mark)) = list_item(rest.as_bytes())
+        && let Some((n, mark)) = pattern::posix_list_item(rest.as_bytes())
         && n == rest.len()
         && matches!(mark, b'.' | b'=')
     {
@@ -474,7 +468,7 @@ fn portable_list(body: &str) -> Option<String> {
     }
     let mut members = Vec::new();
     while !rest.is_empty() {
-        if let Some((n, mark)) = list_item(rest.as_bytes()) {
+        if let Some((n, mark)) = pattern::posix_list_item(rest.as_bytes()) {
             let name = &rest[2..n - 2];
             let item = if mark == b':' {
                 Class(&rest[..n])
@@ -678,22 +672,7 @@ fn capture_count(expression: &str) -> usize {
         match byte {
             b'\\' => bytes = bytes.get(1..).unwrap_or_default(),
             b'(' => groups += 1,
-            b'[' => {
-                bytes = bytes.strip_prefix(b"^").unwrap_or(bytes);
-                bytes = bytes.strip_prefix(b"]").unwrap_or(bytes);
-                while let Some((&c, after)) = bytes.split_first() {
-                    bytes = after;
-                    if c == b']' {
-                        break;
-                    }
-                    if c == b'['
-                        && let Some(&marker @ (b':' | b'=' | b'.')) = after.first()
-                        && let Some(end) = after[1..].windows(2).position(|s| s == [marker, b']'])
-                    {
-                        bytes = &after[end + 3..];
-                    }
-                }
-            }
+            b'[' => {bytes=ere_list_end(bytes).map_or(&[][..], |end|&bytes[end+1..]);}
             _ => {}
         }
     }

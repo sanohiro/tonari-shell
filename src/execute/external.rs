@@ -215,6 +215,7 @@ impl External {
             return 127;
         }
         let mut error = libc::ENOENT;
+        let mut failed_path = program.as_c_str();
         let paths = self
             .search_paths
             .as_deref()
@@ -233,25 +234,29 @@ impl External {
                     error = self.script_fallback(path, fallback_in_session.then_some(session));
                     break;
                 }
-                libc::EACCES => error = libc::EACCES,
+                libc::EACCES => { error = libc::EACCES; failed_path = path; },
                 e => {
                     error = e;
                     break;
                 }
             }
         }
-        let status = exec_status(error);
-        let path = std::path::Path::new(std::ffi::OsStr::from_bytes(program.as_bytes()));
+        report_exec_error(session, program.as_bytes(), std::path::Path::new(std::ffi::OsStr::from_bytes(failed_path.to_bytes())), error)
+
+    }
+}
+
+#[cold]
+pub(super) fn report_exec_error(session: &Session, name: &[u8], path: &std::path::Path, error: i32) -> u8 {
         let reason: &[u8] = match error {
-            libc::ENOENT | libc::ENOTDIR if !program.as_bytes().contains(&b'/') => b": command not found",
+            libc::ENOENT | libc::ENOTDIR if !name.contains(&b'/') => b": command not found",
             libc::ENOENT | libc::ENOTDIR => b": No such file or directory",
             libc::EISDIR => b": Is a directory",
             libc::EACCES if path.is_dir() => b": Is a directory",
             libc::EACCES | libc::EPERM => b": Permission denied",
             _ => b": cannot execute",
         };
-        let prefix = session.diagnostic_prefix(|| session.line());
-        write_diagnostic(prefix.as_deref().unwrap_or("tonari: ").as_bytes(), program.as_bytes(), reason, b"");
-        status
-    }
+    let prefix = session.diagnostic_prefix(|| session.line());
+    write_diagnostic(prefix.as_deref().unwrap_or("tonari: ").as_bytes(), name, reason, b"");
+    exec_status(error)
 }

@@ -549,9 +549,7 @@ fn resolve_tilde(parts: &mut Vec<Part>) {
     while let Some(part) = parts.get(end) {
         let Part::Pattern(raw) = part else { return };
         let login = raw.split('/').next().unwrap();
-        if !login
-            .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
+        if !super::valid_tilde_user(login)
         {
             return;
         }

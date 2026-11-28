@@ -627,22 +627,40 @@ fn write_history_file(
     op: char,
     timestamped: bool,
 ) -> io::Result<()> {
-    if op == 'w' && session.history.as_ref().is_some_and(|h| h.incomplete(path)) {
-        return Err(error("refusing to overwrite incompletely read history"));
-    }
     let file = locked_history(
         path,
         OpenOptions::new()
             .write(true)
             .create(true)
             .append(op == 'a')
-            .truncate(false)
             .mode(0o600),
     )?;
+    let meta = file.metadata()?;
     let h = session.history_mut();
+    if op == 'w' && h.incomplete_files.contains(&(meta.dev(), meta.ino())) {
+        return Err(error("refusing to overwrite incompletely read history"));
+    }
     let first = if op == 'a' { h.written } else { 0 };
     let write = |target: &File| -> io::Result<()> {
         let mut output = io::BufWriter::new(target);
+        if op == 'a' && meta.is_file() && meta.len() > 0 && h.pending[first..].contains(&true) {
+            // Retain write-only and FIFO semantics on the primary descriptor.
+            // Only a readable regular file needs this optional boundary check.
+            let input = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(path);
+            if let Ok(input) = input {
+                let original = input.metadata()?;
+                if (original.dev(), original.ino()) == (meta.dev(), meta.ino()) {
+                    let mut last = [0];
+                    input.read_exact_at(&mut last, meta.len() - 1)?;
+                    if last != [b'\n'] {
+                        output.write_all(b"\n")?;
+                    }
+                }
+            }
+        }
         for i in first..h.lines.len() {
             if op == 'a' && !h.pending[i] {
                 continue;
@@ -655,7 +673,6 @@ fn write_history_file(
         }
         output.flush()
     };
-    let meta = file.metadata()?;
     if op == 'w' && meta.is_file() {
         let path = std::fs::canonicalize(path)?;
         replace_history(&path, meta.permissions(), |file| write(file))?;

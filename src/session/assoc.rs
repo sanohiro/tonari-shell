@@ -161,7 +161,7 @@ impl Session {
         let value = self.convert_case(value, self.variables.get(name).and_then(|v| v.letter_case));
         let var = self
             .variables
-            .get_mut(name)
+            .value_mut(name, false)
             .ok_or("missing associative array")?;
         var.make_associative()?.insert(key, value);
         var.array_assigned = true;

@@ -296,10 +296,15 @@ pub(super) fn append_expansion(
     }
 }
 
+// Native glob throughput measurements and cache byte limits are recorded in
+// docs/benchmarks.md. Only keep compact, repeatedly useful directory listings.
+const MAX_CACHED_NAME_BYTES: usize = 512 * 1024;
+const INDIRECT_BYTE_SORT_NAMES: usize = 16_384;
+
 pub(super) fn append(mut paths: Vec<String>, fields: &mut Vec<String>, collation: Collation) {
     if collation != Collation::Current && (32..=16384).contains(&paths.len()) {
         let bytes = paths.iter().map(|p| p.len() + 1).sum::<usize>();
-        if bytes <= 512 * 1024 {
+        if bytes <= MAX_CACHED_NAME_BYTES {
             PREVIOUS.with_borrow_mut(|previous| {
                 if !previous.matches(&paths, collation) {
                     previous.update(&mut paths, collation, bytes);
@@ -309,7 +314,7 @@ pub(super) fn append(mut paths: Vec<String>, fields: &mut Vec<String>, collation
             return;
         }
     }
-    if (collation == Collation::Bytes && paths.len() > 16384)
+    if (collation == Collation::Bytes && paths.len() > INDIRECT_BYTE_SORT_NAMES)
         || (cfg!(target_os = "macos") && collation == Collation::FixedLocale && paths.len() >= 32)
     {
         let bytes = paths.iter().map(|p| p.len() + 1).sum();

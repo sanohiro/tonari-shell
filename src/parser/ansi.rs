@@ -2,18 +2,6 @@ use super::Error;
 use super::Incomplete;
 use std::str::Chars;
 
-fn digits(chars: &mut Chars<'_>, radix: u32, count: usize) -> Option<u32> {
-    let mut value = None;
-    for _ in 0..count {
-        let Some(n) = chars.clone().next().and_then(|c| c.to_digit(radix)) else {
-            break;
-        };
-        chars.next();
-        value = Some(value.unwrap_or(0) * radix + n);
-    }
-    value
-}
-
 /// Decode a dollar-single-quoted word. Hex and octal escapes produce bytes,
 /// so adjacent escapes may together encode one UTF-8 character.
 pub(super) fn quoted(chars: &mut Chars<'_>) -> Result<String, Error> {
@@ -89,10 +77,7 @@ fn escapes(source: &str, braced_hex: bool) -> Result<String, Error> {
             }
             '0'..='7' => {
                 let first = escape.to_digit(8).unwrap();
-                let rest = chars.as_str();
-                let tail = digits(&mut chars, 8, 2).unwrap_or(0);
-                let count = rest.len() - chars.as_str().len();
-                ((first << (3 * count)) + tail) as u8
+                crate::word::quote::char_escape_digits(&mut chars, 8, 2, first).0 as u8
             }
             'x' if braced_hex && chars.as_str().starts_with('{') => {
                 chars.next();
@@ -112,7 +97,8 @@ fn escapes(source: &str, braced_hex: bool) -> Result<String, Error> {
                     'u' => 4,
                     _ => 8,
                 };
-                let Some(n) = digits(&mut chars, 16, count) else {
+                let (n, taken) = crate::word::quote::char_escape_digits(&mut chars, 16, count, 0);
+                if taken == 0 {
                     bytes.extend_from_slice(&[b'\\', escape as u8]);
                     continue;
                 };

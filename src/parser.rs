@@ -136,6 +136,8 @@ pub enum Error {
 }
 
 impl Error {
+    fn incomplete_message(message: &'static str) -> Self { Self::Incomplete(Incomplete::Message(message)) }
+
     pub(crate) fn unfinished_function() -> Self {
         Self::Incomplete(Incomplete::Message("unfinished function definition"))
     }
@@ -189,30 +191,10 @@ pub(crate) fn reserved(word: &str) -> bool {
 }
 
 fn reserved_spelling(word: &str) -> Option<&'static str> {
-    Some(match word {
-        "if" => "if",
-        "then" => "then",
-        "else" => "else",
-        "elif" => "elif",
-        "fi" => "fi",
-        "case" => "case",
-        "esac" => "esac",
-        "while" => "while",
-        "until" => "until",
-        "for" => "for",
-        "do" => "do",
-        "done" => "done",
-        "in" => "in",
-        "select" => "select",
-        "function" => "function",
-        "coproc" => "coproc",
-        "time" => "time",
-        "!" => "!",
-        "{" => "{",
-        "[[" => "[[",
-        "}" => "}",
-        _ => return None,
-    })
+    macro_rules! keywords {
+        ($($key:literal),+) => { match word { $($key => Some($key),)+ _ => None } };
+    }
+    keywords!("if", "then", "else", "elif", "fi", "case", "esac", "while", "until", "for", "do", "done", "in", "select", "function", "coproc", "time", "!", "{", "[[", "}")
 }
 
 pub fn parse(source: &str) -> Result<Vec<Statement>, Error> {
@@ -223,14 +205,13 @@ pub fn parse_final(source: &str) -> Result<Vec<Statement>, Error> {
     parse_source(source, true)
 }
 
+#[derive(Clone,Copy)]
+struct ReadOptions {comments:bool,posix:bool,time_options_external:bool,extquote:bool,extglob:bool}
 thread_local! {
     // Lexers invoked recursively by a substitution inherit the outer read's options.
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
-    static COMMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
-    static POSIX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static TIME_OPTIONS_EXTERNAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static EXTQUOTE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
-    static EXTGLOB: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static READ_OPTIONS: std::cell::Cell<ReadOptions> = const { std::cell::Cell::new(ReadOptions{ comments:true, posix:false,time_options_external:false,extquote:true,extglob:false }) };
+
 }
 
 pub fn session_source(
@@ -345,14 +326,11 @@ pub(crate) fn with_subscript_aliases<T>(
 fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
     let read = || {
         let _first_line = crate::ScopedCell::enter(&FIRST_LINE, line);
-        let _extglob = crate::ScopedCell::enter(&EXTGLOB, session.shopt.glob.extglob);
-        let _extquote = crate::ScopedCell::enter(&EXTQUOTE, session.shopt.extquote);
-        let _posix = crate::ScopedCell::enter(&POSIX, session.posix);
-        let _time_options_external = crate::ScopedCell::enter(
-            &TIME_OPTIONS_EXTERNAL,
-            session.posix && session.shopt.compat > 41,
-        );
-        let _comments = crate::ScopedCell::enter(&COMMENTS, session.read_comments());
+        let _options=crate::ScopedCell::enter(&READ_OPTIONS,ReadOptions{
+            comments:session.read_comments(), posix:session.posix,
+            time_options_external:session.posix && session.shopt.compat>41,
+            extquote:session.shopt.extquote,extglob:session.shopt.glob.extglob
+        });
         parse()
     };
     if session.reads_aliases() {
@@ -421,7 +399,28 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
     }
     let (tokens, spans, _) = match lex(source, false, final_input) {
         Ok(tokens) => tokens,
-        Err(error @ Error::Incomplete(_)) => {
+        Err(error @ Error::Incomplete(_)) => return retry_alias_quote(source,final_input,error),
+        Err(error) => return Err(error),
+    };
+    let mut reader = Reader::new(tokens, spans, source);
+    reader.final_input = final_input;
+    reader.list(&[])
+}
+
+// Most shell reads are a few lines. Reuse their token and span allocations;
+// nested parses take another pair while the outer reader owns its buffers.
+const MAX_CACHED_TOKENS: usize = 4096;
+type TokenBuffers = (Vec<Token>, Vec<(usize, usize)>);
+thread_local! {
+    static TOKEN_BUFFERS: std::cell::Cell<TokenBuffers> = const {
+        std::cell::Cell::new((Vec::new(), Vec::new()))
+    };
+}
+
+// During recursive lexing, a nested AST can start after the first line of
+// the outer input. Store byte offsets only. No reference outlives the lex.
+fn retry_alias_quote(source: &str, final_input: bool,error: Error) -> Result<Vec<Statement>,Error> {
+
             // An alias opening a quote can supply the missing left delimiter
             // for the following source. Only retry a literal command name.
             let aliases = aliases::current();
@@ -443,27 +442,9 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
             let mut reader = Reader::new(tokens, spans, source);
             reader.final_input = final_input;
             reader.joined_alias(name.into(), value, nested)?;
-            return reader.list(&[]);
-        }
-        Err(error) => return Err(error),
-    };
-    let mut reader = Reader::new(tokens, spans, source);
-    reader.final_input = final_input;
-    reader.list(&[])
+            reader.list(&[])
 }
 
-// Most shell reads are a few lines. Reuse their token and span allocations;
-// nested parses take another pair while the outer reader owns its buffers.
-const MAX_CACHED_TOKENS: usize = 4096;
-type TokenBuffers = (Vec<Token>, Vec<(usize, usize)>);
-thread_local! {
-    static TOKEN_BUFFERS: std::cell::Cell<TokenBuffers> = const {
-        std::cell::Cell::new((Vec::new(), Vec::new()))
-    };
-}
-
-// During recursive lexing, a nested AST can start after the first line of
-// the outer input. Store byte offsets only. No reference outlives the lex.
 struct SourceLines {
     start: usize,
     end: usize,
@@ -607,7 +588,7 @@ impl Reader {
         count - self.tokens.len()
     }
     fn subscript_aliases(&self) -> crate::alias::Aliases {
-        if POSIX.get() {
+        if READ_OPTIONS.get().posix {
             self.aliases.clone()
         } else {
             Default::default()
@@ -727,9 +708,7 @@ impl Reader {
             self.newlines();
             if self.peek().is_none() {
                 if condition != Condition::Always {
-                    return Err(Error::Incomplete(Incomplete::Message(
-                        "expected a command after operator",
-                    )));
+                    return Err(Error::incomplete_message("expected a command after operator"));
                 }
                 return Ok(statements);
             }
@@ -877,9 +856,7 @@ impl Reader {
                 }
             }
             if self.peek().is_none() {
-                return Err(Error::Incomplete(Incomplete::Message(
-                    "expected a command after pipe",
-                )));
+                return Err(Error::incomplete_message("expected a command after pipe"));
             }
             let start = self.position();
             let mut stage = match self.compound()? {
@@ -977,9 +954,7 @@ impl Reader {
             String::from("COPROC")
         };
         if self.peek().is_none() {
-            return Err(Error::Incomplete(Incomplete::Message(
-                "expected a coprocess command",
-            )));
+            return Err(Error::incomplete_message("expected a coprocess command"));
         }
         let command = if let Some(compound) = self.nested(Self::compound)? {
             if self.has_redirect() {
@@ -1003,9 +978,7 @@ impl Reader {
         let word = match self.operand() {
             Some(Token::Word(word)) => word.word,
             None => {
-                return Err(Error::Incomplete(Incomplete::Message(
-                    "expected a case word",
-                )));
+                return Err(Error::incomplete_message("expected a case word"));
             }
             _ => return Err(Error::Invalid("expected a case word")),
         };
@@ -1029,9 +1002,7 @@ impl Reader {
                 match self.operand() {
                     Some(Token::Word(word)) => patterns.push(CasePattern::new(word.word)),
                     None => {
-                        return Err(Error::Incomplete(Incomplete::Message(
-                            "unfinished case command",
-                        )));
+                        return Err(Error::incomplete_message("unfinished case command"));
                     }
                     _ => return Err(Error::Invalid("expected a case pattern")),
                 }
@@ -1105,9 +1076,7 @@ impl Reader {
                 protected: false,
                 ..
             })) if is_identifier(&name) => Ok(name),
-            None => Err(Error::Incomplete(Incomplete::Message(
-                "expected an identifier",
-            ))),
+            None => Err(Error::incomplete_message("expected an identifier")),
             _ => Err(Error::Invalid("expected an identifier")),
         }
     }
@@ -1229,7 +1198,7 @@ impl Reader {
         let start = self.position();
         let compound = self.nested(Self::compound)?.ok_or_else(|| {
             if self.peek().is_none() {
-                Error::Incomplete(Incomplete::Message("expected a function body"))
+                Error::incomplete_message("expected a function body")
             } else {
                 Error::Invalid("expected a compound function body")
             }

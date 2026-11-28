@@ -28,13 +28,21 @@ impl Write for StdoutFd<'_> {
         if error.kind() != io::ErrorKind::Interrupted
             && let Some(name) = self.0.take()
         {
-            diagnostic!("{name}: write error: {error}");
+            diagnostic!("{name}: write error: {}", os_message(&error));
         }
         Err(error)
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+pub(crate) fn os_message(error: &io::Error) -> String {
+    let text = error.to_string();
+    match text.rsplit_once(" (os error ") {
+        Some((message, _)) if error.raw_os_error().is_some() => message.to_owned(),
+        _ => text,
     }
 }
 

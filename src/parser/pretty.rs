@@ -17,10 +17,7 @@ pub(crate) fn format<'a>(source: &'a str, session: &crate::Session) -> Result<Co
         }
         let tokens = reader.tokens.make_contiguous();
         let spans = &reader.spans;
-        if tokens.iter().any(|t| {
-            matches!(t, Token::ArrayStart | Token::EndArm(_))
-                || matches!(t.keyword(), Some("case" | "[["))
-        }) {
+        if tokens.iter().any(Token::preserve_layout) {
             reader.list(&[])?;
             return Ok(Cow::Borrowed(source));
         }

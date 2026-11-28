@@ -59,6 +59,11 @@ impl Default for Word {
 
 pub(crate) const DEFAULT_IFS: &str = " \t\n";
 
+pub(crate) fn is_ifs_whitespace(sep: &str) -> bool {
+    matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c")
+}
+
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alternative {
     Default,
@@ -151,6 +156,10 @@ pub(crate) fn name_chars_len(source: &str) -> usize {
 pub fn is_identifier(name: &str) -> bool {
     let mut chars = name.bytes();
     chars.next().is_some_and(is_name_start) && chars.all(is_name_char)
+}
+
+pub(crate) fn valid_tilde_user(user: &str) -> bool {
+    user.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
 }
 
 impl Word {
@@ -1108,7 +1117,7 @@ impl Fields<'_> {
             if start < i {
                 self.literal(&text[start..i], true);
             }
-            if matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c") {
+            if is_ifs_whitespace(sep) {
                 self.whitespace = true;
             } else {
                 self.emit();

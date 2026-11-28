@@ -334,7 +334,7 @@ impl Reader {
             let Some(value) = self.aliases.get(name) else {
                 return Ok(());
             };
-            if ((!after_blank || super::POSIX.get())
+            if ((!after_blank || super::READ_OPTIONS.get().posix)
                 && !matches!(self.peek(), Some(Token::TimeUtility))
                 && protected.map_or_else(|| reserved(name), |words| words.contains(&name)))
                 || self.alias_frames.iter().any(|f| f.name == name)

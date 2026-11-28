@@ -1,4 +1,3 @@
-use super::Incomplete;
 use super::lexer::{LexWord, Token};
 use super::{Error, Reader, Word, is_identifier};
 use crate::word::name_chars_len;
@@ -88,9 +87,7 @@ impl Reader {
                     ));
                 }
                 None => {
-                    return Err(Error::Incomplete(Incomplete::Message(
-                        "unfinished array assignment",
-                    )));
+                    return Err(Error::incomplete_message("unfinished array assignment"));
                 }
                 Some(_) => return Err(Error::ArrayToken),
             }

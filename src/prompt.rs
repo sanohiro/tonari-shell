@@ -122,15 +122,7 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
         }
         '0'..='7' => {
             let octet = |c: char, chars: &mut std::str::Chars<'_>| {
-                let mut n = c.to_digit(8).unwrap();
-                for _ in 0..2 {
-                    let Some(d) = chars.clone().next().and_then(|ch| ch.to_digit(8)) else {
-                        break;
-                    };
-                    chars.next();
-                    n = n * 8 + d;
-                }
-                n as u8
+                crate::word::quote::char_escape_digits(chars, 8, 2, c.to_digit(8).unwrap()).0 as u8
             };
             let rest = chars.as_str();
             let first = octet(c, chars);

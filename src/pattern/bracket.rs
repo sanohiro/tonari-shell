@@ -2,16 +2,16 @@
 // on backslashes in these lists and on how to resume after an unclosed '['.
 use std::ffi::{CStr, CString};
 
+pub(crate) fn posix_list_item(input: &[u8]) -> Option<(usize,u8)> {
+    let [b'[', mark @ (b':' | b'=' | b'.'), rest @ ..] = input else { return None; };
+    let end=rest.windows(2).position(|p|p==[*mark,b']'])?;
+    Some((end+4,*mark))
+}
+
 fn posix_item_len(input: &[u8]) -> Option<usize> {
-    let [b'[', mark @ (b':' | b'=' | b'.'), rest @ ..] = input else {
-        return None;
-    };
-    let end = rest.windows(2).position(|p| p == [*mark, b']'])?;
-    // A quoted equivalence operand is read as ordinary list members by Bash.
-    if *mark == b'=' && rest[..end].contains(&b'\\') {
-        return None;
-    }
-    Some(end + 4)
+    let (end,mark)=posix_list_item(input)?;
+    // Bash treats an escaped equivalence operand as ordinary list members.
+    (!(mark==b'=' && input[2..end-2].contains(&b'\\'))).then_some(end)
 }
 
 // Input starts immediately after '['. The initial ']' is a literal member.
@@ -328,19 +328,7 @@ impl CharacterClass {
             b.encode_utf8(&mut right);
             return super::glob_locale::range_order(&left, &right);
         }
-        let order = a.cmp(&b);
-        if a == b
-            || (a as u32 <= 255 && b as u32 <= 255)
-            || matches!(self.fold, Some(super::CharacterLocale::Ascii))
-        {
-            return order;
-        }
-        let (mut left, mut right) = ([0u8; 5], [0u8; 5]);
-        a.encode_utf8(&mut left);
-        b.encode_utf8(&mut right);
-        unsafe { libc::strcoll(left.as_ptr().cast(), right.as_ptr().cast()) }
-            .cmp(&0)
-            .then(order)
+        a.cmp(&b)
     }
 
     pub(super) fn accepts(&self, c: char) -> bool {

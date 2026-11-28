@@ -48,6 +48,13 @@ def main():
             (["-c", 'cd /; cd "$HOME"; pushd -; pwd'], (0, b"/\n/ ~\n/\n"), {}),
             (["-c", 'shopt -p restricted_shell'], (1, b"shopt -u restricted_shell\n"), {}),
         ]
+        cases.extend([
+            (["-c", "shopt -s mailwarn noexpand_translation; shopt -q mailwarn && shopt -q noexpand_translation"], (0, b""), {}),
+            (["-c", "dirs wayward"], (2, b""), {}),
+            (["-c", "v=x; IFS=: read -r a b <<< 'one:two'; printf '%s/%s' \"$a\" \"$b\""], (0, b"one/two"), {}),
+            (["-c", "printf '%s' \"$(printf -v local_v %d 42)\"; printf '%s' \"${local_v-none}\""], (0, b"none"), {}),
+            (["-c", "printf '%(%Y-%m-%d)T' 0"], (0, b"1970-01-01"), {"TZ": "UTC0"}),
+        ])
         for argv, expected, extra in cases:
             for shell in (reference, candidate):
                 checked(shell, argv, expected, extra)
@@ -73,7 +80,21 @@ def main():
         for argv in (["--noprofile", "--norc", "-ic", "printf ok"], ["--rcfile", str(setup), "-ic", 'printf %s "$loaded"']):
             checked(candidate, argv, (0, b"yes" if "--rcfile" in argv else b"ok"), {"HOME": ""})
 
-        print(f"{len(cases)} Bash comparisons and 5 Tonari contracts passed", flush=True)
+        # A callback may read the same open file description. The following
+        # mapfile record has to start after the line consumed by that callback.
+        (root / "callback-lines").write_text("one\ntwo\nthree\n")
+        callback = "cb() { local x; if [[ $1 == 0 ]]; then IFS= read -r -u3 x; fi; }; exec 3<callback-lines; mapfile -t -u3 -C cb -c1 a; printf '<%s>' \"${a[@]}\""
+        for shell in (reference, candidate):
+            checked(shell, ["-c", callback], (0, b"<one><three>"))
+        for cmd, operand in [("read -u 99 x", b"99"), ("read -n -1", b"-1"),
+                             ("read -t abc", b"abc"), ("mapfile -O bad", b"bad"),
+                             ("printf '%y'", b"y"), ("umask 8", b"8"), ("dirs nope", b"nope")]:
+            for shell in (reference, candidate):
+                result = run(shell, "-c", cmd)
+                assert result.returncode and operand in result.stderr, (cmd, result)
+        checked(candidate, ["-c", "printf '%(%8s)T' 42"], (0, b"      42"), {"TZ": "UTC0"})
+        checked(candidate, ["-c", "printf '%(%Es|%Os)T' 42"], (0, b"42|42"), {"TZ": "JST-9"})
+        print(f"{len(cases) + 9} Bash comparisons and 7 Tonari contracts passed", flush=True)
         if not args.runs:
             return
         (root / "lines").write_text(("abcdefgh " * 100 + "\n") * 1200)
@@ -86,6 +107,8 @@ def main():
             "read 1 MiB lines": 'while IFS= read x; do :; done < lines',
             "mapfile 1200 lines with count": 'mapfile -t -n1200 a <lines; echo "${#a[@]}"',
             "format repeated integers": "for ((i=0;i<5000;i++)); do printf '%08d' 123; done >/dev/null",
+            "read here inputs": "for ((i=0;i<1500;i++)); do IFS=: read -r a b <<< one:two; done",
+            "mapfile callbacks": "cb() { :; }; mapfile -t -C cb -c1 a <lines",
             "integer comparisons": 'for ((i=0;i<5000;i++)); do test "$i" -ge 0; done',
             "startup via BASH_ENV": ":",
         }
@@ -105,7 +128,7 @@ def main():
                                   extra={"BASH_ENV": str(setup)} if label.startswith("startup") else None)
                     elapsed = (time.perf_counter_ns() - start) / 1e6
                     assert out.returncode == 0 and not out.stderr, out
-                    if label.startswith("mapfile"):
+                    if label == "mapfile 1200 lines with count":
                         assert out.stdout == b"1200\n", out
                     if trial:
                         samples[idx].append(elapsed)

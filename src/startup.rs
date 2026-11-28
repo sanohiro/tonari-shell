@@ -94,21 +94,13 @@ struct Script {
     metadata: std::fs::Metadata,
 }
 
-pub(crate) fn error_message(error: &io::Error) -> String {
-    let text = error.to_string();
-    match text.rsplit_once(" (os error ") {
-        Some((message, _)) if error.raw_os_error().is_some() => message.to_owned(),
-        _ => text,
-    }
-}
-
 pub(crate) fn open_main_script(session: &Session, path: &Path) -> io::Result<(File, Option<PathBuf>)> {
     match File::open(path) {
         Ok(file) => Ok((file, None)),
         Err(first) if first.kind() == io::ErrorKind::NotFound && !path.as_os_str().as_encoded_bytes().contains(&b'/') => {
             if let Some(search) = session.scalar_setting("PATH") {
-                for dir in search.split(':').filter(|dir| !dir.is_empty()) {
-                    let candidate = Path::new(dir).join(path);
+                for dir in crate::execute::search_directories(search.as_ref().as_ref()).filter(|dir| dir != &Path::new(".")) {
+                    let candidate = dir.join(path);
                     match File::open(&candidate) {
                         Ok(file) => return Ok((file, Some(candidate))),
                         Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => {}
@@ -198,19 +190,23 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
     };
     let direct = name.contains('/');
     let inherited = (search.is_none() && !direct && session.shopt.sourcepath)
-        .then(|| session.get("PATH"))
+        .then(|| session.scalar_setting("PATH"))
         .flatten();
     if let Some(path) = search.or(inherited.as_deref()).filter(|_| !direct) {
-        for dir in path.split(':') {
-            let path = Path::new(dir).join(name);
+        let mut selected = None;
+        for dir in crate::execute::search_directories(path.as_ref()) {
+            let path = dir.join(name);
             match open_script(&path) {
-                Ok(file) => return finish(sourced(session, file, &path, &args[1..], status)),
+                Ok(file) => { selected = Some((file, path)); break; }
                 Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR | libc::EISDIR)) => {}
                 Err(e) => {
-                    diagnostic!("{command}: {}: {}", path.display(), error_message(&e));
+                    diagnostic!("{command}: {}: {}", path.display(), crate::builtins::os_message(&e));
                     return failure;
                 }
             }
+        }
+        if let Some((file, path)) = selected {
+            return finish(sourced(session, file, &path, &args[1..], status));
         }
     }
     if !direct && (search.is_some() || session.posix && words[0] == "." && session.shopt.sourcepath)
@@ -221,7 +217,7 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
     match open_script(Path::new(name)) {
         Ok(file) => finish(sourced(session, file, Path::new(name), &args[1..], status)),
         Err(e) => {
-            diagnostic!("{command}: {name}: {}", error_message(&e));
+            diagnostic!("{command}: {name}: {}", crate::builtins::os_message(&e));
             failure
         }
     }

@@ -51,13 +51,13 @@ def main():
         run(tonari, home, "HISTFILE=seed; HISTFILESIZE=2")
         assert seed.read_bytes() == b"two\nthree"
 
-        original = b"old\n\xff\nkept\n"
+        original = b"old\n\xff\nkept"
         seed.write_bytes(original)
         subprocess.run([tonari, "--noprofile", "--norc", "-i"], input=b": annotation\nexit 0\n",
                        cwd=home, capture_output=True, timeout=5,
                        env={"HOME": tmp, "HISTFILE": str(seed), "PATH": "/usr/bin:/bin"})
         contents = seed.read_bytes()
-        assert contents.startswith(original) and b": annotation\n" in contents
+        assert contents.startswith(original + b"\n") and b": annotation\n" in contents
 
         # A program appended after a bulk-parsed group has the correct LINENO.
         growing = home / "growing.sh"
@@ -105,6 +105,13 @@ def main():
             enter(b"after'")
             enter(b'printf %s "$v" >handler-result')
             assert (home / "handler-result").read_bytes() == b"beforeafter"
+            os.write(fd, b"\x1b[200~v='split")
+            read_until(fd, b"split")
+            os.kill(int((home / "shell-pid").read_text()), signal.SIGUSR1)
+            read_until(fd, b"\x1b[?2004h")
+            enter(b"packet'\x1b[201~")
+            enter(b'printf %s "$v" >paste-handler-result')
+            assert (home / "paste-handler-result").read_bytes() == b"splitpacket"
         print("History and interactive review witnesses passed")
 
 

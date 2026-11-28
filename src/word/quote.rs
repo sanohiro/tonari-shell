@@ -1,3 +1,23 @@
+// Escape digits are ASCII in shell words, prompt strings, echo and printf.
+pub(crate) fn escape_digits(input: &[u8], radix: u32, limit: usize, mut value: u32) -> (u32, usize) {
+    let mut count = 0;
+    for &b in input.iter().take(limit) {
+        let Some(digit) = (b as char).to_digit(radix) else {
+            break;
+        };
+        value = value * radix + digit;
+        count += 1;
+    }
+    (value, count)
+}
+
+pub(crate) fn char_escape_digits(chars: &mut std::str::Chars<'_>, radix: u32, limit: usize, initial: u32) -> (u32, usize) {
+    let rest = chars.as_str();
+    let (value, count) = escape_digits(rest.as_bytes(), radix, limit, initial);
+    *chars = rest[count..].chars();
+    (value, count)
+}
+
 pub(crate) fn single_quote(text: &str) -> String {
     let bytes = text.as_bytes();
     // For dense quotes, copying each ordinary byte is cheaper than restarting a search at each tiny span.

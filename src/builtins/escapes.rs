@@ -73,15 +73,8 @@ pub(crate) fn one(input: &mut &[u8], out: &mut Vec<u8>, mode: Mode) -> bool {
     true
 }
 
-fn digits(input: &mut &[u8], radix: u32, limit: usize, mut value: u32) -> (u32, usize) {
-    let mut count = 0;
-    for &b in input.iter().take(limit) {
-        let Some(digit) = (b as char).to_digit(radix) else {
-            break;
-        };
-        value = value * radix + digit;
-        count += 1;
-    }
+fn digits(input: &mut &[u8], radix: u32, limit: usize, initial: u32) -> (u32, usize) {
+    let (value, count) = crate::word::quote::escape_digits(input, radix, limit, initial);
     *input = &input[count..];
     (value, count)
 }

@@ -20,6 +20,10 @@ if [[ $SUITE == correctness-review ]]; then
   python3 tests/review_language.py "$current" "$reference" --benchmark --before "$bin/baseline" > "$out/language-times.tsv"
   python3 tests/review_runtime.py "$current" "$reference" > "$out/runtime.txt"
   python3 tests/review_interactive.py "$current" "$reference" > "$out/interactive.txt"
+  python3 tools/bench_editor_input.py "$current" "$bin/baseline" "$reference" --runs 9 --entries 10000 --case commit --case paste --case Ctrl-R --case Tab > "$out/pty.txt"
+  if [[ $RUNNER_OS == Linux ]]; then
+    python3 tools/bench_heap.py "$bin/baseline" "$current" "$reference" --runs 5 > "$out/heap.txt"
+  fi
   exit
 fi
 if [[ $SUITE == shell-scaling ]]; then

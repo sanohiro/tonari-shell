@@ -138,6 +138,19 @@ pub(crate) fn case_chars(
 }
 
 pub(crate) fn convert_chars(
+    text: std::borrow::Cow<'_, str>,
+    direction: CaseDirection,
+    all: bool,
+    pattern: Option<&Matcher<&str>>,
+    locale: CharacterLocale,
+) -> String {
+    if pattern.is_some() {
+        return super::localized(|| convert(text,direction,all,pattern,locale));
+    }
+    convert(text,direction,all,pattern,locale)
+}
+
+fn convert(
     mut text: std::borrow::Cow<'_, str>,
     direction: CaseDirection,
     all: bool,

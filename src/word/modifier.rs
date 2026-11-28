@@ -97,6 +97,7 @@ pub(crate) fn character_count(text: &str) -> usize {
 }
 
 pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String>, Error> {
+    if let Some(text) = env.borrowed_scalar(name) { return Ok(Some(text.to_owned())); }
     if let Some(key) = name.strip_prefix('#')
         && !env.shadows(key)
         && let Some(n) = env.session.stored_char_count(key)

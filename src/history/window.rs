@@ -115,11 +115,10 @@ impl Window {
     }
 
     // A cooperating append under the journal lock leaves all copied bytes intact.
-    pub(super) fn tracks(&self, file: &File) -> bool {
-        self.stamp.is_some()
-            && file
-                .metadata()
-                .is_ok_and(|m| self.stamp == Some(Stamp::from(&m)))
+    pub(super) fn committed_tail(&self, meta: &Metadata) -> bool {
+        self.matching(meta).is_some()
+            && self.start + self.bytes.len() as u64 == meta.len()
+            && self.bytes.last() == Some(&b'\n')
     }
 
     pub(super) fn appended(&mut self, file: &File, entry: &[u8]) {

@@ -231,9 +231,7 @@ impl WordList {
         last: u8,
         session: &mut Session,
     ) -> Result<(), crate::expansion::Error> {
-        let ifs = session
-            .get("IFS")
-            .unwrap_or_else(|| crate::word::DEFAULT_IFS.into());
+        let ifs = session.ifs();
         if self.literal {
             out.extend(self.literal_matches(prefix, &ifs).map(str::to_owned));
         } else {

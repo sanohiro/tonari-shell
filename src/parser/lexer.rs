@@ -1,6 +1,6 @@
 use super::Incomplete;
 use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse_final};
-use crate::word::{Part, Word, WordBuilder, is_identifier, name_chars_len};
+use crate::word::{valid_tilde_user, Part, Word, WordBuilder, is_identifier, name_chars_len};
 use std::str::Chars;
 
 #[derive(Debug, Clone)]
@@ -34,6 +34,10 @@ pub(super) enum Token {
 }
 
 impl Token {
+    pub(super) fn preserve_layout(&self) -> bool {
+        matches!(self,Token::ArrayStart | Token::EndArm(_)) || matches!(self.keyword(), Some("case" | "[["))
+    }
+
     pub(super) fn keyword(&self) -> Option<&str> {
         match self {
             Self::Reserved(s) => Some(s),
@@ -289,9 +293,7 @@ fn braced_parameter<'a>(
     if starts_braced_command(content) {
         let reply = content.starts_with('|');
         let nested = if reply { &content[1..] } else { content };
-        let (tokens, spans, after) = lex_words(nested, false, false, None, true)?;
-        let body =
-            Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1]).list(&[])?;
+        let (body, after) = substitution_body(nested,true)?;
         word.part(Part::CurrentSubstitution {
             body,
             quoted,
@@ -305,13 +307,11 @@ fn braced_parameter<'a>(
         Some(b'0'..=b'9') => content.bytes().take_while(|b| b.is_ascii_digit()).count(),
         Some(b'@' | b'*' | b'?' | b'$' | b'#' | b'!' | b'-') => 1,
         None => {
-            return Err(Error::Incomplete(Incomplete::Message(
-                "unterminated parameter expansion",
-            )));
+            return Err(Error::incomplete_message("unterminated parameter expansion"));
         }
         _ => return bad_substitution(content, chars, word, quoted),
     };
-    if !super::POSIX.get() && content.starts_with("!#") && !content.starts_with("!#}") {
+    if !super::READ_OPTIONS.get().posix && content.starts_with("!#") && !content.starts_with("!#}") {
         return bad_substitution(content, chars, word, quoted);
     }
     let prefixed = content.starts_with(['#', '!'])
@@ -327,7 +327,7 @@ fn braced_parameter<'a>(
     } else if (content.starts_with('#')
         || content.starts_with('!')
             && (matches!(content.as_bytes().get(1), Some(b'*' | b'@'))
-                || !super::POSIX.get() && matches!(content.as_bytes().get(1), Some(b'?' | b'#'))))
+                || !super::READ_OPTIONS.get().posix && matches!(content.as_bytes().get(1), Some(b'?' | b'#'))))
         && (content.as_bytes().get(2) == Some(&b'}')
             || content.starts_with("!*")
             || content.starts_with("!@"))
@@ -351,7 +351,7 @@ fn braced_parameter<'a>(
     let quote_at = if content.starts_with("$'") { 0 } else { len };
     let decoded_name;
     let name = if quoted_name
-        && !super::POSIX.get()
+        && !super::READ_OPTIONS.get().posix
         && content[quote_at..].starts_with("$'")
         && (quote_at == 0 || is_identifier(head))
     {
@@ -544,9 +544,7 @@ fn braced_parameter<'a>(
             Some('=') => crate::word::Alternative::Assign,
             Some('?') => crate::word::Alternative::Error,
             None => {
-                return Err(Error::Incomplete(Incomplete::Message(
-                    "unterminated parameter expansion",
-                )));
+                return Err(Error::incomplete_message("unterminated parameter expansion"));
             }
             _ => return bad_substitution(content, chars, word, quoted),
         };
@@ -590,9 +588,7 @@ pub(super) fn backquote(
         }
         source.push_str(literal);
         let mut escaped = after[1..].chars();
-        let next = escaped.next().ok_or(Error::Incomplete(Incomplete::Message(
-            "unterminated backquote",
-        )))?;
+        let next = escaped.next().ok_or(Error::incomplete_message("unterminated backquote"))?;
         if next != '\n' {
             if !(matches!(next, '$' | '`' | '\\') || quoted && next == '"') {
                 source.push('\\');
@@ -601,9 +597,7 @@ pub(super) fn backquote(
         }
         rest = escaped.as_str();
     }
-    Err(Error::Incomplete(Incomplete::Message(
-        "unterminated backquote",
-    )))
+    Err(Error::incomplete_message("unterminated backquote"))
 }
 
 fn alternative_word(chars: &mut Chars<'_>, outer_quoted: bool) -> Result<Word, Error> {
@@ -621,7 +615,7 @@ fn parameter_word(
     let mut word = WordBuilder::default();
     let mut empty = true;
     let mut after_colon = false;
-    let quoted_apostrophes = outer_quoted && !super::POSIX.get();
+    let quoted_apostrophes = outer_quoted && !super::READ_OPTIONS.get().posix;
     let mut inside_apostrophes = false;
     loop {
         let start = chars.as_str();
@@ -638,7 +632,7 @@ fn parameter_word(
                 let end = rest.find(['/', ':', '}']).unwrap_or(rest.len());
                 let user = &rest[..end];
                 if valid_tilde_user(user) {
-                    let slash = !stop_slash && super::POSIX.get() && rest[end..].starts_with('/');
+                    let slash = !stop_slash && super::READ_OPTIONS.get().posix && rest[end..].starts_with('/');
                     let end = end + usize::from(slash);
                     word.part(Part::Tilde(format!("~{}", &rest[..end])));
                     *chars = rest[end..].chars();
@@ -659,8 +653,8 @@ fn parameter_word(
                 return Ok((word.finish(), c));
             }
             '$' if outer_quoted
-                && super::EXTQUOTE.get()
-                && !super::POSIX.get()
+                && super::READ_OPTIONS.get().extquote
+                && !super::READ_OPTIONS.get().posix
                 && chars.as_str().starts_with('\'') =>
             {
                 chars.next();
@@ -671,7 +665,7 @@ fn parameter_word(
             }
             '$' if outer_quoted && chars.as_str().starts_with('"') => {
                 chars.next();
-                if !super::EXTQUOTE.get() {
+                if !super::READ_OPTIONS.get().extquote {
                     dollar_word(chars, &mut word, true, assignment, true)?;
                 }
                 double_quoted(chars, &mut word, true)?;
@@ -694,9 +688,7 @@ fn parameter_word(
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,
             '\\' => {
-                let next = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
-                    "unterminated parameter expansion",
-                )))?;
+                let next = chars.next().ok_or(Error::incomplete_message("unterminated parameter expansion"))?;
                 if next == '\n' {
                     continue;
                 }
@@ -726,9 +718,7 @@ fn parameter_word(
         }
         empty = false;
     }
-    Err(Error::Incomplete(Incomplete::Message(
-        "unterminated parameter expansion",
-    )))
+    Err(Error::incomplete_message("unterminated parameter expansion"))
 }
 
 pub(super) fn quoted(
@@ -792,11 +782,17 @@ fn double_quoted(
     Err(Error::Incomplete(Incomplete::DoubleQuote))
 }
 
+fn substitution_body(nested: &str, brace: bool) -> Result<(Vec<super::Statement>,&str),Error> {
+    let (tokens,spans,after)=lex_words(nested,!brace,false,None,brace)?;
+    let source=&nested[..nested.len()-after.len()-1];
+    let body=Reader::new(tokens,spans,source).list(&[])?;
+    Ok((body,after))
+}
+
 fn nested_program(chars: &mut Chars<'_>) -> Result<Vec<super::Statement>, Error> {
     let _nesting = super::enter_expansion()?;
     let nested = chars.as_str();
-    let (tokens, spans, after) = lex(nested, true, false)?;
-    let body = Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1]).list(&[])?;
+    let (body,after)=substitution_body(nested,false)?;
     *chars = after.chars();
     Ok(body)
 }
@@ -808,10 +804,6 @@ fn process_word(chars: &mut Chars<'_>, word: &mut WordBuilder, input: bool) -> R
     Ok(())
 }
 
-fn valid_tilde_user(user: &str) -> bool {
-    user.chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
-}
 
 fn process_start(source: &str) -> bool {
     source.starts_with("<(") || source.starts_with(">(")
@@ -956,9 +948,7 @@ fn scan_subscript<'a>(
             '$' => dollar(&mut chars, &mut word, !associative)?,
             '`' => backquote(&mut chars, &mut word, true)?,
             '\\' => {
-                let next = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
-                    "trailing arithmetic escape",
-                )))?;
+                let next = chars.next().ok_or(Error::incomplete_message("trailing arithmetic escape"))?;
                 if next != '\n' {
                     word.push(next);
                 }
@@ -982,9 +972,7 @@ fn arithmetic_source(chars: &mut Chars<'_>) -> Result<String, Error> {
                 return Ok(source[..end].replace("\\\n", ""));
             }
             ')' if joined(chars.as_str()).trim().is_empty() => {
-                return Err(Error::Incomplete(Incomplete::Message(
-                    "continued arithmetic delimiter",
-                )));
+                return Err(Error::incomplete_message("continued arithmetic delimiter"));
             }
             ')' => {
                 return Err(Error::ArithmeticClose);
@@ -992,9 +980,7 @@ fn arithmetic_source(chars: &mut Chars<'_>) -> Result<String, Error> {
             _ => {}
         }
     }
-    Err(Error::Incomplete(Incomplete::Message(
-        "unterminated arithmetic expression",
-    )))
+    Err(Error::incomplete_message("unterminated arithmetic expression"))
 }
 
 fn pattern_parts(
@@ -1018,9 +1004,7 @@ fn pattern_parts(
         match c {
             '\'' | '"' => quoted(chars, c, word)?,
             '\\' => {
-                let escaped = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
-                    "trailing regular expression escape",
-                )))?;
+                let escaped = chars.next().ok_or(Error::incomplete_message("trailing regular expression escape"))?;
                 if escaped != '\n' {
                     word.push(escaped);
                 }
@@ -1063,9 +1047,7 @@ fn pattern_parts(
         word.part(Part::Pattern(raw));
     }
     if group.is_some() && depth != 0 {
-        return Err(Error::Incomplete(Incomplete::Message(
-            "unterminated extended pattern",
-        )));
+        return Err(Error::incomplete_message("unterminated extended pattern"));
     }
     Ok(())
 }
@@ -1367,7 +1349,7 @@ fn scan_word(
         let literal = &start[..plain];
         if let Some(fixed) = super::reserved_spelling(literal) {
             let token = if fixed == "time"
-                && super::TIME_OPTIONS_EXTERNAL.get()
+                && super::READ_OPTIONS.get().time_options_external
                 && start[plain..]
                     .trim_start_matches([' ', '\t'])
                     .starts_with('-')
@@ -1419,13 +1401,13 @@ fn scan_word(
                     Some(c) => c,
                     None if final_input => '\\',
                     None => {
-                        return Err(Error::Incomplete(Incomplete::Message("trailing backslash")));
+                        return Err(Error::incomplete_message("trailing backslash"));
                     }
                 };
                 if escaped == '\n' {
                     after_colon = follows_colon;
                     if chars.as_str().is_empty() && !final_input {
-                        return Err(Error::Incomplete(Incomplete::Message("line continuation")));
+                        return Err(Error::incomplete_message("line continuation"));
                     }
                     continue;
                 }
@@ -1534,7 +1516,7 @@ fn scan_word(
                 // expansions inside a login name must go through the word reader.
                 if valid_tilde_user(suffix) {
                     let rest = chars.as_str();
-                    let slash = super::POSIX.get() && rest[length..].starts_with('/');
+                    let slash = super::READ_OPTIONS.get().posix && rest[length..].starts_with('/');
                     let end = length + usize::from(slash);
                     word.part(Part::Tilde(format!("~{}", &rest[..end])));
                     *chars = rest[end..].chars();
@@ -1597,7 +1579,7 @@ fn scan(
     let mut saw_case = false;
     let mut brace_groups = 0usize;
     let mut alias_opens_group = false;
-    let sub_aliases = if substitution && super::POSIX.get() {
+    let sub_aliases = if substitution && super::READ_OPTIONS.get().posix {
         super::aliases::current()
     } else {
         Default::default()
@@ -1642,7 +1624,7 @@ fn scan(
             && let Some(rest) = chars.as_str().strip_prefix("\\\n")
         {
             if rest.is_empty() && !final_input {
-                return Err(Error::Incomplete(Incomplete::Message("line continuation")));
+                return Err(Error::incomplete_message("line continuation"));
             }
             chars = rest.chars();
             continue;
@@ -1687,8 +1669,8 @@ fn scan(
             }));
             continue;
         }
-        let extended = pattern == Some(true) || super::EXTGLOB.get();
-        if c == '#' && super::COMMENTS.get() {
+        let extended = pattern == Some(true) || super::READ_OPTIONS.get().extglob;
+        if c == '#' && super::READ_OPTIONS.get().comments {
             let rest = chars.as_str();
             chars = rest[rest.find('\n').unwrap_or(rest.len())..].chars();
             continue;
@@ -1861,9 +1843,7 @@ fn scan(
         return Err(Error::Incomplete(Incomplete::CompoundEnd("esac")));
     }
     if substitution || brace_substitution {
-        return Err(Error::Incomplete(Incomplete::Message(
-            "unterminated command substitution",
-        )));
+        return Err(Error::incomplete_message("unterminated command substitution"));
     }
     spans.resize(tokens.len(), (token_start, source.len()));
     Ok((tokens, spans, ""))

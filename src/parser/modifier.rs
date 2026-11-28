@@ -1,5 +1,4 @@
 use super::Error;
-use super::Incomplete;
 use super::lexer::{backquote, dollar};
 use crate::word::{Word, WordBuilder};
 use std::str::Chars;
@@ -37,9 +36,7 @@ pub(super) fn slice(chars: &mut Chars<'_>) -> Result<(Word, Option<Word>), Error
             }
         }
     }
-    Err(Error::Incomplete(Incomplete::Message(
-        "unterminated parameter slice",
-    )))
+    Err(Error::incomplete_message("unterminated parameter slice"))
 }
 
 pub(crate) fn index_end(s: &str) -> Result<usize, Error> {
@@ -82,7 +79,5 @@ pub(crate) fn index_end(s: &str) -> Result<usize, Error> {
             _ => {}
         }
     }
-    Err(Error::Incomplete(Incomplete::Message(
-        "unterminated array subscript",
-    )))
+    Err(Error::incomplete_message("unterminated array subscript"))
 }

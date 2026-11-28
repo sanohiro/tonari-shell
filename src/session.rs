@@ -744,6 +744,10 @@ impl Session {
         Err("circular name reference")
     }
 
+    pub(crate) fn ifs(&self) -> Cow<'_, str> {
+        self.scalar_setting("IFS").unwrap_or(Cow::Borrowed(crate::word::DEFAULT_IFS))
+    }
+
     // Ordinary shell-authored scalars can be inspected without copying their value.
     pub(crate) fn scalar_setting(&self, name: &str) -> Option<Cow<'_, str>> {
         match self.variables.get(name) {

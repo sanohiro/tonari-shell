@@ -231,6 +231,23 @@ fn stack_budget_exceeded() -> bool {
     origin.saturating_sub(here) >= budget
 }
 
+#[cfg(test)]
+#[test]
+fn recursion_guard_uses_the_worker_stack_bounds() {
+    std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(|| {
+            let marker = 0u8;
+            let here = std::ptr::from_ref(&marker).addr();
+            let floor = thread_stack_floor();
+            assert!(floor < here && here - floor < 512 * 1024);
+            assert!(!stack_budget_exceeded());
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
 fn main() -> ExitCode {
     traps::enter_process();
     let marker = 0u8;
@@ -430,7 +447,7 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
                 input::file_script(session, file, None, initial, invocation.options.check)
             }
             Err(e) => {
-                diagnostic!("{}: {}", path.display(), startup::error_message(&e));
+                diagnostic!("{}: {}", path.display(), builtins::os_message(&e));
                 Flow::Continue(if e.kind() == io::ErrorKind::NotFound {
                     127
                 } else {

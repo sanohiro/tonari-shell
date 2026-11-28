@@ -196,11 +196,7 @@ pub(crate) fn inert(source: &str, session: &Session) -> bool {
     if source.contains(['$', '`', '"', '\\', '[']) {
         return false;
     }
-    let mut parser = Parser {
-        source,
-        tokens: None,
-        token: Token::End,
-    };
+    let mut parser = Parser::new(source);
     loop {
         if parser.advance().is_err() {
             return false;
@@ -256,11 +252,7 @@ impl<'a> Repeated<'a> {
         if source.contains(['$', '`', '"', '\\']) {
             return generic;
         }
-        let mut parser = Parser {
-            tokens: None,
-            source,
-            token: Token::End,
-        };
+        let mut parser = Parser::new(source);
         if parser.advance().is_err() {
             return generic;
         }
@@ -450,11 +442,7 @@ impl Expression {
         if self.source.len() > 64 * 1024 || self.source.contains(['$', '`', '"', '\\']) {
             return None;
         }
-        let mut scanner = Parser {
-            source: &self.source,
-            tokens: None,
-            token: Token::End,
-        };
+        let mut scanner = Parser::new(&self.source);
         let mut out = Vec::new();
         loop {
             scanner.advance().ok()?;
@@ -518,6 +506,7 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    fn new(source: &'a str) -> Self { Self { source, tokens: None, token: Token::End } }
     fn advance(&mut self) -> Result<Token<'a>> {
         let old = self.token;
         if let Some(tokens) = self.tokens {
@@ -730,6 +719,10 @@ fn element_name<'a>(
     if let Some(key) = variables.associative_key(base, index) {
         return Ok(Target::Name(format!("{base}[{}]", key?).into()));
     }
+    if matches!(index, "@" | "*") {
+        diagnostic!("{base}: bad array subscript");
+        return Ok(Target::Unavailable);
+    }
     Ok(Target::Indexed(
         base,
         calculate(numeric_subscript(index), variables, depth + 1)?,
@@ -737,6 +730,7 @@ fn element_name<'a>(
 }
 
 enum Target<'a> {
+    Unavailable,
     Name(std::borrow::Cow<'a, str>),
     Indexed(&'a str, i64),
 }
@@ -744,6 +738,7 @@ enum Target<'a> {
 impl Target<'_> {
     fn set(&self, vars: &mut dyn Variables, value: i64) -> Result<()> {
         match self {
+            Self::Unavailable => Ok(()),
             Self::Name(name) => vars.set(name, value),
             Self::Indexed(name, index) => vars.set_indexed(name, *index, value),
         }
@@ -765,6 +760,7 @@ impl Value<'_> {
             Self::Number(n) => Ok(*n),
             Self::Variable(target) => {
                 let text = match target {
+                    Target::Unavailable => return Ok(0),
                     Target::Name(name) => {
                         if let Some(n) = variables.decimal(name) {
                             return Ok(n);
@@ -830,11 +826,7 @@ fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<
         variables.set(name, old.wrapping_add(delta))?;
         return Ok(old);
     }
-    Parser {
-        source,
-        tokens: None,
-        token: Token::End,
-    }
+    Parser::new(source)
     .evaluate(variables, depth)
 }
 

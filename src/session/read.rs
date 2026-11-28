@@ -348,7 +348,7 @@ pub(super) fn run(
         || (opts.max_chars == Some(0) || opts.timeout.is_some())
             && unsafe { libc::fcntl(opts.fd, libc::F_GETFD) } < 0
     {
-        diagnostic!("read: {}: invalid file descriptor", opts.fd);
+        diagnostic!("read: {}: invalid file descriptor: {}", opts.fd, crate::builtins::os_message(&io::Error::from_raw_os_error(libc::EBADF)));
         return Flow::Continue(1);
     }
     if let Some(invalid) = opts
@@ -571,7 +571,11 @@ pub(super) fn run(
             Ok(None) => break 1,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
-                diagnostic!("read: {e}");
+                if e.raw_os_error() == Some(libc::EBADF) {
+                    diagnostic!("read: {}: invalid file descriptor: {}", opts.fd, crate::builtins::os_message(&e));
+                } else {
+                    diagnostic!("read: {}", crate::builtins::os_message(&e));
+                }
                 return Flow::Continue(1);
             }
         };
@@ -628,9 +632,7 @@ pub(super) fn assign_fields(
     let ifs = if opts.exact {
         std::borrow::Cow::Borrowed("")
     } else {
-        session
-            .scalar_setting("IFS")
-            .unwrap_or_else(|| crate::word::DEFAULT_IFS.into())
+        session.ifs()
     };
     if opts.array.is_none()
         && let [name] = opts.names
@@ -743,7 +745,7 @@ fn scan_fields(
         if escaped.binary_search(&offset).is_ok() {
             return;
         }
-        let space = matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c");
+        let space = crate::word::is_ifs_whitespace(sep);
         if start < offset {
             push((start, offset));
             end = offset;

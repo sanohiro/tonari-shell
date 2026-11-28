@@ -285,9 +285,7 @@ impl Source {
                 ));
             }
             Self::LiteralWords { source, keep_order } => {
-                let ifs = session
-                    .get("IFS")
-                    .unwrap_or_else(|| crate::word::DEFAULT_IFS.into());
+                let ifs = session.ifs();
                 if keep_order {
                     let names = source.ordered_matches(prefix, &ifs);
                     if !list {
@@ -467,10 +465,11 @@ pub fn at(
         let mut quoting = Quoting::default();
         let mut file_start = None;
         for (offset, c) in raw.char_indices() {
-            if quoting.consume(c) == WordChar::Unquoted && matches!(c, '>' | '<' | '=') {
-                if matches!(c, '>' | '<') || crate::parser::is_identifier(&raw[..offset]) {
-                    file_start = Some(offset + 1);
-                }
+            if quoting.consume(c) == WordChar::Unquoted
+                && (matches!(c, '>' | '<')
+                    || c == '=' && crate::parser::is_identifier(&raw[..offset]))
+            {
+                file_start = Some(offset + 1);
             }
         }
         if let Some(skip) = file_start {

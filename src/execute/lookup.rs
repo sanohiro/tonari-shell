@@ -31,7 +31,7 @@ fn default_system_path() -> &'static std::ffi::OsStr {
 }
 
 // Unix PATH entries borrow the original byte string, including non-UTF-8 entries.
-pub(super) fn search_directories(path: &OsStr) -> impl Iterator<Item = &Path> {
+pub(crate) fn search_directories(path: &OsStr) -> impl Iterator<Item = &Path> {
     path.as_bytes().split(|&b| b == b':').map(|bytes| {
         if bytes.is_empty() {
             Path::new(".")
