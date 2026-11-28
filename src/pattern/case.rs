@@ -8,14 +8,14 @@ pub(super) fn mapped_char(c: char, upper: bool, locale: CharacterLocale) -> char
             c.to_ascii_lowercase()
         };
     }
-    unsafe extern "C" {
-        fn towupper_l(c: u32, locale: libc::locale_t) -> u32;
-        fn towlower_l(c: u32, locale: libc::locale_t) -> u32;
-    }
+    mapped_in(c, upper, locale, utf8_locale())
+}
+
+fn utf8_locale() -> libc::locale_t {
     // The shell may start in C and switch to UTF-8. Select a UTF-8 ctype
     // explicitly without changing the process locale or loading Unicode tables.
     static UTF8: OnceLock<usize> = OnceLock::new();
-    let utf8 = *UTF8.get_or_init(|| {
+    *UTF8.get_or_init(|| {
         for name in [c"C.UTF-8", c"en_US.UTF-8", c"UTF-8"] {
             let locale = unsafe {
                 libc::newlocale(libc::LC_CTYPE_MASK, name.as_ptr(), std::ptr::null_mut())
@@ -25,7 +25,14 @@ pub(super) fn mapped_char(c: char, upper: bool, locale: CharacterLocale) -> char
             }
         }
         0
-    }) as libc::locale_t;
+    }) as libc::locale_t
+}
+
+fn mapped_in(c: char, upper: bool, locale: CharacterLocale, utf8: libc::locale_t) -> char {
+    unsafe extern "C" {
+        fn towupper_l(c: u32, locale: libc::locale_t) -> u32;
+        fn towlower_l(c: u32, locale: libc::locale_t) -> u32;
+    }
     match (locale, upper, c) {
         (CharacterLocale::Ascii, true, _) => c.to_ascii_uppercase(),
         (CharacterLocale::Ascii, false, _) => c.to_ascii_lowercase(),
@@ -115,81 +122,72 @@ pub(crate) enum CaseDirection {
     Toggle,
 }
 
-pub(crate) fn toggle_case(
-    mut text: String,
-    all: bool,
-    filter: Option<&Matcher<&str>>,
-    locale: crate::session::CharacterLocale,
-) -> String {
-    use crate::session::CharacterLocale;
-    if filter.is_none()
-        && (locale == CharacterLocale::Ascii
-            || text.is_ascii() && locale != CharacterLocale::Turkic)
-    {
-        let len = if all { text.len() } else { text.len().min(1) };
-        // Only ASCII letters change. All UTF-8 continuation and leading bytes stay intact.
-        for byte in &mut unsafe { text.as_bytes_mut() }[..len] {
-            if byte.is_ascii_alphabetic() {
-                *byte ^= 0x20;
-            }
-        }
-        return text;
-    }
-    localized(|| {
-        text.chars()
-            .enumerate()
-            .map(|(i, c)| {
-                let mut buffer = [0; 4];
-                if (all || i == 0) && filter.is_none_or(|p| p.matches(c.encode_utf8(&mut buffer))) {
-                    mapped_char(c, !c.is_uppercase(), locale)
-                } else {
-                    c
-                }
-            })
-            .collect()
-    })
-}
-
 pub(crate) fn case_chars(
-    mut text: String,
+    text: String,
     upper: bool,
     all: bool,
     pattern: Option<&Matcher<&str>>,
-    locale: crate::session::CharacterLocale,
+    locale: CharacterLocale,
 ) -> String {
-    use crate::session::CharacterLocale;
+    let direction = if upper {
+        CaseDirection::Upper
+    } else {
+        CaseDirection::Lower
+    };
+    convert_chars(text.into(), direction, all, pattern, locale)
+}
+
+pub(crate) fn convert_chars(
+    mut text: std::borrow::Cow<'_, str>,
+    direction: CaseDirection,
+    all: bool,
+    pattern: Option<&Matcher<&str>>,
+    locale: CharacterLocale,
+) -> String {
     if pattern.is_none()
-        && (matches!(locale, CharacterLocale::Ascii)
-            || text.is_ascii() && !matches!(locale, CharacterLocale::Turkic))
+        && (locale == CharacterLocale::Ascii
+            || locale != CharacterLocale::Turkic && text.is_ascii())
     {
         let end = if all {
             text.len()
         } else {
             text.chars().next().map_or(0, char::len_utf8)
         };
-        if upper {
-            text[..end].make_ascii_uppercase();
-        } else {
-            text[..end].make_ascii_lowercase();
-        }
-        return text;
-    }
-    localized(|| {
-        let mut out = String::with_capacity(text.len());
-        let mut chars = text.chars();
-        for c in chars.by_ref() {
-            let mut buf = [0; 4];
-            let eligible = pattern.is_none_or(|p| p.matches(c.encode_utf8(&mut buf)));
-            out.push(if eligible {
-                mapped_char(c, upper, locale)
-            } else {
-                c
-            });
-            if !all {
-                break;
+        let s = &mut text.to_mut()[..end];
+        match direction {
+            CaseDirection::Upper => s.make_ascii_uppercase(),
+            CaseDirection::Lower => s.make_ascii_lowercase(),
+            CaseDirection::Toggle => {
+                // Only ASCII letters change, preserving every UTF-8 boundary.
+                for b in unsafe { s.as_bytes_mut() } {
+                    if b.is_ascii_alphabetic() {
+                        *b ^= 0x20;
+                    }
+                }
             }
         }
-        out.push_str(chars.as_str());
-        out
-    })
+        return text.into_owned();
+    }
+    let utf8 = utf8_locale();
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    for c in chars.by_ref() {
+        let mut buf = [0; 4];
+        let eligible = pattern.is_none_or(|p| p.matches(c.encode_utf8(&mut buf)));
+        let upper = match direction {
+            CaseDirection::Upper => true,
+            CaseDirection::Lower => false,
+            CaseDirection::Toggle => !c.is_uppercase(),
+        };
+        out.push(if eligible {
+            mapped_in(c, upper, locale, utf8)
+        } else {
+            c
+        });
+        if !all {
+            break;
+        }
+    }
+    out.push_str(chars.as_str());
+    out
 }

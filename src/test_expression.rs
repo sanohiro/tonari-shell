@@ -28,6 +28,42 @@ struct CompiledGlob {
     group: Option<pattern::extended::Pattern>,
 }
 
+impl StaticGlob {
+    fn matches(&self, left: &str, source: &str, session: &Session) -> bool {
+        if session.shopt.nocasematch {
+            pattern::extended::insensitive_session(left, source, true, session)
+        } else {
+            let locale = source
+                .contains(['[', '?'])
+                .then(|| pattern::session_locale(session))
+                .flatten();
+            let _guard = locale.as_ref().and_then(|l| l.enter());
+            let mut entry = self.compiled.borrow_mut();
+            // Bracket ranges and their per-character results belong to the
+            // active locale. Keep its handle alive until recompilation.
+            let ascii_ranges = session.shopt.globasciiranges;
+            let current = entry.as_ref().is_some_and(|cached| {
+                cached.ascii_ranges == ascii_ranges
+                    && cached.locale.as_ref().map(std::rc::Rc::as_ptr)
+                        == locale.as_ref().map(std::rc::Rc::as_ptr)
+            });
+            if !current {
+                *entry = Some(Box::new(CompiledGlob {
+                    matcher: pattern::Matcher::new(source.to_owned()),
+                    group: pattern::extended::Pattern::new(source),
+                    locale,
+                    ascii_ranges,
+                }));
+            }
+            let compiled = entry.as_ref().unwrap();
+            compiled.group.as_ref().map_or_else(
+                || compiled.matcher.matches(left),
+                |group| group.accepts(left, false),
+            )
+        }
+    }
+}
+
 impl Expr {
     pub(crate) fn binary(left: Word, operator: &'static str, right: Word) -> Self {
         use crate::word::Part;
@@ -102,6 +138,21 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         diagnostic!("[[: {message}");
         Flow::Continue(2)
     };
+    if !session.xtrace {
+        match expr {
+            Word(w) | Unary("-n" | "-z", w) if let Some(v) = w.stored_parameter(session) => {
+                return Ok(v.is_empty() == matches!(expr, Unary("-z", _)));
+            }
+            Binary(w, op @ ("<" | ">" | "=" | "==" | "!="), right)
+                if (!session.shopt.nocasematch || matches!(*op, "<" | ">"))
+                    && let Some(right) = right.as_literal()
+                    && let Some(v) = w.stored_parameter(session) =>
+            {
+                return builtins::binary(v, op, right).map_err(error);
+            }
+            _ => {}
+        }
+    }
     match expr {
         Not(e) => match condition(e, session, status) {
             Ok(value) => Ok(!value),
@@ -142,42 +193,17 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             builtins::unary(op, &value, session).map_err(error)
         }
         StaticGlob(left, op, glob) => {
-            let left = operand(session, left, status)?;
             let source = glob
                 .text
                 .get_or_init(|| glob.word.clone().extended_pattern(&|_| None, &[]));
+            if !session.xtrace
+                && let Some(value) = left.stored_parameter(session)
+            {
+                return Ok(glob.matches(value, source, session) != (*op == "!="));
+            }
+            let left = operand(session, left, status)?;
             trace(session, status, &[&left, op, source]);
-            let matched = if session.shopt.nocasematch {
-                pattern::extended::insensitive_session(&left, source, true, session)
-            } else {
-                let locale = source
-                    .contains(['[', '?'])
-                    .then(|| pattern::session_locale(session))
-                    .flatten();
-                let _guard = locale.as_ref().and_then(|l| l.enter());
-                let mut entry = glob.compiled.borrow_mut();
-                // Bracket ranges and their per-character results belong to the
-                // active locale. Keep its handle alive until recompilation.
-                let ascii_ranges = session.shopt.globasciiranges;
-                let current = entry.as_ref().is_some_and(|cached| {
-                    cached.ascii_ranges == ascii_ranges
-                        && cached.locale.as_ref().map(std::rc::Rc::as_ptr)
-                            == locale.as_ref().map(std::rc::Rc::as_ptr)
-                });
-                if !current {
-                    *entry = Some(Box::new(CompiledGlob {
-                        matcher: pattern::Matcher::new(source.clone()),
-                        group: pattern::extended::Pattern::new(source),
-                        locale,
-                        ascii_ranges,
-                    }));
-                }
-                let compiled = entry.as_ref().unwrap();
-                compiled.group.as_ref().map_or_else(
-                    || compiled.matcher.matches(&left),
-                    |group| group.accepts(&left, false),
-                )
-            };
+            let matched = glob.matches(&left, source, session);
             Ok(matched != (*op == "!="))
         }
         StaticRegex(left, quoted, plain) => {

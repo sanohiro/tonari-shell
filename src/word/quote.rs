@@ -6,13 +6,13 @@ pub(crate) fn single_quote(text: &str) -> String {
 
 pub(crate) fn push_single_quote(output: &mut String, text: &str) {
     output.push('\'');
-    let mut tail = text;
-    while let Some((before, after)) = tail.split_once('\'') {
-        output.push_str(before);
+    let mut start = 0;
+    for at in memchr::memchr_iter(b'\'', text.as_bytes()) {
+        output.push_str(&text[start..at]);
         output.push_str("'\\''");
-        tail = after;
+        start = at + 1;
     }
-    output.push_str(tail);
+    output.push_str(&text[start..]);
     output.push('\'');
 }
 

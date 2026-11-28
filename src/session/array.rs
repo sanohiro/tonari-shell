@@ -781,7 +781,22 @@ impl Session {
             var.array_assigned = true;
             return Ok(());
         }
-        let mut var = self.declared_variable(name, global).unwrap_or_default();
+        // Taking the active value keeps its element storage unique. Numeric
+        // subscripts can see prior entries through initializer_number. Integer
+        // attributes and dynamic variables may read the live binding themselves.
+        let mut var = if append
+            && !global
+            && let Some(var) = self.variables.get_mut(name)
+            && var.elements.is_some()
+            && !var.readonly
+            && !var.dynamic
+            && !var.integer
+            && var.letter_case.is_none()
+        {
+            std::mem::take(var)
+        } else {
+            self.declared_variable(name, global).unwrap_or_default()
+        };
         if var.readonly {
             return Err(crate::session::READONLY);
         }

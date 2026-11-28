@@ -234,15 +234,14 @@ impl<T: AsRef<str>> Matcher<T> {
     }
 
     pub(crate) fn matches(&self, value: &str) -> bool {
-        if value.contains('\0') {
-            return false;
-        }
-        if matches!(self, Self::Native(_)) || matches!(self, Self::Bracket(p, _) if p.needs_locale)
+        let accepted = if matches!(self, Self::Native(_))
+            || matches!(self, Self::Bracket(p, _) if p.needs_locale)
         {
             localized(|| self.accepts(value.as_bytes(), false, None))
         } else {
             self.accepts(value.as_bytes(), false, None)
-        }
+        };
+        accepted && memchr::memchr(0, value.as_bytes()).is_none()
     }
 }
 
@@ -346,7 +345,7 @@ pub fn matches(value: &str, pattern: &str) -> bool {
 mod case;
 use case::mapped_char;
 pub(crate) use case::{
-    CaseDirection, capitalize, case_chars, folded_prefix, same_letter, toggle_case,
+    CaseDirection, capitalize, case_chars, convert_chars, folded_prefix, same_letter,
 };
 
 pub(crate) struct ParameterPattern<'a> {
@@ -454,7 +453,7 @@ pub(crate) fn trim_boundary(
         && !literal
             .bytes()
             .any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | 0))
-        && !value.contains('\0');
+        && memchr::memchr(0, value.as_bytes()).is_none();
     if plain {
         if star.is_some() {
             let offset = if prefix == longest {
@@ -480,7 +479,7 @@ pub(crate) fn trim_boundary(
         && !tail.is_empty()
         && !head.contains(['?', '[', '\\', '\0'])
         && !tail.contains(['*', '?', '[', '\\', '\0'])
-        && !value.contains('\0')
+        && memchr::memchr(0, value.as_bytes()).is_none()
     {
         if prefix {
             let rest = value.strip_prefix(head)?;

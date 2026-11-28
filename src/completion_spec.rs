@@ -919,6 +919,39 @@ fn apply(
     Ok(status)
 }
 
+pub(crate) fn capture_candidates(
+    session: &mut Session,
+    args: &[String],
+    last: u8,
+    out: &mut Vec<u8>,
+) -> Option<u8> {
+    let req = Request::parse(CompBuiltin::Compgen, args).ok()?;
+    let spec = &req.spec;
+    if args.is_empty()
+        || req.destination.is_some()
+        || spec.function.is_some()
+        || spec.command.is_some()
+        || spec.glob.is_some()
+        || spec.words.as_ref().is_some_and(|list| !list.literal)
+        || !spec.actions.iter().all(|a| {
+            matches!(
+                a,
+                CompAction::File
+                    | CompAction::Directory
+                    | CompAction::Command
+                    | CompAction::Variable
+                    | CompAction::Function
+                    | CompAction::Builtin
+                    | CompAction::Keyword
+                    | CompAction::Alias
+            )
+        })
+    {
+        return None;
+    }
+    apply(req, CompBuiltin::Compgen, session, last, out).ok()
+}
+
 pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
     let builtin = CompBuiltin::from_name(name);
     if builtin == CompBuiltin::Compgen && args.is_empty() {
