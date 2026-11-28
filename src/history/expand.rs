@@ -136,6 +136,23 @@ fn substitute(value: &str, memory: &Memory, global: bool) -> io::Result<String> 
     Ok(result)
 }
 
+fn replace_event_words(value: &str, memory: &Memory, global: bool, by_word: bool, extglob: bool) -> io::Result<String> {
+    if !by_word { return substitute(value, memory, global); }
+    let (old, new) = memory.substitution.as_ref().ok_or_else(|| error("no previous substitution"))?;
+    let mut result = String::new();
+    let mut start = 0;
+    for (a, b) in crate::parser::history_designator_spans(value, extglob) {
+        if let Some(at) = value[a..b].find(old) {
+            result.push_str(&value[start..a + at]);
+            result.push_str(new);
+            start = a + at + old.len();
+        }
+    }
+    if start == 0 { return Err(error("substitution failed")); }
+    result.push_str(&value[start..]);
+    Ok(result)
+}
+
 fn remember(memory: &mut Memory, mut old: String, new: String) -> io::Result<()> {
     if old.is_empty() {
         old = memory
@@ -238,7 +255,8 @@ fn expand_event(
     };
     while input.starts_with(':') {
         pop(&mut input);
-        let global = input.starts_with('g');
+        let global = input.starts_with(['g', 'G', 'a']);
+        let by_word = input.starts_with('G');
         if global {
             pop(&mut input);
         }
@@ -275,14 +293,14 @@ fn expand_event(
                 let new = field(&mut input, d);
                 let memory = memory.get_or_insert_with(Default::default);
                 remember(memory, old, new)?;
-                substitute(&value, memory, global)?
+                replace_event_words(&value, memory, global, by_word, extglob)?
             }
-            '&' => substitute(
+            '&' => replace_event_words(
                 &value,
                 memory
                     .as_deref()
                     .ok_or_else(|| error("no previous substitution"))?,
-                global,
+                global, by_word, extglob,
             )?,
             _ => return Err(error("unsupported history modifier")),
         };
@@ -309,7 +327,7 @@ pub(crate) fn expand_line<'a>(
         return Ok(unchanged());
     };
     let history = session.history.as_deref();
-    if let Some(q) = quick
+    if quote.is_none() && let Some(q) = quick
         && let Some(rest) = line.strip_prefix(q)
     {
         return quick_substitution(session, q, rest);

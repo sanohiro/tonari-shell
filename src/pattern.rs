@@ -8,13 +8,28 @@ pub(crate) use glob_locale::{Cached as PatternLocale, sync_ranges};
 pub(crate) fn session_locale(session: &crate::Session) -> Option<std::rc::Rc<PatternLocale>> {
     thread_local! { static INHERITED: std::cell::OnceCell<Option<std::rc::Rc<PatternLocale>>> = const { std::cell::OnceCell::new() }; }
     if session.pattern_locale_overridden() {
-        glob_locale::resolve(&|key| session.get(key))
+        if let Some(all) = session.scalar_setting("LC_ALL").filter(|s| !s.is_empty()) {
+            return glob_locale::resolve_names(&all, &all);
+        }
+        let ctype = session.locale_category("LC_CTYPE");
+        let collate = session.locale_category("LC_COLLATE");
+        glob_locale::resolve_names(ctype.as_deref().unwrap_or("C"), collate.as_deref().unwrap_or("C"))
     } else {
         INHERITED.with(|cell| {
             cell.get_or_init(|| glob_locale::resolve(&|key| std::env::var(key).ok()))
                 .clone()
         })
     }
+}
+
+pub(crate) fn text_order(left: &str, right: &str, session: &crate::Session) -> std::cmp::Ordering {
+    let locale = (session.shopt.compat > 40).then(|| session_locale(session)).flatten();
+    if let Some(locale) = locale && !matches!(locale.collate.as_str(), "C" | "POSIX" | "C.UTF-8" | "C.utf8")
+        && let (Ok(left), Ok(right)) = (std::ffi::CString::new(left), std::ffi::CString::new(right))
+        && let Some(_locale) = locale.enter() {
+        return unsafe { libc::strcoll(left.as_ptr(), right.as_ptr()) }.cmp(&0);
+    }
+    left.cmp(right)
 }
 
 impl PatternLocale {
@@ -681,7 +696,7 @@ impl GlobOptions {
                         }
                     }
                 }
-                '(' => depth += 1,
+                '(' if self.extglob => depth += 1,
                 ')' => depth = depth.saturating_sub(1),
                 ':' if depth == 0 => {
                     if begin != i {
@@ -906,6 +921,7 @@ fn paths(
         paths.retain(|path| fs::symlink_metadata(path).is_ok());
     }
     if let Some(patterns) = &options.ignore {
+        paths.retain(|path| !matches!(path.trim_end_matches('/').rsplit('/').next(), Some("." | "..")));
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
             // alternative may contain a literal directory separator.

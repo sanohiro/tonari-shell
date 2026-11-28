@@ -121,6 +121,7 @@ pub enum Incomplete {
     DoubleQuote,
     AnsiQuote,
     CasePattern,
+    CompoundEnd(&'static str),
     Subshell,
 }
 
@@ -159,6 +160,7 @@ impl Error {
             Self::Incomplete(Incomplete::DoubleQuote) => "unterminated double quote",
             Self::Incomplete(Incomplete::AnsiQuote) => "unterminated dollar-single-quoted string",
             Self::Incomplete(Incomplete::CasePattern) => "expected ')' after case pattern",
+            Self::Incomplete(Incomplete::CompoundEnd(_)) => "unfinished compound command",
             Self::Incomplete(Incomplete::Subshell) => "unfinished subshell",
             Self::NulByte => "NUL in command text",
             Self::ArithmeticClose => "invalid closing parenthesis in arithmetic expression",
@@ -166,6 +168,20 @@ impl Error {
             Self::ArrayToken => "unexpected token in array assignment",
         }
     }
+}
+
+thread_local! {
+    static EXPANSION_DEPTH: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
+}
+
+// A nested lexer starts a new Reader. Charge the parent even across that
+// boundary, including expansion of a word originally obtained from a file.
+pub(crate) fn enter_expansion() -> Result<crate::ScopedCell<u16>, Error> {
+    let depth = EXPANSION_DEPTH.get();
+    if depth >= 128 || depth >= 8 && depth.is_multiple_of(8) && crate::stack_budget_exceeded() {
+        return Err(Error::Invalid("shell expansion nesting limit exceeded"));
+    }
+    Ok(crate::ScopedCell::enter(&EXPANSION_DEPTH, depth + 1))
 }
 
 pub(crate) fn reserved(word: &str) -> bool {
@@ -504,6 +520,7 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
 }
 
 struct Reader {
+    here_extents: Vec<(usize, usize)>,
     depth: usize,
     first_line: usize,
     source: Rc<str>,
@@ -546,6 +563,7 @@ impl Reader {
         Self {
             first_line: source_line(source),
             line_index: std::cell::Cell::new(0),
+            here_extents: Vec::new(),
             depth: 0,
             spans,
             alias_source: None,
@@ -625,17 +643,25 @@ impl Reader {
     }
 
     fn operand(&mut self) -> Option<Token> {
-        self.tokens.pop_front().map(Token::into_operand)
+        Some(match self.tokens.pop_front()? {
+            Token::HereBody(body, extent) => {
+                self.here_extents.push(extent);
+                Token::Word(LexWord { word: Word::Literal(body), protected: true, assignment: None })
+            }
+            token => token.into_operand(),
+        })
     }
 
-    fn expect(&mut self, keyword: &str) -> Result<(), Error> {
+    fn expect(&mut self, keyword: &'static str) -> Result<(), Error> {
         if self.keyword() == Some(keyword) {
             self.tokens.pop_front();
             Ok(())
         } else if self.peek().is_none() {
-            Err(Error::Incomplete(Incomplete::Message(
-                "unfinished compound command",
-            )))
+            Err(Error::Incomplete(if matches!(keyword, "}" | "fi" | "done" | "esac") {
+                Incomplete::CompoundEnd(keyword)
+            } else {
+                Incomplete::Message("unfinished compound command")
+            }))
         } else {
             Err(Error::Invalid("unexpected token in compound command"))
         }
@@ -1167,6 +1193,7 @@ impl Reader {
     }
 
     fn function(&mut self, keyword: bool) -> Result<Command, Error> {
+        let first_here = self.here_extents.len();
         if keyword {
             self.tokens.pop_front();
         }
@@ -1224,6 +1251,23 @@ impl Reader {
         } else {
             self.location(start_name).line
         };
+        let mut location = location;
+        let mut rendered = None;
+        for &(start, end) in &self.here_extents[first_here..] {
+            if start >= location.end && let Some(raw) = self.source.get(start..end) {
+                let text = rendered.get_or_insert_with(|| {
+                    let mut text = location.text().to_owned();
+                    text.push('\n');
+                    text
+                });
+                text.push_str(raw);
+            }
+        }
+        if let Some(text) = rendered {
+            location.start = 0;
+            location.end = text.trim_end_matches('\n').len();
+            location.source = text.into();
+        }
         Ok(Command::Function {
             name,
             definition: Rc::new(FunctionDefinition {
@@ -1383,7 +1427,11 @@ impl Reader {
                                 cmd.words
                                     .push(lexer::subscript_word(expr.text(), true)?.declaration());
                             } else {
-                                let value = &expr.text()[name.len() + 1..];
+                                // The assignment name is logical text and may have crossed
+                                // a physical line continuation before the equals sign.
+                                let value = &expr.text()[expr.text().find('(').ok_or(
+                                    Error::Invalid("invalid array initializer"),
+                                )?..];
                                 cmd.assignments.push((
                                     name,
                                     Assignment::Scalar(lexer::subscript_word(value, true)?),

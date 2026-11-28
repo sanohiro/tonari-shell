@@ -67,6 +67,19 @@ impl Session {
                 status = 1;
                 continue;
             }
+            let resolved = match self.reference_name(name) {
+                Ok(resolved) => resolved,
+                Err(e) => {
+                    diagnostic!("export: {name}: {e}");
+                    status = 1;
+                    continue;
+                }
+            };
+            let target = resolved.as_ref();
+            // An array element assignment uses its resolved subscript. The
+            // export attribute itself belongs to the array variable.
+            let element = array::subscript(target);
+            let name = element.map_or(target, |(base, _)| base);
             let readonly = self.readonly(name);
             if readonly && value.is_some() {
                 diagnostic!("export: {name}: readonly variable");
@@ -76,6 +89,17 @@ impl Session {
             if name == "PATH" && value.is_some() {
                 self.hashes.clear();
             }
+            let value = if element.is_some() {
+                if let Some(value) = value {
+                    let value = if append { Cow::Owned(self.get(target).unwrap_or_default() + value) } else { Cow::Borrowed(value) };
+                    if let Err(e) = self.assign_builtin_target(target, &value) {
+                        diagnostic!("export: {target}: {e}");
+                        status = 1;
+                        continue;
+                    }
+                }
+                None
+            } else { value };
             let integer = self.integer(name);
             let normalized;
             let (value, append) = if integer && let Some(value) = value {
@@ -227,14 +251,16 @@ impl Session {
             Variable {
                 declared: self
                     .locals
-                    .last()
-                    .is_some_and(|scope| scope.variables.contains_key(name)),
+                    .iter()
+                    .rev()
+                    .take(if self.shopt.localvar_unset { usize::MAX } else { 1 })
+                    .any(|scope| scope.variables.contains_key(name)),
                 ..Variable::default()
             },
         );
     }
 
-    pub fn unset(&mut self, args: &[String]) -> u8 {
+    pub fn unset(&mut self, args: &[String]) -> crate::Flow {
         let mut args = args;
         let mut literal_ref = false;
         let mut functions_only = false;
@@ -247,14 +273,14 @@ impl Session {
                     'f' => functions_only = true,
                     _ => {
                         diagnostic!("unset: unsupported option {opt}");
-                        return 2;
+                        return crate::Flow::Continue(2);
                     }
                 }
             }
         }
         if functions_only && variables_only {
             diagnostic!("unset: cannot combine -f and -v");
-            return 1;
+            return crate::Flow::Continue(1);
         }
         self.unset_operands(
             args.iter().map(String::as_str),
@@ -265,7 +291,7 @@ impl Session {
     }
 
     pub(crate) fn unset_builtin_target(&mut self, name: &str) -> u8 {
-        self.unset_operands(std::iter::once(name), false, false, true)
+        self.unset_operands(std::iter::once(name), false, false, true).child_status()
     }
 
     fn unset_operands<'a>(
@@ -274,7 +300,7 @@ impl Session {
         literal_ref: bool,
         functions_only: bool,
         variables_only: bool,
-    ) -> u8 {
+    ) -> crate::Flow {
         let mut status = 0;
         for original in args {
             if literal_ref && !self.is_nameref(original) {
@@ -298,6 +324,11 @@ impl Session {
                 }
             };
             let subscript = array::subscript(name);
+            if variables_only && !is_identifier(subscript.map_or(name, |(base, _)| base)) {
+                diagnostic!("unset: {original}: not a valid identifier");
+                status = 1;
+                continue;
+            }
             let base = subscript.map_or(name, |(base, _)| base);
             if !functions_only
                 && (Self::builtin_readonly(base)
@@ -310,9 +341,10 @@ impl Session {
             let resolve_function = functions_only
                 || !variables_only
                     && (subscript.is_none() || self.readonly_functions.contains(name))
-                    && self
-                        .declared_variable(name, false)
-                        .is_none_or(|v| !v.declared);
+                    && self.variables.get(name).map_or_else(
+                        || self.declared_variable(name, false).is_none_or(|v| !v.declared),
+                        |var| !var.declared,
+                    );
             if resolve_function && self.readonly_functions.contains(name) {
                 diagnostic!("unset: {name}: readonly function");
                 status = 1;
@@ -365,7 +397,7 @@ impl Session {
                     Ok(i) => self.unset_element(base, i),
                     Err(e) => {
                         diagnostic!("unset: {e}");
-                        return 1;
+                        return crate::Flow::Discard(1);
                     }
                 }
                 continue;
@@ -377,6 +409,6 @@ impl Session {
                 self.unset_variable(name);
             }
         }
-        status
+        crate::Flow::Continue(status)
     }
 }

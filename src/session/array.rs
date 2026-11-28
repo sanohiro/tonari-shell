@@ -264,6 +264,9 @@ impl Session {
     }
 
     pub fn assign_builtin_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
+        if super::is_identifier(target) && self.assign_existing_literal(target, value) {
+            return Ok(());
+        }
         self.assign_target_value(
             target,
             value,
@@ -802,6 +805,7 @@ impl Session {
             && !global
             && let ArrayItems::Indexed(words) = items
             && let Some(var) = self.variables.get_mut(name)
+            && !var.dynamic
             && !var.readonly
             && !var.integer
             && !var.nameref
@@ -991,7 +995,16 @@ impl Session {
                 .ok_or(crate::session::SUBSCRIPT_RANGE)?;
                 let value = if var.integer {
                     let old = if concat {
-                        map.get(&i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
+                        match map.get(&i) {
+                            None => 0,
+                            Some(text) => match Self::plain_decimal(text) {
+                                Some(n) => n,
+                                None => {
+                                    let expression = text.to_owned();
+                                    self.initializer_number(name, var, &mut map, visible, &expression)?
+                                }
+                            }
+                        }
                     } else {
                         0
                     };

@@ -4,7 +4,53 @@ permissions:
   contents: read
 
 jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        revision: [current, previous]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ matrix.revision == 'previous' && github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+      - run: cargo build --locked --release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shell-${{ matrix.revision }}
+          path: target/release/tonari
+          if-no-files-found: error
+          retention-days: 1
+
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - run: cargo test --locked
+      - run: rustup target add x86_64-unknown-linux-musl
+      - run: cargo test --locked --target x86_64-unknown-linux-musl
+      - run: python3 -m unittest discover -s tests/compat -p test_benchmark_helpers.py
+
+  integration:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: shell-current
+          path: bin
+      - run: |
+          chmod +x bin/tonari
+          python3 tests/shell.py bin/tonari -q
+          python3 tests/compat/source_review.py /bin/bash bin/tonari --runs 0
+
   compare:
+    needs: build
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -13,43 +59,24 @@ jobs:
     timeout-minutes: 25
     env:
       SHARD: ${{ matrix.shard }}
-      BASE_REVISION: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          fetch-depth: 0
           persist-credentials: false
-      - name: Build both revisions and compare upstream cases
-        shell: bash
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: shell-*
+          path: bin
+      - name: Compare upstream cases
         run: |
           set -euo pipefail
-          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_REVISION"
-          export CARGO_TARGET_DIR="$RUNNER_TEMP/target"
-          (cd "$RUNNER_TEMP/base" && cargo build --locked --release --target-dir "$RUNNER_TEMP/base-target")
-          cp "$RUNNER_TEMP/base-target/release/tonari" "$RUNNER_TEMP/previous"
-          cargo build --locked --release
+          chmod +x bin/shell-{current,previous}/tonari
           git init -q "$RUNNER_TEMP/yash"
           git -C "$RUNNER_TEMP/yash" fetch -q --depth 1 https://github.com/magicant/yash.git 1cdb509a617894ed96a12c33b43bcd7adb6f1ff5
           git -C "$RUNNER_TEMP/yash" checkout -q --detach FETCH_HEAD
           python3 tools/ci/yash-posix.py "$RUNNER_TEMP/yash" results --prepare --runs 1 --require-bash-passes \
-            --tonari "$CARGO_TARGET_DIR/release/tonari" --previous "$RUNNER_TEMP/previous" --bash /bin/bash \
+            --tonari "$PWD/bin/shell-current/tonari" --previous "$PWD/bin/shell-previous/tonari" --bash /bin/bash \
             --shard "$SHARD/4" --inventory docs/compatibility/yash-posix/ubuntu-24.04.tsv.gz
-      - name: Check interpreter unit tests
-        if: matrix.shard == 0
-        run: cargo test --locked
-      - name: Check native benchmark helpers
-        if: matrix.shard == 0
-        run: python3 -m unittest discover -s tests/compat -p test_benchmark_helpers.py
-      - name: Check POSIX execution order and terminal operands
-        if: matrix.shard == 0
-        run: python3 tests/shell.py "$RUNNER_TEMP/target/release/tonari" -q -k posix_
-      - name: Run shell and terminal regressions
-        if: matrix.shard == 0
-        run: |
-          python3 tests/shell.py "$RUNNER_TEMP/target/release/tonari" -q
-      - name: Compare source-review witnesses with the runner's Bash
-        if: matrix.shard == 0
-        run: python3 tests/compat/source_review.py /bin/bash "$RUNNER_TEMP/target/release/tonari" --runs 0
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

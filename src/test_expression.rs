@@ -148,6 +148,10 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     && let Some(right) = right.as_literal()
                     && let Some(v) = w.stored_parameter(session) =>
             {
+                if matches!(*op, "<" | ">") {
+                    let order = pattern::text_order(v,right,session);
+                    return Ok(if *op == "<" { order.is_lt() } else { order.is_gt() });
+                }
                 return builtins::binary(v, op, right).map_err(error);
             }
             _ => {}
@@ -168,7 +172,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             Ok(true)
         }
         Or(terms) => {
-            let (last, prefix) = terms.split_last().expect("empty conditional disjunction");
+            let Some((last, prefix)) = terms.split_last() else { return Ok(false); };
             for term in prefix {
                 match condition(term, session, status) {
                     Ok(false) | Err(Flow::Continue(1..)) => {}
@@ -226,6 +230,12 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             let left = operand(session, left, status)?;
             match op {
                 "=" | "==" | "!=" => {
+                    if !session.xtrace && !session.shopt.nocasematch
+                        && let crate::word::Word::Expanded(parts) = right
+                        && matches!(parts.as_slice(), [crate::word::Part::Parameter {quoted: true, ..}])
+                        && let Some(value) = right.stored_parameter(session) {
+                        return Ok((left == value) != (op == "!="));
+                    }
                     if !session.shopt.nocasematch
                         && let Some(text) = right.as_literal()
                     {
@@ -293,6 +303,12 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         "-gt" => a > b,
                         _ => a >= b,
                     })
+                }
+                "<" | ">" => {
+                    let right = operand(session, right, status)?;
+                    trace(session, status, &[&left, op, &right]);
+                    let order = pattern::text_order(&left, &right, session);
+                    Ok(if op == "<" { order.is_lt() } else { order.is_gt() })
                 }
                 _ => {
                     let right = operand(session, right, status)?;

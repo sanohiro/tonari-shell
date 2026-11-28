@@ -17,6 +17,10 @@ pub(crate) fn builtin(session: &mut Session, args: &[String], status: u8) -> Flo
         }
         _ => args,
     };
+    if crate::stack_budget_exceeded() {
+        diagnostic!("eval: nesting limit exceeded");
+        return Flow::Discard(1);
+    }
     let joined;
     let source = match args {
         [] => return Flow::Continue(0),

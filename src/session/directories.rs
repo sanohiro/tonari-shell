@@ -317,7 +317,7 @@ impl Session {
                 if i == 0 {
                     if !no_cd {
                         let target = self.dir_stack.last().unwrap().clone();
-                        self.change_directory(Path::new(&target), false, false, true)?;
+                        self.change_directory(Path::new(&target), self.physical, false, true)?;
                     }
                     self.dir_stack.pop();
                 } else {
@@ -334,7 +334,7 @@ impl Session {
                     .collect();
                 paths.rotate_left(i);
                 if !no_cd {
-                    self.change_directory(Path::new(&paths[0]), false, false, true)?;
+                    self.change_directory(Path::new(&paths[0]), self.physical, false, true)?;
                 }
                 self.dir_stack = paths.into_iter().skip(1).rev().collect();
             } else if let Some(dir) = operand {
@@ -344,7 +344,12 @@ impl Session {
                     let cwd = self
                         .stack_entry(0)
                         .ok_or_else(|| io::Error::other("cannot read current directory"))?;
-                    self.change_directory(Path::new(dir), false, false, true)?;
+                    if dir == "-" {
+                        let old = self.get("OLDPWD").ok_or_else(|| io::Error::other("OLDPWD not set"))?;
+                        self.change_directory(Path::new(&old), self.physical, true, true)?;
+                    } else {
+                        self.change_directory(Path::new(dir), self.physical, false, true)?;
+                    }
                     self.dir_stack.push(cwd);
                 }
             } else if !no_cd {
@@ -356,7 +361,7 @@ impl Session {
                     .last()
                     .ok_or_else(|| io::Error::other("no other directory"))?
                     .clone();
-                self.change_directory(Path::new(&next), false, false, true)?;
+                self.change_directory(Path::new(&next), self.physical, false, true)?;
                 *self.dir_stack.last_mut().unwrap() = cwd;
             }
             Ok(())
@@ -468,6 +473,10 @@ impl Session {
                 diagnostic!("cd: {} not set", if previous { "OLDPWD" } else { "HOME" });
                 return 1;
             };
+            if target.is_empty() {
+                diagnostic!("cd: null directory");
+                return 1;
+            }
             if self.posix && physical {
                 match self.try_change_directory(
                     Path::new(&target),

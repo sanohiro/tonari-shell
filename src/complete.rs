@@ -31,6 +31,7 @@ pub struct Context<'a> {
     pub current: usize,
     pub start: usize,
     pub command_start: usize,
+    pub command_end: usize,
 }
 
 #[derive(Default)]
@@ -131,6 +132,7 @@ impl<'a> Context<'a> {
             current,
             start,
             command_start: self.command_start,
+            command_end: end,
         }
     }
 
@@ -149,6 +151,7 @@ impl<'a> Context<'a> {
         let mut in_word = false;
         let mut start = 0;
         let mut command_start = 0;
+        let mut command_end = line.len();
         let mut current = None;
         for (i, c) in line.char_indices() {
             if i == cursor {
@@ -164,6 +167,7 @@ impl<'a> Context<'a> {
                 }
                 if c == '\n' || "|;&".contains(c) {
                     if i >= cursor {
+                        command_end = i;
                         in_word = false;
                         break;
                     }
@@ -197,6 +201,7 @@ impl<'a> Context<'a> {
             current: current?,
             start,
             command_start,
+            command_end,
         })
     }
 }
@@ -238,6 +243,12 @@ impl Common {
         } else {
             ControlFlow::Continue(())
         }
+    }
+
+    fn endpoints(first: &str, last: &str, multiple: bool, lower_bound: &str) -> Self {
+        let mut common = Self::new(first.to_owned());
+        if multiple { let _ = common.narrow(last, lower_bound); }
+        common
     }
 
     fn from_names<'a>(mut names: impl Iterator<Item = &'a str>, lower_bound: &str) -> Option<Self> {
@@ -291,10 +302,7 @@ impl Source {
                     ));
                 }
                 if let Some(matches) = source.indexed(prefix, &ifs) {
-                    let mut common = Common::new(source.word(*matches.first()?).to_owned());
-                    if matches.len() > 1 {
-                        let _ = common.narrow(source.word(*matches.last()?), prefix);
-                    }
+                    let common = Common::endpoints(source.word(*matches.first()?), source.word(*matches.last()?), matches.len() > 1, prefix);
                     let choices = if list {
                         matches.iter().map(|&r| source.word(r).to_owned()).collect()
                     } else {
@@ -384,10 +392,7 @@ impl Source {
         };
         // These generators return sorted choices. The first and last determine
         // the common prefix of the whole list, including multibyte boundaries.
-        let mut common = Common::new(words.first()?.clone());
-        if words.len() > 1 {
-            let _ = common.narrow(words.last()?, prefix);
-        }
+        let common = Common::endpoints(words.first()?, words.last()?, words.len() > 1, prefix);
         Some((common, words))
     }
 }
@@ -404,27 +409,6 @@ pub fn at(
     let start = context.start;
     let prefix = context.words.get(context.current)?;
     let command = (!first).then(|| context.words[0].as_str());
-    let default_source = if files_only {
-        Source::Files
-    } else if session.shopt.hostcomplete
-        && let Some(host) = prefix.strip_prefix('@')
-    {
-        let mut names: Vec<_> = host_names(host, session)
-            .into_iter()
-            .map(|s| format!("@{s}"))
-            .collect();
-        names.sort_unstable();
-        names.dedup();
-        if names.is_empty() {
-            Source::Files
-        } else {
-            Source::Words(names)
-        }
-    } else if first && !prefix.contains('/') {
-        Source::Commands
-    } else {
-        Source::Files
-    };
     // Registered definitions own the candidate list, including an explicitly
     // empty result. Only the shell's default completion offers learned arguments.
     let configured = !files_only
@@ -443,7 +427,7 @@ pub fn at(
     let callback = adjusted.as_ref().unwrap_or(&context);
     let callback_prefix = &line[callback.start..cursor];
     let generated = if configured && (callback.current != 0 || command.is_none()) {
-        crate::completion_spec::for_tab(session, command, callback_prefix, Some(callback))
+        crate::completion_spec::for_tab(session, command, callback_prefix, Some(callback), list)
     } else {
         None
     };
@@ -467,6 +451,27 @@ pub fn at(
                 return alternatives(names, prefix);
             }
         }
+    let default_source = if files_only {
+        Source::Files
+    } else if session.shopt.hostcomplete
+        && let Some((user,host)) = prefix.rsplit_once('@')
+    {
+        let mut names: Vec<_> = host_names(host, session)
+            .into_iter()
+            .map(|s| format!("{user}@{s}"))
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        if names.is_empty() {
+            Source::Files
+        } else {
+            Source::Words(names)
+        }
+    } else if first && !prefix.contains('/') {
+        Source::Commands
+    } else {
+        Source::Files
+    };
         let files = matches!(default_source, Source::Files | Source::Directories);
         let source = if dirs && files {
             Source::Directories
@@ -511,6 +516,27 @@ pub fn at(
                 generated.noquote,
                 !generated.nospace && cursor == line.len(),
             ));
+        }
+    }
+    if !files_only {
+        let raw = &line[start..cursor];
+        let mut quoting = Quoting::default();
+        let mut file_start = None;
+        for (offset, c) in raw.char_indices() {
+            if quoting.consume(c) == WordChar::Unquoted && matches!(c, '>' | '<' | '=') {
+                if matches!(c, '>' | '<') || crate::parser::is_identifier(&raw[..offset]) {
+                    file_start = Some(offset + 1);
+                }
+            }
+        }
+        if let Some(skip) = file_start {
+            let (common, choices) = Source::Files.matches(&raw[skip..], session, list)?;
+            return Some(Completion::new(start + skip, common, choices, false, cursor == line.len()));
+        }
+        if let Some(user) = raw.strip_prefix('~') && !user.is_empty() && !user.contains('/') {
+            let choices: Vec<_> = user_names(user).into_iter().map(|s| format!("~{s}/")).collect();
+            let common = Common::from_names(choices.iter().map(String::as_str), raw)?;
+            return Some(Completion::new(start, common, choices, true, false));
         }
     }
     if let Some((head, rest)) = line[start..cursor].split_once('/')
@@ -621,16 +647,15 @@ fn variable_completion(
         Some(&q @ (b'\'' | b'"')) => (Some(char::from(q)), &raw[1..]),
         _ => (None, raw),
     };
-    let tail = raw.strip_prefix('$')?;
+    let dollar = raw.rfind('$')?;
+    if raw[..dollar].ends_with('\\') { return None; }
+    let tail = &raw[dollar + 1..];
     let (braced, prefix) = tail.strip_prefix('{').map_or((false, tail), |p| (true, p));
     if !prefix.is_empty() && !crate::parser::is_identifier(prefix) {
         return None;
     }
     let names = session.variable_names(prefix);
-    let mut common = Common::new(names.first()?.clone());
-    if names.len() > 1 {
-        let _ = common.narrow(names.last()?, prefix);
-    }
+    let mut common = Common::endpoints(names.first()?, names.last()?, names.len() > 1, prefix);
     let close = |name: &mut String| {
         if braced {
             name.push('}');
@@ -703,9 +728,9 @@ fn quote_choice(common: &str, noquote: bool, append_space: bool, source_prefix: 
             replacement.push_str("'\n'");
             continue;
         }
-        let leading_tilde = i == 0 && common.starts_with("~/");
+        let leading_tilde = i == 0 && c == '~' && common.contains('/');
         let ordinary = c.is_alphanumeric()
-            || "/._-".contains(c)
+            || "/._-+,%^]}@".contains(c)
             || !c.is_ascii() && !c.is_whitespace() && !c.is_control();
         if !leading_tilde && !ordinary {
             replacement.push('\\');
@@ -741,7 +766,7 @@ fn visit_commands(
     let mut entries = 0usize;
     let mut checked_fd = false;
     let ignored = crate::execute::IgnoredExecutables::new(session);
-    for dir in std::env::split_paths(&session.search_path(&[])) {
+    for (position, dir) in std::env::split_paths(&session.search_path(&[])).enumerate() {
         let path = if dir.as_os_str().is_empty() {
             Path::new(".")
         } else {
@@ -761,7 +786,7 @@ fn visit_commands(
             }
             ControlFlow::Continue(())
         };
-        if !prefix.is_empty() {
+        if position < command_cache::MAX_DIRECTORIES {
             command_cache::scan(path, prefix.as_bytes(), &mut checked_fd, &mut candidate)?;
         } else {
             scan(path, prefix.as_bytes(), &mut candidate)?;
@@ -805,6 +830,12 @@ fn common_command(prefix: &str, session: &Session) -> Option<Common> {
     common
 }
 
+fn collect_name(raw: &std::ffi::CStr, prefix: &str, names: &mut Vec<String>) {
+    if raw.to_bytes().starts_with(prefix.as_bytes()) && let Ok(name) = raw.to_str() {
+        names.push(name.to_owned());
+    }
+}
+
 pub(crate) fn user_names(prefix: &str) -> Vec<String> {
     let mut names = Vec::new();
     // Consume each libc-owned entry before requesting the next one.
@@ -815,11 +846,7 @@ pub(crate) fn user_names(prefix: &str) -> Vec<String> {
             if entry.is_null() {
                 break;
             }
-            if let Ok(name) = std::ffi::CStr::from_ptr((*entry).pw_name).to_str()
-                && name.starts_with(prefix)
-            {
-                names.push(name.to_owned());
-            }
+            collect_name(std::ffi::CStr::from_ptr((*entry).pw_name), prefix, &mut names);
         }
         libc::endpwent();
     }
@@ -831,12 +858,7 @@ pub(crate) fn group_names(prefix: &str) -> Vec<String> {
     unsafe {
         libc::setgrent();
         while let Some(group) = libc::getgrent().as_ref() {
-            let bytes = std::ffi::CStr::from_ptr(group.gr_name).to_bytes();
-            if bytes.starts_with(prefix.as_bytes())
-                && let Ok(name) = std::str::from_utf8(bytes)
-            {
-                names.push(name.to_owned());
-            }
+            collect_name(std::ffi::CStr::from_ptr(group.gr_name), prefix, &mut names);
         }
         libc::endgrent();
     }
@@ -847,7 +869,6 @@ pub(crate) fn service_names(prefix: &str) -> Vec<String> {
     use std::os::unix::fs::MetadataExt;
     struct Previous {
         file: (u64, u64, i64, i64, u64),
-        prefix: String,
         names: Vec<String>,
     }
     thread_local! { static PREVIOUS: std::cell::RefCell<Option<Previous>> = const { std::cell::RefCell::new(None) }; }
@@ -863,11 +884,8 @@ pub(crate) fn service_names(prefix: &str) -> Vec<String> {
         metadata.len(),
     );
     PREVIOUS.with_borrow_mut(|last| {
-        if let Some(entry) = last
-            && entry.file == key
-            && entry.prefix == prefix
-        {
-            return entry.names.clone();
+        if let Some(entry) = last && entry.file == key {
+            return entry.names.iter().filter(|name| name.starts_with(prefix)).cloned().collect();
         }
         let Ok(text) = std::fs::read_to_string(path) else {
             return Vec::new();
@@ -881,15 +899,11 @@ pub(crate) fn service_names(prefix: &str) -> Vec<String> {
                 Some(std::iter::once(primary).chain(fields))
             })
             .flatten()
-            .filter(|name| name.starts_with(prefix))
             .map(str::to_owned)
             .collect();
-        *last = Some(Previous {
-            file: key,
-            prefix: prefix.into(),
-            names: names.clone(),
-        });
-        names
+        let matching = names.iter().filter(|name| name.starts_with(prefix)).cloned().collect();
+        *last = Some(Previous { file: key, names });
+        matching
     })
 }
 
@@ -1046,6 +1060,10 @@ impl<'a> Directory<'a> {
             .map_or(("", prefix), |i| prefix.split_at(i + 1));
         let path = match dir.strip_prefix("~/") {
             Some(rest) => Path::new(&session.get("HOME")?).join(rest),
+            None if let Some(name) = dir.strip_prefix('~') => {
+                let (name, rest) = name.split_once('/')?;
+                Path::new(&crate::word::named_home(name)?).join(rest)
+            }
             None => Path::new(if dir.is_empty() { "." } else { dir }).to_owned(),
         };
         let (dir, path) = if session.shopt.dirspell

@@ -15,6 +15,7 @@ unicode-width = { version = "0.2", default-features = false }
 tonari-time-locales = { path = "crates/time-locales" }
 itoa = "1"
 foldhash = "0.2.0"
+unicode-segmentation = { version = "1", default-features = false }
 
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
 dlmalloc = { version = "0.2.14", features = ["global"] }

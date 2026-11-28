@@ -84,8 +84,8 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
     for spec in args {
         let send = |pid| unsafe { libc::kill(pid, sig) == 0 };
         let ok = if spec.starts_with('%') {
-            jobs.select(spec).is_some_and(|i| {
-                let job = &jobs.table[i];
+            let markers = marked_jobs(jobs.all_jobs());
+            list_position(jobs, spec, markers).and_then(|i| jobs.all_jobs().nth(i)).is_some_and(|job| {
                 if let Some(group) = job.group {
                     send(-group)
                 } else {
@@ -194,7 +194,7 @@ fn wait_next(session: &mut Session, ids: &[String], force: bool) -> (u8, Option<
             }
             if !job.active() && !job.stopped() {
                 let job = jobs.table.remove(i);
-                let pid = job.children.last().map(|p| p.pid);
+                let pid = job.children.iter().rev().find(|p| p.pid > 0).map(|p| p.pid);
                 jobs.remember(&job);
                 return (job.status(), pid);
             }
@@ -208,6 +208,7 @@ fn wait_next(session: &mut Session, ids: &[String], force: bool) -> (u8, Option<
 }
 
 fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Option<pid_t>) {
+    let force = force || !session.jobs.monitor;
     let Ok(mask) = crate::traps::WaitMask::new(&session.traps) else {
         return (1, None);
     };
@@ -240,7 +241,7 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
                 Ok(Some(code)) => return (code, None),
                 Ok(None) => (
                     job.status(),
-                    number.or_else(|| job.children.last().map(|p| p.pid)),
+                    number.or_else(|| job.children.iter().rev().find(|p| p.pid > 0).map(|p| p.pid)),
                 ),
                 Err(_) => (127, None),
             };
@@ -258,7 +259,7 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
                 {
                     let reason = unsafe { libc::strsignal(sig) };
                     if !reason.is_null() {
-                        eprintln!(
+                        stderr_line!(
                             "{} {}  {}",
                             process.pid,
                             unsafe { std::ffi::CStr::from_ptr(reason) }.to_string_lossy(),
@@ -405,7 +406,7 @@ pub(super) fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, out: &mut d
         }
         let pid = job
             .group
-            .unwrap_or_else(|| job.children.first().map_or(0, |p| p.pid));
+            .unwrap_or_else(|| job.children.iter().find(|p| p.pid > 0).map_or(0, |p| p.pid));
         if mode == 'p' {
             if writeln!(out, "{pid}").is_err() {
                 return 1;
@@ -425,6 +426,7 @@ pub(super) fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, out: &mut d
             let mut names = job.name.split(" | ");
             for (stage, child) in job.children.iter().enumerate() {
                 let name = names.next().unwrap_or("command");
+                if child.pid <= 0 { continue; }
                 let suffix = if stage + 1 == job.children.len() {
                     bg
                 } else {
@@ -508,12 +510,12 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
             }
             let mut status = 0;
             let mut out = crate::builtins::stdout_for("bg");
-            for spec in words[1..]
-                .iter()
+            let operands = if words.get(1).is_some_and(|arg| arg == "--") { &words[2..] } else { &words[1..] };
+            for spec in operands.iter()
                 .map(String::as_str)
-                .chain((words.len() == 1).then_some("%+"))
+                .chain(operands.is_empty().then_some("%+"))
             {
-                let Some(i) = jobs.select(spec) else {
+                let Some(i) = jobs.select_job(spec) else {
                     diagnostic!("bg: {spec}: no such job");
                     status = 1;
                     continue;
@@ -529,11 +531,11 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                     diagnostic!("bg: job {} already in background", job.id);
                     continue;
                 }
-                if job.stopped() && job.resume().is_err() {
+                if job.resume().is_err() {
                     status = 1;
                     continue;
                 }
-                session.last_background = job.children.last().map(|p| p.pid);
+                session.last_background = job.children.iter().rev().find(|p| p.pid > 0).map(|p| p.pid);
                 let result = if session.posix {
                     writeln!(out, "[{}] {} &", job.id, job.name)
                 } else {
@@ -557,8 +559,11 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 diagnostic!("{name}: no job control");
                 return 1;
             }
-            let Some(i) = jobs.select(words.get(1).map(String::as_str).unwrap_or("")) else {
-                diagnostic!("{name}: no such job");
+            let mut args = &words[1..];
+            if args.first().is_some_and(|arg| arg == "--") { args = &args[1..]; }
+            let spec = args.first().map_or("%+", String::as_str);
+            let Some(i) = jobs.select_job(spec) else {
+                diagnostic!("{name}: {spec}: no such job");
                 return 1;
             };
             if jobs.table[i].group.is_none() {
@@ -580,6 +585,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
             jobs.note_foreground_signal(&mut job);
             if job.stopped() {
                 jobs.table.push(job);
+                jobs.report_stopped();
             }
             r.unwrap_or(1)
         }

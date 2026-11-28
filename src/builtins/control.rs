@@ -122,6 +122,7 @@ pub fn help(mut args: &[String]) -> u8 {
     while let Some(opt) = crate::builtins::flags::next(&mut args) {
         for c in opt[1..].chars() {
             if !"dms".contains(c) {
+                diagnostic!("help: -{c}: invalid option");
                 return 2;
             }
             mode = c;

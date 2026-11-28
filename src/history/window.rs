@@ -129,8 +129,17 @@ impl Window {
             if new.identity == old.identity
                 && old.len.checked_add(entry.len() as u64) == Some(new.len)
                 && self.start + self.bytes.len() as u64 == old.len
-                && entry.len() <= CAPACITY - self.bytes.len()
+                && entry.len() <= CAPACITY
             {
+                if entry.len() > CAPACITY - self.bytes.len() {
+                    // Retire complete pages in batches to amortize compaction.
+                    let overflow = self.bytes.len() + entry.len() - CAPACITY;
+                    let drop = overflow.max(CAPACITY / 4).div_ceil(PAGE) * PAGE;
+                    let drop = drop.min(self.bytes.len());
+                    self.start += drop as u64;
+                    self.bytes.drain(..drop);
+                    self.unicode_pages.drain(..drop.div_ceil(PAGE));
+                }
                 let first_page = self.bytes.len() / PAGE;
                 let needed = self.bytes.len() + entry.len();
                 if needed > self.bytes.capacity() {

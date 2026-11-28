@@ -1,6 +1,7 @@
 pub(crate) mod bindings;
 mod editing;
 mod input;
+pub(crate) use input::RESIZED;
 mod picker;
 pub(crate) mod preview;
 mod recall;
@@ -15,7 +16,8 @@ use input::{Keys, Terminal, unbound_text};
 use search::ReverseSearch;
 use std::io::{self, Write};
 use undo::Undo;
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     Session, complete,
@@ -38,22 +40,31 @@ fn matching_opener(text: &str, cursor: usize) -> Option<usize> {
         b'}' => b'{',
         _ => return None,
     };
-    let mut nested = 0;
-    for (i, &byte) in text.as_bytes()[..cursor - 1].iter().enumerate().rev() {
-        if byte == open {
-            if nested == 0 {
-                return Some(i);
-            }
-            nested -= 1;
-        } else if byte == close {
-            nested += 1;
+    let mut quoted = None;
+    let mut escape = false;
+    let mut stack = Vec::new();
+    for (i, &byte) in text.as_bytes()[..cursor].iter().enumerate() {
+        if escape { escape = false; continue; }
+        if byte == b'\\' && quoted != Some(b'\'') { escape = true; continue; }
+        if let Some(quote) = quoted {
+            if byte == quote { quoted = None; }
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"') { quoted = Some(byte); }
+        else if byte == open { stack.push(i); }
+        else if byte == close {
+            let found = stack.pop();
+            if i + 1 == cursor { return found; }
         }
     }
     None
 }
 
 fn previous(s: &str, i: usize) -> usize {
-    s[..i].char_indices().next_back().map_or(0, |(i, _)| i)
+    if i == 0 || s.as_bytes()[i - 1].is_ascii() && s.as_bytes()[i - 1] != b'\n' {
+        return i.saturating_sub(1);
+    }
+    s[..i].grapheme_indices(true).next_back().map_or(0, |(start, _)| start)
 }
 fn rubout(text: &mut String, cursor: usize, overwrite: bool, undo: Option<&mut Undo>) -> usize {
     let start = previous(text, cursor);
@@ -79,7 +90,10 @@ fn rubout(text: &mut String, cursor: usize, overwrite: bool, undo: Option<&mut U
 }
 
 fn next(s: &str, i: usize) -> usize {
-    i + s[i..].chars().next().map_or(0, char::len_utf8)
+    let rest = &s[i..];
+    if let Some(&first) = rest.as_bytes().first() && first.is_ascii() && first != b'\r'
+        && rest.as_bytes().get(1).is_none_or(u8::is_ascii) { return i + 1; }
+    i + rest.graphemes(true).next().map_or(0, str::len)
 }
 
 #[derive(Default, Clone, Copy)]
@@ -140,6 +154,21 @@ impl Screen {
         }
     }
 
+    fn resize(&mut self) {
+        let Some((rows, cols)) = crate::interactive::terminal_size(libc::STDERR_FILENO) else { return };
+        if rows > 0 && cols >= 4 {
+            self.width = usize::from(cols) - 1;
+            self.height = usize::from(rows);
+            self.view.invalidate();
+            self.tail = None;
+        }
+    }
+
+    fn cancel(&mut self, prompt: &str, text: &str) -> io::Result<()> {
+        self.frame(prompt, text, text.len(), "");
+        self.output.push_str("^C\r\n");
+        io::stderr().write_all(self.output.as_bytes())
+    }
     fn can_append(&self, suffix: &str) -> bool {
         suffix.len() <= self.width && !suffix.contains('\n') && self.row + 2 < self.height
     }
@@ -244,10 +273,14 @@ impl Screen {
     }
 }
 
+fn control_glyph(c: char) -> [char; 2] {
+    ['^', if c.is_ascii() { ((c as u8) ^ 64) as char } else { '?' }]
+}
+
 fn push_visible(out: &mut String, text: &str) {
     for c in text.chars() {
         if c.is_control() {
-            out.extend(c.escape_default());
+            out.extend(control_glyph(c));
         } else {
             out.push(c);
         }
@@ -312,14 +345,22 @@ fn draw_prompt(prompt: &str, width: usize, out: &mut String, pos: &mut Position)
 
 fn draw_text(mut text: &str, width: usize, out: &mut String, pos: &mut Position) {
     while !text.is_empty() {
-        let n = text
-            .bytes()
-            .take_while(|b| (b' '..=b'~').contains(b))
-            .count();
+        let mut n = text.bytes().take_while(|b| (b' '..=b'~').contains(b)).count();
+        if n != 0 && text.as_bytes().get(n).is_some_and(|b| !b.is_ascii()) {
+            // A following combining mark or keycap can widen the final ASCII cell.
+            n -= 1;
+        }
         if n == 0 {
-            let c = text.chars().next().unwrap();
-            draw_char(c, width, out, pos, false);
-            text = &text[c.len_utf8()..];
+            let cluster = text.graphemes(true).next().unwrap();
+            if cluster.starts_with(char::is_control) {
+                for c in cluster.chars() { draw_char(c, width, out, pos, false); }
+            } else {
+                let cells = cluster.width();
+                if pos.col + cells > width { out.push_str("\r\n"); pos.row += 1; pos.col = 0; }
+                out.push_str(cluster);
+                pos.col += cells;
+            }
+            text = &text[cluster.len()..];
         } else {
             let (mut ascii, rest) = text.split_at(n);
             while !ascii.is_empty() {
@@ -355,14 +396,7 @@ fn draw_char(c: char, width: usize, out: &mut String, pos: &mut Position, truste
             out.push(c);
             return;
         }
-        for ch in [
-            '^',
-            if c.is_ascii() {
-                ((c as u8) ^ 64) as char
-            } else {
-                '?'
-            },
-        ] {
+        for ch in control_glyph(c) {
             draw_char(ch, width, out, pos, true);
         }
         return;
@@ -441,6 +475,7 @@ struct EditorState {
     undo: Undo,
     scratch: String,
     overwrite: bool,
+    killing: bool,
     motion: bool,
     appended: Option<usize>,
     erased: Option<usize>,
@@ -501,13 +536,32 @@ impl EditorState {
         {
             screen.move_short(prompt, text, cursor)?;
         } else if let Some(start) = self.appended.take()
-            && let Some(pos) = screen.tail
-            && screen.can_append(&text[start..])
-            && cursor == text.len()
-            && hint.is_empty()
-            && !searching
+            && cursor == text.len() && !searching && screen.can_append(&text[start..])
+            && (start == 0 || text[start..].is_ascii() || previous(text, next(text, start)) == start)
+            && text.len().saturating_add(hint.len()) < VIEWPORT_THRESHOLD
+            && (screen.had_hint || screen.tail.is_some() && hint.is_empty())
         {
-            screen.append(&text[start..], pos)?;
+            if screen.had_hint {
+                screen.output.clear();
+                screen.output.push_str("\x1b[J");
+                let mut caret = Position { row: screen.row, col: screen.column };
+                draw_text(&text[start..], screen.width, &mut screen.output, &mut caret);
+                if !hint.is_empty() {
+                    screen.output.push_str("\x1b[2m");
+                    let mut end = caret;
+                    draw_text(hint, screen.width, &mut screen.output, &mut end);
+                    screen.output.push_str("\x1b[0m");
+                    viewport::move_to(&mut screen.output, end, caret);
+                }
+                screen.tail = hint.is_empty().then_some(caret);
+                screen.had_hint = !hint.is_empty();
+                screen.row = caret.row;
+                screen.column = caret.col;
+                screen.view.invalidate();
+                io::stderr().write_all(screen.output.as_bytes())?;
+            } else if let Some(pos) = screen.tail {
+                screen.append(&text[start..], pos)?;
+            }
         } else if let Some(cells) = self.erased.take()
             && let Some(mut pos) = screen.tail
             && cells < pos.col
@@ -519,7 +573,9 @@ impl EditorState {
             screen.tail = Some(pos);
             screen.column = pos.col;
             screen.view.invalidate();
-            write!(io::stderr(), "\x1b[{cells}D\x1b[K")?;
+            screen.output.clear();
+            let _ = std::fmt::Write::write_fmt(&mut screen.output, format_args!("\x1b[{cells}D\x1b[K"));
+            io::stderr().write_all(screen.output.as_bytes())?;
         } else {
             screen.draw(prompt, text, cursor, hint)?;
         }
@@ -546,6 +602,7 @@ fn read_trap(
     }
     *term = Some(Terminal::enter(session.bindings.paste())?);
     screen.row = 0;
+    screen.resize();
     screen.tail = None;
     screen.view.invalidate();
     Ok(None)
@@ -582,8 +639,8 @@ pub fn line(
     let mut vi = vi::State::default();
     let mut recall = recall::Recall::new(session.history_lines().len());
     let mut search: Option<ReverseSearch> = None;
+    let mut search_prompt = String::new();
     let mut last_tab = false;
-    let styled_or_multiline = prompt.contains(['\x1b', '\n']);
     let mut blink = false;
     let mut replaying = false;
     let mut view = View::Unread;
@@ -598,14 +655,18 @@ pub fn line(
                 match $operation {
                     Ok(value) => break value,
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                        if read.is_some() && session.traps.read_pending() {
+                        if RESIZED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                            screen.resize();
+                            screen.draw(prompt, &text, cursor, "")?;
+                        } else if session.traps.read_pending() {
                             if let Some(outcome) =
                                 read_trap(&mut term, session, status, &mut screen)?
                             {
+                                session.editor_queue = std::mem::take(&mut keys.queued);
                                 return Ok(outcome);
                             }
                         } else {
-                            io::stderr().write_all(b"\r\n")?;
+                            screen.cancel(prompt, &text)?;
                             return Ok(Input::Cancel);
                         }
                     }
@@ -615,12 +676,13 @@ pub fn line(
         };
     }
     loop {
-        if read.is_some()
-            && session.traps.read_pending()
+        if session.traps.read_pending()
             && let Some(outcome) = read_trap(&mut term, session, status, &mut screen)?
         {
-            return Ok(outcome);
+            session.editor_queue = std::mem::take(&mut keys.queued);
+                                return Ok(outcome);
         }
+        if RESIZED.swap(false, std::sync::atomic::Ordering::Relaxed) { screen.resize(); }
         if session.bindings.map == Keymap::Command && !text.is_empty() {
             cursor = cursor.min(previous(&text, text.len()));
         }
@@ -641,9 +703,8 @@ pub fn line(
         } else {
             ""
         };
-        let search_prompt;
         let visible_prompt = if let Some(search) = &search {
-            search_prompt = search.prompt(screen.width);
+            search.prompt(screen.width, &mut search_prompt);
             &search_prompt
         } else {
             prompt
@@ -698,7 +759,7 @@ pub fn line(
             }
         }
         if crate::interrupted() {
-            io::stderr().write_all(b"\r\n")?;
+            screen.cancel(prompt, &text)?;
             return Ok(Input::Cancel);
         }
         if session.notify && keys.queued.is_empty() {
@@ -709,10 +770,12 @@ pub fn line(
             })?;
         }
         let Some(first) = read_key!(keys.get()) else {
+            session.editor_queue = std::mem::take(&mut keys.queued);
             return Ok(Input::End);
         };
         // Ordinary committed text can bypass key-sequence and editing-action dispatch.
         if search.is_none() && unbound_text(first, session) {
+            edit.killing = false;
             edit.last_argument = None;
             recall.edited(session.history_lines().len());
             let start = cursor;
@@ -730,7 +793,7 @@ pub fn line(
                 continue;
             }
             Binding::Macro(seq) => {
-                keys.expand_macro(seq)?;
+                keys.expand_macro(&seq)?;
                 continue;
             }
             Binding::Shell(command) => {
@@ -747,6 +810,7 @@ pub fn line(
                 edit.last_argument = None;
                 recall = recall::Recall::new(session.history_lines().len());
                 if let crate::Flow::Exit(_) = flow {
+                    session.editor_queue = std::mem::take(&mut keys.queued);
                     return Ok(Input::Control(flow));
                 }
                 term = Some(Terminal::enter(session.bindings.paste())?);
@@ -759,6 +823,7 @@ pub fn line(
         if action != Action::LastArg {
             edit.last_argument = None;
         }
+        if !matches!(action, Action::Kill | Action::WholeLine | Action::KillBack | Action::KillWord | Action::RubWord | Action::KillBackWord | Action::RubFilename | Action::Cut | Action::Discard) { edit.killing = false; }
         if action != Action::Insert {
             edit.undo.boundary();
         }
@@ -810,6 +875,9 @@ pub fn line(
                     {
                         text = found;
                     }
+                    if text != state.original {
+                        edit.undo.record(&state.original, 0..state.original.len(), text.len(), state.original_cursor, false);
+                    }
                     search = None;
                     cursor = text.len();
                 }
@@ -825,7 +893,7 @@ pub fn line(
                     ));
                     if state.wants_picker(action) {
                         let selected = picker::history(
-                            std::mem::take(&mut state.query),
+                            state.query.clone(),
                             history,
                             session,
                             &mut keys,
@@ -842,7 +910,7 @@ pub fn line(
                                 cursor = state.original_cursor;
                             }
                             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                                if read.is_some() && session.traps.read_pending() {
+                                if session.traps.read_pending() {
                                     continue;
                                 }
                                 screen.draw(prompt, &state.original, state.original_cursor, "")?;
@@ -931,7 +999,8 @@ pub fn line(
             }
             Action::Delete if text.is_empty() && first == 4 => {
                 io::stderr().write_all(b"\r\n")?;
-                return Ok(Input::End);
+                session.editor_queue = std::mem::take(&mut keys.queued);
+            return Ok(Input::End);
             }
             Action::Accept | Action::Comment => {
                 if action == Action::Comment {
@@ -939,7 +1008,6 @@ pub fn line(
                 }
                 if action == Action::Comment
                     || visible_prompt != prompt
-                    || (!styled_or_multiline && text.len() < VIEWPORT_THRESHOLD)
                     || replaying
                     || screen.tail.is_none()
                 {
@@ -966,7 +1034,6 @@ pub fn line(
                 let start = previous(&text, cursor);
                 if cursor == text.len()
                     && start < cursor
-                    && (styled_or_multiline || start >= VIEWPORT_THRESHOLD)
                     && text.as_bytes()[start].is_ascii_graphic()
                 {
                     edit.erased = Some(1usize);
@@ -1081,7 +1148,7 @@ pub fn line(
                             }
                             Ok(None) => {}
                             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                                if read.is_some() && session.traps.read_pending() {
+                                if session.traps.read_pending() {
                                     continue;
                                 }
                                 screen.draw(prompt, &text, cursor, "")?;

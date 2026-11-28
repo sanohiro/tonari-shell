@@ -63,7 +63,7 @@ pub(super) fn function_run(
 ) -> Option<(Vec<parser::Statement>, usize, usize)> {
     if session.interactive
         || session.xtrace
-        || session.traps.active()
+        || session.traps.observes_commands()
         || session.reads_aliases()
         || !parser::opens_function(first)
     {

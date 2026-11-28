@@ -5,7 +5,7 @@ use std::ops::ControlFlow;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
-const MAX_DIRECTORIES: usize = 32;
+pub(super) const MAX_DIRECTORIES: usize = 32;
 const MAX_ENTRIES: usize = 8192;
 const MAX_NAME_BYTES: usize = 256 * 1024;
 
@@ -41,11 +41,14 @@ impl Listing {
         prefix: &[u8],
         visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
-        let mut link = self.heads[usize::from(prefix[0])];
+        let mut all = 0;
+        let mut link = prefix.first().map_or(0, |&first| self.heads[usize::from(first)]);
         let editing = crate::editor::preview::active();
         let mut visited = 0usize;
-        while link != 0 {
-            let entry = &self.index[usize::from(link) - 1];
+        while link != 0 || prefix.is_empty() && all < self.index.len() {
+            let entry = if prefix.is_empty() {
+                let index = all; all += 1; &self.index[index]
+            } else { &self.index[usize::from(link) - 1] };
             link = entry.next;
             if editing && visited.is_multiple_of(256) {
                 crate::editor::preview::scan_input();

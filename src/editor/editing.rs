@@ -151,18 +151,20 @@ impl EditorState {
         if action != Action::Copy {
             self.undo.record(text, lo..hi, 0, cursor, false);
         }
-        if lo == 0 && hi == text.len() && hi > 0 && action != Action::Copy {
+        if !self.killing && lo == 0 && hi == text.len() && hi > 0 && action != Action::Copy {
             std::mem::swap(killed, text);
             text.clear();
             cursor = 0;
         } else if lo != hi {
-            killed.clear();
-            killed.push_str(&text[lo..hi]);
+            if !self.killing { killed.clear(); }
+            if self.killing && lo < cursor { killed.insert_str(0, &text[lo..hi]); }
+            else { killed.push_str(&text[lo..hi]); }
             if action != Action::Copy {
                 text.replace_range(lo..hi, "");
                 cursor = lo;
             }
         }
+        self.killing = action != Action::Copy;
         cursor
     }
 

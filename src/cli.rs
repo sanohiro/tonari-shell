@@ -11,6 +11,10 @@ pub enum Input {
 #[derive(Default)]
 pub struct StartupOptions {
     pub check: bool,
+    pub privileged: bool,
+    pub history: Option<bool>,
+    pub vi: Option<bool>,
+    pub emacs: Option<bool>,
     pub notify: bool,
     pub ignoreeof: Option<bool>,
     pub errexit: bool,
@@ -43,6 +47,7 @@ pub struct Invocation {
     pub interactive: bool,
     pub login: bool,
     pub as_sh: bool,
+    pub as_su: bool,
     pub norc: bool,
     pub noprofile: bool,
     pub noediting: bool,
@@ -69,6 +74,7 @@ pub fn parse(
 ) -> Result<Action, String> {
     let name = args.next().unwrap_or_else(|| "tonari".into());
     let mut login = name.as_bytes().starts_with(b"-");
+    let as_su = matches!(name.as_bytes().rsplit(|b| *b == b'/').next(), Some(b"su" | b"-su"));
     let as_sh = matches!(
         name.as_bytes().rsplit(|b| *b == b'/').next(),
         Some(b"sh" | b"-sh")
@@ -120,6 +126,7 @@ pub fn parse(
                         'i' => interactive = enabled,
                         'l' => login = enabled,
                         's' => stdin = enabled,
+                        'p' => options.privileged = enabled,
                         'n' => options.check = enabled,
                         'b' => options.notify = enabled,
                         'e' => options.errexit = enabled,
@@ -142,6 +149,16 @@ pub fn parse(
                             .shopts
                             .push((enabled, args.next().map(utf8).transpose()?)),
                         'o' => match args.next().as_deref().and_then(|a| a.to_str()) {
+                            Some("privileged") => options.privileged = enabled,
+                            Some("history") => options.history = Some(enabled),
+                            Some("vi") => {
+                                options.vi = Some(enabled);
+                                if enabled { options.emacs = Some(false); }
+                            }
+                            Some("emacs") => {
+                                options.emacs = Some(enabled);
+                                if enabled { options.vi = Some(false); }
+                            }
                             Some("braceexpand") => options.braceexpand = enabled,
                             Some("posix") => options.posix = Some(enabled),
                             Some("physical") => options.physical = enabled,
@@ -200,6 +217,7 @@ pub fn parse(
         interactive,
         login,
         as_sh,
+        as_su,
         norc,
         noprofile,
         noediting,

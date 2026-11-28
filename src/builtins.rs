@@ -181,6 +181,15 @@ fn conjunction(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'
 }
 
 fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
+    let mut negate = false;
+    while tokens.first().is_some_and(|word| word == "!") {
+        *tokens = &tokens[1..];
+        negate = !negate;
+    }
+    primary_operand(tokens, session).map(|value| value ^ negate)
+}
+
+fn primary_operand(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
     let (first, rest) = tokens.split_first().ok_or("argument expected")?;
     *tokens = rest;
     if let [op, right, tail @ ..] = rest
@@ -191,10 +200,10 @@ fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'stat
         *tokens = tail;
         return binary(first, op, right);
     }
-    if first == "!" {
-        return Ok(!primary(tokens, session)?);
-    }
     if first == "(" {
+        if crate::stack_budget_exceeded() {
+            return Err("conditional expression nested too deeply");
+        }
         // Bash 5.3 applies the POSIX small-arity rules inside parentheses.
         // Stop scanning as soon as the group cannot qualify.
         let mut level = 1;
@@ -251,6 +260,11 @@ fn binary_op(op: &str) -> bool {
     )
 }
 
+pub(crate) fn integer_operand(text: &str) -> Option<i64> {
+    text.trim_start_matches(|c: char| c.is_ascii_whitespace())
+        .trim_end_matches([' ', '\t']).parse().ok()
+}
+
 pub(crate) fn binary(left: &str, op: &str, right: &str) -> Result<bool, &'static str> {
     Ok(match op {
         "=" | "==" => left == right,
@@ -269,14 +283,8 @@ pub(crate) fn binary(left: &str, op: &str, right: &str) -> Result<bool, &'static
             }
         }
         _ => {
-            let a = left
-                .trim()
-                .parse::<i64>()
-                .map_err(|_| "integer expression expected")?;
-            let b = right
-                .trim()
-                .parse::<i64>()
-                .map_err(|_| "integer expression expected")?;
+            let a = integer_operand(left).ok_or("integer expression expected")?;
+            let b = integer_operand(right).ok_or("integer expression expected")?;
             match op {
                 "-eq" => a == b,
                 "-ne" => a != b,
@@ -329,10 +337,10 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
         "-o" => return Ok(session.set_option_enabled(arg)),
         "-v" => return variable_set(session, arg, session.shopt.array_expand_once),
         "-t" => {
-            let number = match arg.trim_ascii().parse::<i64>() {
-                Ok(number) => number,
-                Err(_) if session.posix => return Ok(false),
-                Err(_) => return Err("integer expected"),
+            let number = match integer_operand(arg) {
+                Some(number) => number,
+                None if session.posix => return Ok(false),
+                None => return Err("integer expected"),
             };
             return Ok(i32::try_from(number).is_ok_and(|fd| unsafe { libc::isatty(fd) == 1 }));
         }

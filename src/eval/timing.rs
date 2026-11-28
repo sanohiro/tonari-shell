@@ -58,7 +58,10 @@ impl Timer {
                 out.push(c);
                 continue;
             }
-            let mut code = chars.next().unwrap_or('\0');
+            let Some(mut code) = chars.next() else {
+                out.push('%');
+                break;
+            };
             if code == '%' {
                 out.push('%');
                 continue;
@@ -107,6 +110,6 @@ impl Timer {
                 out.push('s');
             }
         }
-        eprintln!("{out}");
+        stderr_line!("{out}");
     }
 }

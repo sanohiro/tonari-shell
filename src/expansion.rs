@@ -20,6 +20,11 @@ pub struct Error {
 }
 
 impl Error {
+    pub(crate) fn in_expression(mut self, text: &str) -> Self {
+        self.message = format!("{text}: {}", self.message).into();
+        self
+    }
+
     pub fn fatal(message: impl Into<std::borrow::Cow<'static, str>>, status: u8) -> Self {
         Self {
             message: message.into(),
@@ -250,7 +255,7 @@ impl<'a> Expansion<'a> {
         }
         let (integer, changes_case) = self.session.assignment_attributes(base);
         if integer {
-            value = self.arithmetic(&value)?.to_string();
+            value = self.arithmetic_value(&value)?.to_string();
         }
         match &element {
             Some(AssignmentElement::Index(base, index)) => {
@@ -423,8 +428,13 @@ impl<'a> Expansion<'a> {
 
     pub fn arithmetic(&mut self, expression: &str) -> Result<i64, Error> {
         let text = self.arithmetic_text(expression)?;
-        arithmetic::with_variables(&text, self).map_err(|message| match message {
-            "unbound arithmetic variable" => Error::fatal(message, 1),
+        self.arithmetic_value(&text)
+    }
+
+    /// Operands that already went through shell expansion must only be parsed as arithmetic.
+    pub(crate) fn arithmetic_value(&mut self, text: &str) -> Result<i64, Error> {
+        arithmetic::with_variables(text, self).map_err(|message| match message {
+            "unbound arithmetic variable" => arithmetic::shell_error(message, text, self.session),
             _ => Error::discard(message),
         })
     }
@@ -614,7 +624,7 @@ impl Variables for Expansion<'_> {
     ) -> Option<Result<String, &'static str>> {
         self.session
             .is_associative(name)
-            .then(|| self.key(source).map_err(|_| "bad array subscript"))
+            .then(|| arithmetic::data_key(source, |name| self.lookup(name)))
     }
     fn nounset(&self) -> bool {
         self.session.nounset

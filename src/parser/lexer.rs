@@ -15,6 +15,7 @@ pub(super) enum Token {
     Reserved(&'static str),
     TimeUtility,
     Word(LexWord),
+    HereBody(String, (usize, usize)),
     ArrayStart,
     LeftParen,
     RightParen,
@@ -282,6 +283,7 @@ fn braced_parameter<'a>(
     assignment: bool,
     quoted_name: bool,
 ) -> Result<(), Error> {
+    let _nesting = super::enter_expansion()?;
     chars.next();
     let content = chars.as_str();
     if starts_braced_command(content) {
@@ -566,6 +568,7 @@ pub(super) fn backquote(
     word: &mut WordBuilder,
     quoted: bool,
 ) -> Result<(), Error> {
+    let _nesting = super::enter_expansion()?;
     let mut source = String::new();
     let mut rest = chars.as_str();
     while let Some(at) = memchr::memchr2(b'`', b'\\', rest.as_bytes()) {
@@ -790,6 +793,7 @@ fn double_quoted(
 }
 
 fn nested_program(chars: &mut Chars<'_>) -> Result<Vec<super::Statement>, Error> {
+    let _nesting = super::enter_expansion()?;
     let nested = chars.as_str();
     let (tokens, spans, after) = lex(nested, true, false)?;
     let body = Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1]).list(&[])?;
@@ -1553,6 +1557,24 @@ fn scan_word(
     })))
 }
 
+// After a case arm terminator only a pattern list or esac is legal.
+// Recognizing this boundary locally avoids parsing all preceding arms.
+fn follows_case_terminator(tokens: &[Token]) -> bool {
+    let mut rest = tokens;
+    while let Some((pattern, before)) = rest.split_last() {
+        if !matches!(pattern, Token::Word(_) | Token::Reserved(_) | Token::TimeUtility) {
+            return false;
+        }
+        if let Some((Token::Pipe, earlier)) = before.split_last() {
+            rest = earlier;
+            continue;
+        }
+        return matches!(before.iter().rev().find(|t| !matches!(t, Token::Newline)), Some(Token::EndArm(_)))
+            && pattern.keyword() != Some("esac");
+    }
+    false
+}
+
 fn scan(
     source: &str,
     substitution: bool,
@@ -1617,6 +1639,9 @@ fn scan(
                 .list(&[])
                 .is_ok()
         {
+            if !pending_docs.is_empty() {
+                return Err(Error::Invalid("here-document must finish before command substitution closes"));
+            }
             chars.next();
             return Ok((tokens, spans, chars.as_str()));
         }
@@ -1654,6 +1679,10 @@ fn scan(
         }
         if separator(c) && !process_start(chars.as_str()) {
             chars.next();
+            if substitution && c == ')' && saw_case && follows_case_terminator(&tokens) {
+                tokens.push(Token::RightParen);
+                continue;
+            }
             if substitution && c == ')' && parentheses == 0 {
                 // A case pattern can end with an unmatched right parenthesis.
                 // Ask the grammar only for substitutions containing a case word.
@@ -1665,6 +1694,9 @@ fn scan(
                         ))
                     );
                 if !inner_closer {
+                    if !pending_docs.is_empty() {
+                        return Err(Error::Invalid("here-document must finish before command substitution closes"));
+                    }
                     return Ok((tokens, spans, chars.as_str()));
                 }
             }
@@ -1677,7 +1709,7 @@ fn scan(
             }
             let token = if c == '\n' {
                 if !pending_docs.is_empty() {
-                    here_doc::collect(&mut chars, &mut tokens, &mut pending_docs, final_input)?;
+                    here_doc::collect(source.len(), &mut chars, &mut tokens, &mut pending_docs, final_input)?;
                 }
                 Token::Newline
             } else {
@@ -1800,7 +1832,13 @@ fn scan(
             tokens.push(Token::ArrayStart);
         }
     }
-    here_doc::collect(&mut chars, &mut tokens, &mut pending_docs, final_input)?;
+    here_doc::collect(source.len(), &mut chars, &mut tokens, &mut pending_docs, final_input)?;
+    if substitution && saw_case && matches!(
+        tokens.iter().rev().find(|t| !matches!(t, Token::Newline)),
+        Some(Token::EndArm(_))
+    ) {
+        return Err(Error::Incomplete(Incomplete::CompoundEnd("esac")));
+    }
     if substitution || brace_substitution {
         return Err(Error::Incomplete(Incomplete::Message(
             "unterminated command substitution",

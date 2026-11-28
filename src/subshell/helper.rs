@@ -178,7 +178,7 @@ pub(super) fn capture(
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
     if !super::can_elide_child(session)
-        || session.traps.has_explicit_traps()
+        || session.traps.observes_commands()
         || session.keyword
         || session.shopt.nocasematch
         || session.shopt.localvar_inherit

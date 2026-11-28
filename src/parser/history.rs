@@ -1,7 +1,7 @@
 use super::*;
 
 fn with_tokens<T>(source: &str, read: impl FnOnce(&[Token], &[(usize, usize)]) -> T) -> Option<T> {
-    let (mut tokens, mut spans, _) = lex(source, false, true).ok()?;
+    let (mut tokens, mut spans, _) = lex(source, false, false).ok()?;
     let result = read(&tokens, &spans);
     if tokens.capacity().max(spans.capacity()) <= MAX_CACHED_TOKENS {
         tokens.clear();

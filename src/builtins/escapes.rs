@@ -55,11 +55,17 @@ pub(crate) fn one(input: &mut &[u8], out: &mut Vec<u8>, mode: Mode) -> bool {
             };
             let (value, count) = digits(input, 16, limit, 0);
             if count == 0 {
+                if mode != Mode::Echo {
+                    diagnostic!("printf: missing hexadecimal digit for \\{}", escape as char);
+                }
                 out.extend_from_slice(&[b'\\', escape]);
             } else if escape == b'x' {
                 out.push(value as u8);
             } else if let Some(c) = char::from_u32(value) {
                 out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+            } else {
+                out.extend_from_slice(&[b'\\', escape]);
+                out.extend_from_slice(&rest[..count]);
             }
         }
         _ => out.extend_from_slice(&[b'\\', escape]),

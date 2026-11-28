@@ -186,7 +186,14 @@ pub(crate) fn reset_child_signals() {
     crate::traps::reset_caught_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM]);
 }
 
-fn stage_expansion(word: &Word) -> bool {
+fn stage_parameter(name: &str, session: &Session) -> bool {
+    let name = name.trim_start_matches(['#', '!']);
+    matches!(name, "BASHPID" | "RANDOM" | "SRANDOM")
+        || name.contains('[')
+        || session.is_nameref(name)
+}
+
+fn stage_expansion(word: &Word, session: &Session) -> bool {
     use crate::word::Part;
     match word {
         Word::Literal(_) => false,
@@ -196,24 +203,24 @@ fn stage_expansion(word: &Word) -> bool {
             | Part::Process { .. }
             | Part::Arithmetic { .. } => true,
             Part::Modify { .. } => true,
-            Part::Nested(word) => stage_expansion(word),
-            Part::Parameter { name, .. } => name == "BASHPID",
+            Part::Nested(word) => stage_expansion(word, session),
+            Part::Parameter { name, .. } | Part::BraceParameter(name) => stage_parameter(name, session),
             Part::Alternative { name, op, word, .. } => {
                 *op == crate::word::Alternative::Assign
-                    || name == "BASHPID"
-                    || stage_expansion(word)
+                    || stage_parameter(name, session)
+                    || stage_expansion(word, session)
             }
-            Part::Trim { name, pattern, .. } => name == "BASHPID" || stage_expansion(pattern),
+            Part::Trim { name, pattern, .. } => stage_parameter(name, session) || stage_expansion(pattern, session),
             _ => false,
         }),
     }
 }
 
-fn redirection_observable(r: &Redirect<Word>) -> bool {
+fn redirection_observable(r: &Redirect<Word>, session: &Session) -> bool {
     if r.variable.is_some() {
         return true;
     }
-    stage_expansion(&r.word)
+    stage_expansion(&r.word, session)
         || matches!(r.target, Target::HereDoc { expand: true })
             && r.word
                 .as_literal()
@@ -245,11 +252,11 @@ fn start_raw(
         separate_keyword_arguments(&mut raw);
     }
     let observable = needs_ordered_redirects(&raw, session)
-        || raw.redirects.iter().any(redirection_observable)
-        || raw.words.iter().any(stage_expansion)
-        || raw.assignments.iter().any(|(_, value)| match value {
-            Assignment::Scalar(word) => stage_expansion(word),
-            Assignment::Array(_, items, _) => items.iter().any(|(_, word)| stage_expansion(word)),
+        || raw.redirects.iter().any(|r| redirection_observable(r, session))
+        || raw.words.iter().any(|w| stage_expansion(w, session))
+        || raw.assignments.iter().any(|(name, value)| name.contains('[') || match value {
+            Assignment::Scalar(word) => stage_expansion(word, session),
+            Assignment::Array(_, items, _) => items.iter().any(|(index, word)| index.is_some() || stage_expansion(word, session)),
         });
     if !observable {
         return match prepare(raw, session, last_status, false) {
@@ -283,8 +290,21 @@ fn start_raw(
             *command = crate::parser::Command::Group(std::mem::take(body));
         }
         session.stdin_redirected |= input.is_some();
-        let code = if apply(&setup, libc::PIPE_BUF) {
-            match run(vec![raw], last_status, true, session) {
+        let code = if apply(&setup, libc::PIPE_BUF, session) {
+            // A simple stage expands words in the child process at the
+            // caller's BASH_SUBSHELL depth, then enters its execution frame.
+            let result = if raw.compound.is_none() && !needs_ordered_redirects(&raw, session) {
+                session.subshell_depth -= 1;
+                let prepared = prepare(raw, session, last_status, true);
+                session.subshell_depth += 1;
+                match prepared {
+                    Ok(cmd) => run_prepared(cmd, None, last_status, true, session),
+                    Err(e) => { e.report(""); Ok(e.flow(session)) }
+                }
+            } else {
+                foreground(std::borrow::Cow::Owned(raw), last_status, true, session)
+            };
+            match result {
                 Ok(flow) => flow.child_status(),
                 Err(e) => {
                     diagnostic!("{e}");
@@ -316,7 +336,7 @@ fn start(
     // Keep a real child for job control and observable child-signal traps.
     if !launch.background
         && launch.group.is_none()
-        && !session.traps.active()
+        && !session.traps.observes_commands()
         && cmd.redirects.is_empty()
         && (input.is_some() || output.is_some())
         && let Some(Builtin::Exit(status) | Builtin::Status(status)) = builtin
@@ -353,7 +373,7 @@ fn start(
         && input.is_none()
         && !launch.background
         && launch.group.is_none()
-        && !session.traps.active()
+        && !session.traps.observes_commands()
         && (cmd.redirects.is_empty() || merged_pipe.is_some())
         && let Some(plain) = PlainOutput::new(builtin, cmd, 512)
     {
@@ -375,7 +395,7 @@ fn start(
         && matches!(r.target, Target::HereDoc { .. } | Target::HereString)
         && r.word.len() <= here_input::PIPE_LIMIT
         && let Ok(reader) =
-            here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT).and_then(private_fd)
+            here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT, session).and_then(private_fd)
         && let Ok(pid) =
             External::new(cmd, session)?.spawn_redirected(&[], None, Some(&reader), output.as_ref())
     {
@@ -499,7 +519,7 @@ fn fork_stage(
         }
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
-        let code = if !apply(&setup, here_pipe_limit(builtin, cmd)) {
+        let code = if !apply(&setup, here_pipe_limit(builtin, cmd), session) {
             1
         } else if let Some(external) = external.as_ref() {
             external.exec(None)
@@ -652,7 +672,7 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
     line.push('\n');
     let fd = session
         .scalar_setting("BASH_XTRACEFD")
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.trim().parse().ok())
         .filter(|&fd| !fd::is_private(fd))
         .unwrap_or(2);
     let mut data = line.as_bytes();
@@ -810,7 +830,7 @@ fn run_ordered(
     // environment. Only dynamic operands can expose that distinction.
     let child_redirects = redirects
         .iter()
-        .any(|r| r.word.as_literal().is_none() || redirection_observable(r))
+        .any(|r| r.word.as_literal().is_none() || redirection_observable(r, session))
         && {
             let (skip, search, _) = lookup::scan_prefix(&words, lookup::Search::Normal, session);
             builtin_words(&words[skip..], search, 0, status, session, || {
@@ -890,26 +910,15 @@ fn run_external(
             {
                 cmd.select_missing_hook();
             }
-            Err(hash::Absent)
-                if cmd.redirects.is_empty()
-                    && launch.group.is_none()
-                    && !session.traps.active() =>
-            {
-                let prefix = session.diagnostic_prefix(|| session.line());
-                eprintln!(
-                    "{}{}: command not found",
-                    prefix.as_deref().unwrap_or("tonari: "),
-                    cmd.words[0]
-                );
-                return Ok(Flow::Continue(127));
-            }
+            // Failed lookup diagnostics belong to a child. A closed pipeline
+            // on stderr must not deliver the command's SIGPIPE to this shell.
             Err(hash::Absent) => {}
         }
     }
     if replace && launch.group.is_none() && !cmd.prepare_missing_hook(session) {
         let executable = External::new(cmd, session)?;
         return Ok(Flow::Continue(
-            if apply(&actions(cmd), here_input::PIPE_LIMIT) {
+            if apply(&actions(cmd), here_input::PIPE_LIMIT, session) {
                 executable.exec(
                     (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
                 )

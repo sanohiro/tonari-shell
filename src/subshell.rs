@@ -81,7 +81,7 @@ pub(crate) fn current_substitution(
     // A single output builtin with inert operands can write to memory directly. Everything
     // that can redirect stdout or observe traps still executes in a real fd scope.
     if !reply
-        && !session.traps.active()
+        && !session.traps.observes_commands()
         && !session.xtrace
         && let Some(cmd) = sole_plain_command(&body)
         && (!session.keyword || cmd.keyword_args.is_empty())
@@ -163,7 +163,7 @@ pub fn capture_substitution(
     let mut child_input = None;
     // A literal read of an ordinary file has no substitutions to isolate.
     // Keep streams, virtual files, error reporting and trap execution in the child.
-    if !session.traps.active()
+    if !session.traps.observes_commands()
         && !session.xtrace
         && let Some(path) = input_only(&body)
             .and_then(|word| stored_path(word, session, session.posix && !session.interactive))
@@ -286,6 +286,7 @@ pub(super) fn read_output(
 
 fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'static str> {
     if output.contains(&0) {
+        diagnostic!("warning: command substitution: ignored null byte in input");
         output.retain(|&b| b != 0);
     }
     while output.last() == Some(&b'\n') {
@@ -344,7 +345,7 @@ fn wrapped_capture(
     if path.starts_with('/')
         && cmd.redirects.is_empty()
         && arguments.is_empty()
-        && !session.traps.has_explicit_traps()
+        && !session.traps.observes_commands()
         && !session.is_exported("SHELLOPTS")
         && !session.functions.contains_key(path)
         && operands.iter().all(|arg| arg.as_literal().is_some())
@@ -597,7 +598,7 @@ fn capture_query(
         || session.disabled_builtins.contains(name)
         || session.keyword && !cmd.keyword_args.is_empty()
         || session.noexec
-        || session.traps.has_explicit_traps()
+        || session.traps.observes_commands()
         || !can_elide_child(session)
     {
         return None;
@@ -721,7 +722,7 @@ fn capture_simple(
             "jobs"
                 if body.len() == 1
                     && session.jobs.is_empty()
-                    && !session.traps.has_explicit_traps()
+                    && !session.traps.observes_commands()
                     && (args.is_empty()
                         || matches!(args, [flag] if flag.as_literal() == Some("-p"))) =>
             {
@@ -916,7 +917,7 @@ fn foreground_builtin(
         || session.xtrace
         || session.errexit
         || session.noexec
-        || session.traps.has_explicit_traps()
+        || session.traps.observes_commands()
         || !can_elide_child(session)
     {
         return None;

@@ -1,3 +1,17 @@
+// Diagnostics are best-effort, including when stderr is no longer writable.
+macro_rules! stderr_text {
+    ($($arg:tt)*) => { crate::write_stderr(format_args!($($arg)*)) };
+}
+
+macro_rules! stderr_line {
+    () => { stderr_text!("\n") };
+    ($($arg:tt)+) => { stderr_text!("{}\n", format_args!($($arg)+)) };
+}
+
+fn write_stderr(args: std::fmt::Arguments<'_>) {
+    let _ = std::io::stderr().lock().write_fmt(args);
+}
+
 // Keep the prefix and stderr formatter in the cold path; each caller supplies its fields.
 macro_rules! diagnostic {
     ($($arg:tt)*) => { crate::print_diagnostic(format_args!($($arg)*)) };
@@ -6,7 +20,7 @@ macro_rules! diagnostic {
 #[cold]
 #[inline(never)]
 fn print_diagnostic(args: std::fmt::Arguments<'_>) {
-    eprintln!("tonari: {args}");
+    stderr_line!("tonari: {args}");
 }
 
 mod interactive;
@@ -147,19 +161,37 @@ fn input_timeout() -> Option<libc::timespec> {
     })
 }
 
-// Reserve half the soft limit for callers, signal frames and nested execution.
+// Keep the common recursion check to address arithmetic. ulimit -s updates
+// the budget when the soft limit changes, including inside a forked shell.
+static STACK_BUDGET: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn update_stack_budget(soft: libc::rlim_t) {
+    // A process can advertise an unlimited soft limit even when its main
+    // stack is bounded by the host. Keep the initial environment and the
+    // deeper parser and signal frames clear of the guard page.
+    let limit = (soft as usize).min(8 * 1024 * 1024);
+    let reserve = (limit / 4).min(256 * 1024);
+    STACK_BUDGET.store((limit / 2).saturating_sub(reserve).max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
 #[cold]
-fn stack_budget_exceeded() -> bool {
-    const STACK_RESERVE: u64 = 256 * 1024;
-    let Some(origin) = MAIN_STACK_ORIGIN.get() else {
-        return true;
-    };
+fn initial_stack_budget() -> usize {
     let mut limit = std::mem::MaybeUninit::uninit();
     if unsafe { libc::getrlimit(libc::RLIMIT_STACK, limit.as_mut_ptr()) } != 0 {
-        return true;
+        return 1;
     }
-    let used = origin.abs_diff(std::ptr::from_ref(&limit).addr()) as u64;
-    used + STACK_RESERVE >= unsafe { limit.assume_init() }.rlim_cur / 2
+    update_stack_budget(unsafe { limit.assume_init() }.rlim_cur);
+    STACK_BUDGET.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn stack_budget_exceeded() -> bool {
+    let Some(origin) = MAIN_STACK_ORIGIN.get() else {
+        return !cfg!(test);
+    };
+    let marker = 0u8;
+    let budget = STACK_BUDGET.load(std::sync::atomic::Ordering::Relaxed);
+    let budget = if budget == 0 { initial_stack_budget() } else { budget };
+    origin.abs_diff(std::ptr::from_ref(&marker).addr()) >= budget
 }
 
 // Script fallback can reenter invoke() in a child at an arbitrary call depth.
@@ -177,14 +209,12 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
     let invocation = match cli::parse(args, shell_terminal) {
         Ok(Action::Run(invocation)) => invocation,
         Ok(Action::Version) => {
-            println!("tonari {}", env!("CARGO_PKG_VERSION"));
-            return 0;
+            return u8::from(writeln!(io::stdout().lock(), "tonari {}", env!("CARGO_PKG_VERSION")).is_err());
         }
         Ok(Action::Help) => {
-            println!(
+            return u8::from(writeln!(io::stdout().lock(),
                 "Usage: tonari [--noprofile] [--norc | --rcfile FILE] [-efilnsu] [-o OPTION] [-O SHOPT] [-c COMMAND [NAME [ARG...]] | -s [ARG...] | FILE [ARG...]]"
-            );
-            return 0;
+            ).is_err());
         }
         Err(e) => {
             diagnostic!("{e}");
@@ -203,7 +233,16 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
 fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 {
     use cli::Input;
     session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
+    session.privileged = invocation.options.privileged;
+    if unsafe { libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid() } {
+        diagnostic!("running with unequal real and effective credentials is unsupported");
+        return 126;
+    }
     let env = startup::Environment::read(session);
+    if session.privileged {
+        session.unset_variable("CDPATH");
+        session.unset_variable("GLOBIGNORE");
+    }
     session.initialize_shell_level(&env);
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
@@ -237,11 +276,12 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
     session.shopt.nolog = invocation.options.nolog;
     session.interactive = invocation.interactive;
     session.login = invocation.login;
-    session.history_enabled = invocation.interactive;
+    session.history_enabled = invocation.options.history.unwrap_or(invocation.interactive);
     session.histexpand = invocation.options.histexpand.unwrap_or(session.interactive);
     // The selected keymap is also observable in a forced interactive script.
     // Terminal capabilities are checked separately when opening the editor.
-    session.emacs = session.interactive && !invocation.noediting;
+    session.vi = session.interactive && !invocation.noediting && invocation.options.vi.unwrap_or(false);
+    session.emacs = session.interactive && !invocation.noediting && invocation.options.emacs.unwrap_or(true);
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
     {
@@ -291,26 +331,29 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
         if session.get("PS1").is_none() {
             session.assign("PS1", "tonari$ ");
         }
+        if session.get("PS2").is_none() {
+            session.assign("PS2", "> ");
+        }
         if session.get("HISTFILE").is_none()
-            && let Some(home) = session.get("HOME").or_else(crate::word::account_home)
+            && let Some(home) = startup::startup_home(session)
         {
             let file = if session.posix {
                 ".sh_history"
             } else {
                 ".bash_history"
             };
-            session.assign("HISTFILE", &format!("{home}/{file}"));
+            session.assign("HISTFILE", &home.join(file).to_string_lossy());
         }
     }
     if session.interactive && traps::listen_for_interrupts().is_err() {
         return 1;
     }
-    let initial = match startup::initialize(session, &invocation) {
+    let initial = match startup::initialize(session, &invocation, &env) {
         Flow::Discard(status) | Flow::Continue(status) => status,
         Flow::Return(status) | Flow::Exit(status) => {
             return traps::finish(session, status);
         }
-        Flow::Break(..) | Flow::LoopContinue(_) => return 1,
+        Flow::Break(..) | Flow::LoopContinue(_) => return traps::finish(session, 1),
     };
     if invocation.debugger
         && !invocation.options.check
@@ -334,15 +377,16 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
                 None,
             )
         }
-        Input::File(path) => match std::fs::File::open(&path) {
-            Ok(file) => {
+        Input::File(path) => match startup::open_main_script(session, &path) {
+            Ok((file, resolved)) => {
+                let path = resolved.unwrap_or(path);
                 session.push_source_path(&path);
                 session.function_names.push("main".into());
                 session.call_lines.push(0);
                 input::file_script(session, file, None, initial, invocation.options.check)
             }
             Err(e) => {
-                diagnostic!("{}: {e}", path.display());
+                diagnostic!("{}: {}", path.display(), startup::error_message(&e));
                 Flow::Continue(if e.kind() == io::ErrorKind::NotFound {
                     127
                 } else {
@@ -365,5 +409,5 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
         Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
         Flow::Break(..) | Flow::LoopContinue(_) => 1,
     };
-    traps::finish(session, code)
+    traps::finish_shell(session, code, invocation.interactive && session.stdin_script)
 }

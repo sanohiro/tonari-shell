@@ -15,7 +15,7 @@ fn label(out: &mut String, text: &str, mut cells: usize) -> usize {
     let start = cells;
     for c in text.chars() {
         if c.is_control() {
-            let escaped = c.escape_default();
+            let escaped = super::control_glyph(c);
             if escaped.len() > cells {
                 break;
             }
@@ -42,19 +42,14 @@ fn draw<'a>(
     empty: &str,
 ) {
     let out = &mut screen.output;
-    out.clear();
-    out.push('\r');
-    if screen.row > 0 {
-        let _ = write!(out, "\x1b[{}A", screen.row);
-    }
-    out.push_str("\x1b[J");
+    super::begin_redraw(out, screen.row);
     let prefix = label(out, heading, screen.width);
     let available = screen.width - prefix;
     let mut remaining = available;
     let mut start = query.len();
     for (i, c) in query.char_indices().rev() {
         let w = if c.is_control() {
-            c.escape_default().len()
+            super::control_glyph(c).len()
         } else {
             c.width().unwrap_or(0)
         };
@@ -177,6 +172,11 @@ pub(super) fn choose(
     let mut hits = Vec::new();
     let mut scanned = 0;
     let mut selected: usize = 0;
+    let contains = |value: &str, needle: &str| {
+        if !session.bindings.ignore_case { return value.contains(needle); }
+        let locale = session.character_locale();
+        value.char_indices().any(|(at,_)| crate::pattern::folded_prefix(&value[at..], needle, locale).is_some())
+    };
     let rows = page_rows(screen);
     loop {
         // Preserve source order, and resume scanning only when the user
@@ -192,7 +192,7 @@ pub(super) fn choose(
                 while scanned < choices.len() && hits.len() < wanted {
                     let index = scanned;
                     scanned += 1;
-                    if finder.find(choices[index].as_bytes()).is_some() {
+                    if (!session.bindings.ignore_case && finder.find(choices[index].as_bytes()).is_some()) || (session.bindings.ignore_case && contains(&choices[index], &query)) {
                         hits.push(index);
                     }
                 }
@@ -217,6 +217,7 @@ pub(super) fn choose(
         let Some(first) = keys.get()? else {
             return Ok(None);
         };
+        let old_len = query.len();
         match read_key(first, keys, session, &mut query)? {
             Key::Changed => {}
             Key::Cancel => return Ok(None),
@@ -239,8 +240,12 @@ pub(super) fn choose(
             Key::Ignore => continue,
         }
         selected = 0;
-        scanned = 0;
-        hits.clear();
+        if query.len() > old_len {
+            hits.retain(|&i| contains(&choices[i], &query));
+        } else {
+            scanned = 0;
+            hits.clear();
+        }
     }
 }
 

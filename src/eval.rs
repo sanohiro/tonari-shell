@@ -438,8 +438,8 @@ fn run_arithmetic_loop(
             compiled.run(s, last)
         };
         result.map_err(|e| {
-            diagnostic!("{e}");
-            Flow::Continue(1)
+            e.report("");
+            e.flow(s)
         })
     };
     if (session.xtrace || !init.trim().is_empty())
@@ -860,6 +860,7 @@ pub(crate) fn call_with_bindings(
     if matches!(flow, Flow::Continue(_)) && session.traps.return_handler() {
         session.signal_line = Some(function.definition.location.line);
     }
+    let flow = crate::traps::leaving_scope(session, flow);
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
     session.signal_line = caller_signal_line;

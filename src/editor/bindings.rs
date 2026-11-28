@@ -143,8 +143,8 @@ static ESC_KEY: [[(Option<Action>, bool); 128]; 3] = [
 #[derive(Clone)]
 pub(super) enum Binding {
     Edit(Action),
-    Macro(Vec<u8>),
-    Shell(String),
+    Macro(Rc<[u8]>),
+    Shell(Rc<str>),
     Removed,
 }
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -455,25 +455,38 @@ fn encode(seq: &[u8], meta: bool) -> String {
     s
 }
 
+fn named_key(name: &str) -> Result<Vec<u8>, String> {
+    let mut name = name.to_ascii_lowercase();
+    let mut control = false;
+    let mut meta = false;
+    while let Some((prefix, rest)) = name.split_once('-') {
+        match prefix { "control" | "ctrl" | "c" => control = true,
+            "meta" | "m" => meta = true, _ => break }
+        name = rest.to_owned();
+    }
+    let byte = match name.as_str() {
+        "tab" => b'\t', "space" | "spc" => b' ', "newline" | "lfd" => b'\n',
+        "return" | "ret" => b'\r', "escape" | "esc" => 27,
+        "rubout" | "del" => 127, "backspace" => 8,
+        _ if name.len() == 1 => name.as_bytes()[0], _ => return Err(format!("unknown key name: {name}")),
+    };
+    let byte = if control { if byte == b'?' { 127 } else { byte & 31 } } else { byte };
+    Ok(if meta { vec![27, byte] } else { vec![byte] })
+}
+
 fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), String> {
     let spec = spec.trim();
     if !shell && let Some(set) = spec.strip_prefix("set ") {
-        let (name, value) = set
-            .trim()
-            .split_once(char::is_whitespace)
-            .ok_or("missing variable value")?;
+        let set = set.trim();
+        let (name, value) = set.split_once(char::is_whitespace).unwrap_or((set, ""));
         let value = value.trim();
-        let on = || match value.to_ascii_lowercase().as_str() {
-            "on" | "1" => Ok(true),
-            "off" | "0" => Ok(false),
-            _ => Err("expected on or off"),
-        };
+        let on = || value.is_empty() || value == "1" || value.eq_ignore_ascii_case("on");
         match name {
-            "blink-matching-paren" => bindings.blink_matching_paren = on()?,
-            "completion-ignore-case" => bindings.ignore_case = on()?,
-            "completion-map-case" => bindings.map_case = on()?,
-            "match-hidden-files" => bindings.hide_dotfiles = !on()?,
-            "mark-directories" => bindings.unmarked_dirs = !on()?,
+            "blink-matching-paren" => bindings.blink_matching_paren = on(),
+            "completion-ignore-case" => bindings.ignore_case = on(),
+            "completion-map-case" => bindings.map_case = on(),
+            "match-hidden-files" => bindings.hide_dotfiles = !on(),
+            "mark-directories" => bindings.unmarked_dirs = !on(),
             "comment-begin" => {
                 bindings.comment_begin = Some(if let Some(end) = quoted_end(value) {
                     value[1..end].into()
@@ -481,16 +494,10 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
                     value.into()
                 })
             }
-            "disable-completion" => bindings.disable_completion = on()?,
-            "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()?),
+            "disable-completion" => bindings.disable_completion = on(),
+            "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()),
             "keyseq-timeout" => {
-                bindings.timeout = Some(
-                    value
-                        .parse::<i32>()
-                        .ok()
-                        .filter(|n| *n >= 0)
-                        .ok_or("invalid key sequence timeout")?,
-                )
+                bindings.timeout = Some(value.parse::<i32>().unwrap_or(0).max(0));
             }
             "keymap" => bindings.map = Keymap::parse(value)?,
             "editing-mode" if matches!(value, "emacs" | "vi") => {
@@ -502,39 +509,34 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
                 };
             }
             _ => {
-                return Err(format!(
-                    "unsupported readline variable or value: {name} {value}"
-                ));
+                diagnostic!("bind: {name}: unknown readline variable or value");
             }
         }
         return Ok(());
     }
-    let end = quoted_end(spec).ok_or("expected a quoted key sequence")?;
-    let key = decode(&spec[..=end])?;
-    if key.is_empty() {
-        return Err("empty key sequence".into());
-    }
-    let value = spec[end + 1..]
-        .trim_start()
-        .strip_prefix(':')
-        .ok_or("expected ':'")?
-        .trim_start();
+    let (key, value) = if let Some(end) = quoted_end(spec) {
+        (decode(&spec[..=end])?, spec[end + 1..].trim_start().strip_prefix(':').ok_or("expected ':'")?)
+    } else {
+        let (name, value) = spec.split_once(':').ok_or("expected ':'")?;
+        (named_key(name.trim())?, value)
+    };
+    if key.is_empty() { return Err("empty key sequence".into()); }
+    let value = value.trim_start();
     let binding = if shell {
         Binding::Shell(if let Some(end) = quoted_end(value) {
             value[1..end].replace("\\\"", "\"").replace("\\\\", "\\")
         } else {
             value.to_owned()
-        })
+        }.into())
     } else if value.starts_with('"') {
-        Binding::Macro(decode(value)?)
+        Binding::Macro(decode(value)?.into())
     } else {
         let name = value.split_whitespace().next().unwrap_or("");
-        Binding::Edit(
-            named_actions()
-                .find(|(_, n, _)| *n == name)
-                .ok_or_else(|| format!("unknown readline function: {name}"))?
-                .0,
-        )
+        let Some((action, _, _)) = named_actions().find(|(_, n, _)| *n == name) else {
+            diagnostic!("bind: {name}: unknown readline function");
+            return Ok(());
+        };
+        Binding::Edit(action)
     };
     bindings.set(key, binding);
     Ok(())
@@ -547,7 +549,7 @@ fn load_file(session: &mut Session, path: &Path, depth: usize) -> Result<(), Str
     let mut levels = Vec::new();
     let mut active = true;
     let mut error = None;
-    for line in text.lines().map(str::trim) {
+    for (i, line) in text.lines().map(str::trim).enumerate() {
         if let Some(cond) = line.strip_prefix("$if ") {
             levels.push(active);
             let cond = cond.trim();
@@ -575,8 +577,9 @@ fn load_file(session: &mut Session, path: &Path, depth: usize) -> Result<(), Str
             } else {
                 configure(&mut session.bindings, line, false)
             };
-            if result.is_err() {
-                error = result.err();
+            if let Err(message) = result {
+                diagnostic!("{}:{}: {message}", path.display(), i + 1);
+                error = Some(format!("{}: invalid inputrc", path.display()));
             }
         }
     }
@@ -611,7 +614,7 @@ pub(super) fn reload(session: &mut Session) {
 #[inline(never)]
 pub(crate) fn builtin(session: &mut Session, args: &[String]) -> u8 {
     if !session.interactive {
-        eprintln!(
+        stderr_line!(
             "{}: line {}: bind: warning: line editing not enabled",
             session.arg0,
             session.line()
@@ -619,8 +622,9 @@ pub(crate) fn builtin(session: &mut Session, args: &[String]) -> u8 {
     }
     initialize(session);
     let old = session.bindings.map;
-    let result = run(session, args);
-    if args.iter().any(|s| s == "-m") {
+    let mut temporary_map = false;
+    let result = run(session, args, &mut temporary_map);
+    if temporary_map {
         session.bindings.map = old;
     }
     if let Some(vi) = session.bindings.prefer_vi.take() {
@@ -630,12 +634,12 @@ pub(crate) fn builtin(session: &mut Session, args: &[String]) -> u8 {
     match result {
         Ok(status) => status,
         Err(e) => {
-            eprintln!("{}: line {}: bind: {e}", session.arg0, session.line());
+            stderr_line!("{}: line {}: bind: {e}", session.arg0, session.line());
             1
         }
     }
 }
-fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
+fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Result<u8, String> {
     let meta = matches!(
         session.character_locale(),
         crate::session::CharacterLocale::Ascii
@@ -660,6 +664,7 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
             "-m" => {
                 let m = operand()?;
                 session.bindings.map = Keymap::parse(m)?;
+                *temporary_map = true;
             }
             "-l" => {
                 for name in names() {

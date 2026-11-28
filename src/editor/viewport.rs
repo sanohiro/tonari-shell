@@ -38,7 +38,7 @@ fn extent(chars: impl Iterator<Item = char>, mut budget: usize, width: usize) ->
     (bytes, budget)
 }
 
-fn move_to(out: &mut String, from: Position, to: Position) {
+pub(super) fn move_to(out: &mut String, from: Position, to: Position) {
     if from.row == to.row {
         if from.col > to.col {
             let _ = write!(out, "\x1b[{}D", from.col - to.col);

@@ -8,7 +8,7 @@ use crate::Session;
 
 pub(super) const DEFAULT_HISTSIZE: usize = 500;
 
-fn tail_lines_offset(file: &fs::File, len: u64, mut lines: usize) -> std::io::Result<u64> {
+fn tail_lines_offset(file: &fs::File, len: u64, mut lines: usize, unterminated: bool) -> std::io::Result<u64> {
     if lines == 0 {
         return Ok(len);
     }
@@ -18,6 +18,9 @@ fn tail_lines_offset(file: &fs::File, len: u64, mut lines: usize) -> std::io::Re
         let n = pos.min(block.len() as u64) as usize;
         pos -= n as u64;
         file.read_exact_at(&mut block[..n], pos)?;
+        if unterminated && pos + n as u64 == len && block[n - 1] != b'\n' {
+            lines -= 1;
+        }
         for i in memchr::memrchr_iter(b'\n', &block[..n]) {
             if lines == 0 {
                 return Ok(pos + i as u64 + 1);
@@ -113,11 +116,13 @@ pub(crate) fn finish_interactive(session: &mut Session) {
     if let Some(path) = custom_history(session) {
         let limit = session.get("HISTFILESIZE").and_then(|s| s.parse().ok());
         let timestamped = session.get("HISTTIMEFORMAT").is_some();
-        let op = if session.shopt.histappend { 'a' } else { 'w' };
+        let incomplete = session.history.as_ref().is_some_and(|h| h.incomplete(std::path::Path::new(&path)));
+        let limit = limit.filter(|_| !incomplete);
+        let op = if session.shopt.histappend || incomplete { 'a' } else { 'w' };
         if let Err(e) =
             commands::history_file(session, op, std::slice::from_ref(&path)).and_then(|()| {
                 limit.map_or(Ok(()), |n| {
-                    commands::limit_plain_file(std::path::Path::new(&path), n, timestamped)
+                    commands::limit_plain_file(std::path::Path::new(&path), n, timestamped, None)
                 })
             })
         {
@@ -214,8 +219,22 @@ fn journal_fields(row: &str) -> Option<(&str, Option<&str>)> {
     Some((body, Some(timestamp)))
 }
 
+struct JournalRecord<'a> {
+    time: Option<&'a str>,
+    pid: &'a str,
+    status: &'a str,
+    dir: &'a str,
+    command: &'a str,
+}
+
+fn journal_record(row: &str) -> Option<JournalRecord<'_>> {
+    let (body, time) = journal_fields(row)?;
+    let mut fields = body.splitn(4, '\t');
+    Some(JournalRecord { time, pid: fields.next()?, status: fields.next()?, dir: fields.next()?, command: fields.next()? })
+}
+
 fn command_field(row: &str) -> Option<&str> {
-    journal_fields(row)?.0.splitn(4, '\t').nth(3)
+    Some(journal_record(row)?.command)
 }
 
 // Old journals and unmarked Bash files may have no creation timestamp.
@@ -280,11 +299,11 @@ impl<T: Default> HistoryWindow<T> {
         self.values.push(value);
     }
 
-    fn remove(&mut self, index: usize) {
-        if index == 0 {
-            self.discard(1);
+    fn remove(&mut self, start: usize, end: usize) {
+        if start == 0 {
+            self.discard(end);
         } else {
-            self.values.remove(self.head + index);
+            self.values.drain(self.head + start..self.head + end);
         }
     }
 
@@ -313,7 +332,10 @@ pub(crate) struct Entries {
     base: usize,
     current: Option<usize>,
     current_lines: usize,
+    // A later history -r/-n can interleave imported entries with local edits.
+    pending: HistoryWindow<bool>,
     written: usize,
+    incomplete_files: Vec<(u64, u64)>,
     imported: Option<InitialJournal>,
 }
 
@@ -353,7 +375,7 @@ impl InitialJournal {
         let available = session
             .history_limit("HISTSIZE", DEFAULT_HISTSIZE)
             .saturating_sub(session.history_lines().len());
-        let pos = tail_lines_offset(&journal, self.len, available)?;
+        let pos = tail_lines_offset(&journal, self.len, available, false)?;
         journal.seek(SeekFrom::Start(pos))?;
         let mut older = Vec::new();
         let mut timestamps = Vec::new();
@@ -365,11 +387,11 @@ impl InitialJournal {
                 break;
             };
             complete += row.len() as u64;
-            if let Some((body, ts)) = std::str::from_utf8(record).ok().and_then(journal_fields)
-                && let Some(text) = body.splitn(4, '\t').nth(3).and_then(decode)
+            if let Some(record) = std::str::from_utf8(record).ok().and_then(journal_record)
+                && let Some(text) = decode(record.command)
             {
                 older.push(text);
-                timestamps.push(ts.and_then(|s| s.parse().ok()).unwrap_or(UNKNOWN_TIME));
+                timestamps.push(record.time.and_then(|s| s.parse().ok()).unwrap_or(UNKNOWN_TIME));
             }
             row.clear();
         }
@@ -379,6 +401,7 @@ impl InitialJournal {
         h.lines.prepend(older);
         h.current = h.current.map(|index| index + n);
         h.timestamps.prepend(timestamps);
+        h.pending.prepend(vec![false; n]);
         h.written += n;
         h.imported = Some(Self {
             len: complete,
@@ -421,8 +444,11 @@ impl Session {
             if default_history(self, path) {
                 return;
             }
+            let timed = self.get("HISTTIMEFORMAT").is_some();
+            let history = self.history.as_mut().map(std::rc::Rc::make_mut);
+            if history.as_ref().is_some_and(|h| h.incomplete(path)) { return; }
             if let Err(e) =
-                commands::limit_plain_file(path, limit, self.get("HISTTIMEFORMAT").is_some())
+                commands::limit_plain_file(path, limit, timed, history.and_then(|h| h.imported.as_mut()))
                 && e.kind() != std::io::ErrorKind::NotFound
             {
                 diagnostic!("{}: {e}", path.display());
@@ -459,6 +485,7 @@ impl Session {
         }
         true
     }
+    #[cfg(test)]
     fn push_history(&mut self, text: &str, current: bool) {
         let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
         self.push_history_limited(text, current, limit);
@@ -472,7 +499,7 @@ impl Session {
             .scalar_setting("HISTCONTROL")
             .is_some_and(|v| v.split(':').any(|w| w == "erasedups"));
         let h = self.history_mut();
-        h.append_line(text.into(), erase);
+        h.append_line(text.into(), erase, true);
         h.timestamps
             .push(unsafe { libc::time(std::ptr::null_mut()) });
         h.trim_to(limit);
@@ -514,11 +541,13 @@ impl Session {
             && self.history_matches_rules(source, previous)
     }
 
-    fn record_replay(&mut self, text: &str) {
+    fn record_replay(&mut self, text: &str) -> bool {
         let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
         if limit != 0 && self.history_matches_rules(text, self.history_lines().last()) {
             self.push_history_limited(text, false, limit);
+            return true;
         }
+        false
     }
 
     fn history_matches_rules(&self, source: &str, previous: Option<&String>) -> bool {
@@ -554,7 +583,11 @@ impl Session {
 }
 
 impl Entries {
-    fn append_line(&mut self, line: String, erase: bool) {
+    fn incomplete(&self, path: &std::path::Path) -> bool {
+        !self.incomplete_files.is_empty() && fs::metadata(path).is_ok_and(|m| self.incomplete_files.contains(&(m.dev(), m.ino())))
+    }
+
+    fn append_line(&mut self, line: String, erase: bool, pending: bool) {
         use std::hash::BuildHasher;
         if erase {
             let counts = self.erase_counts.get_or_insert_with(|| {
@@ -583,6 +616,10 @@ impl Entries {
         } else {
             self.erase_counts = None;
         }
+        if !pending && self.written == self.lines.len() {
+            self.written += 1;
+        }
+        self.pending.push(pending);
         self.lines.push(line);
     }
     fn forget_line(&mut self, i: usize) {
@@ -607,6 +644,7 @@ impl Entries {
             }
             self.lines.discard(count);
             self.timestamps.discard(count);
+            self.pending.discard(count);
             self.base += count;
             self.written = self.written.saturating_sub(count);
             self.current = self.current.and_then(|index| index.checked_sub(count));
@@ -614,18 +652,22 @@ impl Entries {
     }
 
     fn remove(&mut self, index: usize) {
-        self.forget_line(index);
-        self.lines.remove(index);
-        self.timestamps.remove(index);
-        if index < self.written {
-            self.written -= 1;
-        }
-        self.current = self.current.and_then(|j| {
-            if j == index {
-                None
-            } else {
-                Some(j - usize::from(index < j))
+        self.remove_range(index, index + 1);
+    }
+
+    fn remove_range(&mut self, start: usize, end: usize) {
+        if self.erase_counts.is_some() {
+            for i in start..end {
+                self.forget_line(i);
             }
+        }
+        self.lines.remove(start, end);
+        self.timestamps.remove(start, end);
+        self.pending.remove(start, end);
+        self.written -= end.min(self.written).saturating_sub(start);
+        self.current = self.current.and_then(|j| {
+            if (start..end).contains(&j) { None }
+            else { Some(j - if j >= end { end - start } else { 0 }) }
         });
     }
     fn discard_current(&mut self) {
@@ -734,6 +776,8 @@ impl History {
         }
         let Ok(mut journal) = OpenOptions::new()
             .append(true)
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
             .create(true)
             .mode(0o600)
             .open(path)
@@ -745,6 +789,8 @@ impl History {
                 return;
             }
         }
+        let Ok(meta) = journal.metadata() else { return };
+        if !meta.is_file() { return; }
         // One line per entry, including pastes with embedded tabs and newlines.
         let mut entry = if session.get("HISTTIMEFORMAT").is_some() {
             let timestamp = session
@@ -760,10 +806,31 @@ impl History {
         entry.push('\t');
         encode(text, &mut entry);
         entry.push('\n');
+        // A writer that exited mid-record left no complete newline. Discard
+        // just that suffix while holding the same lock used by every writer.
+        let mut len = meta.len();
+        if len != 0 {
+            let mut last = [0];
+            if journal.read_exact_at(&mut last, len - 1).is_err() { return; }
+            if last != [b'\n'] {
+                let mut buf = [0u8; 4096];
+                while len > 0 {
+                    let count = len.min(buf.len() as u64) as usize;
+                    len -= count as u64;
+                    if journal.read_exact_at(&mut buf[..count], len).is_err() { return; }
+                    if let Some(i) = memchr::memrchr(b'\n', &buf[..count]) {
+                        len += i as u64 + 1;
+                        break;
+                    }
+                }
+                if journal.set_len(len).is_err() { return; }
+            }
+        }
         let tracked = window.filter(|cache| cache.tracks(&journal));
-        if journal.write_all(entry.as_bytes()).is_ok()
-            && let Some(cache) = tracked
-        {
+        if journal.write_all(entry.as_bytes()).is_err() {
+            // Keep the next writer from joining its record to a partial write.
+            let _ = journal.set_len(len);
+        } else if let Some(cache) = tracked {
             cache.appended(&journal, entry.as_bytes());
         }
     }
@@ -825,6 +892,9 @@ impl History {
             || self.tail_start != 0 && !recent_first
         {
             self.shared.clear();
+            self.displayed = None;
+            self.shared_query.clear();
+            self.shared_match = None;
             self.journal = Some(identity);
             self.offset = 0;
             self.tail_start = 0;
@@ -922,11 +992,12 @@ impl History {
         let mut end = self.tail_start;
         let cached = self.window.matching(&m);
         let block = &mut self.search_buffer;
+        let mut width = BLOCK as u64;
         while end != 0 {
             if waiting() {
                 return Err(());
             }
-            let start = end.saturating_sub(BLOCK as u64);
+            let start = end.saturating_sub(width);
             let size = (end - start) as usize;
             let (buf, possible) =
                 if let Some((bytes, pages)) = cached.and_then(|window| window.range(start, size)) {
@@ -939,11 +1010,13 @@ impl History {
             let boundary = if start == 0 {
                 0
             } else {
-                memchr::memchr(b'\n', buf).ok_or(())? + 1
+                memchr::memchr(b'\n', buf).map_or(buf.len(), |index| index + 1)
             };
             if boundary == buf.len() {
-                return Err(());
-            } // An oversized record needs the streaming reader.
+                width = width.saturating_mul(2);
+                continue;
+            }
+            width = BLOCK as u64;
             let rows = &buf[boundary..];
             if possible && let Some(hit) = matches(rows, &mut skip) {
                 return Ok(Some(hit));
@@ -1139,6 +1212,7 @@ impl History {
         if prefix.is_empty() {
             return None;
         }
+        self.displayed = None;
         let suffix = |s: &str| s.len() > prefix.len() && s.starts_with(prefix);
         if let Some((last, earlier)) = local.split_last() {
             if suffix(last) {

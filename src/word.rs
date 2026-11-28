@@ -1,7 +1,7 @@
 pub mod brace;
 mod tilde;
 use tilde::tilde;
-pub(crate) use tilde::{account_home, account_shell, effective_user};
+pub(crate) use tilde::{account_home, account_shell, effective_user, named_home};
 mod modifier;
 pub(crate) mod quote;
 mod replace;
@@ -301,6 +301,8 @@ impl Word {
             Self::Literal(_) => return Ok(()),
             Self::Expanded(parts) | Self::Declaration(parts) => parts,
         };
+        let _nesting = crate::parser::enter_expansion()
+            .map_err(|error| crate::expansion::Error::discard(error.message()))?;
         let literal = |text, quoted| {
             if quoted {
                 Part::Text(text)
@@ -398,6 +400,15 @@ impl Word {
                     *name = indirect_target(target, env)?.into();
                 }
             }
+            if let Part::Parameter { name, quoted } = part
+                && let Some((base, at, keys)) = array_elements_name(name)
+                && !env.shadows(base) {
+                let mut values = Vec::new();
+                if env.session.append_array_fields(base, keys, &mut values) {
+                    *part = Part::Elements { values, at, quoted: *quoted };
+                    continue;
+                }
+            }
             match part {
                 Part::Modify {
                     name,
@@ -443,6 +454,8 @@ impl Word {
                 Part::Arithmetic { expression, quoted } => {
                     let value = match expression.compiled(env, true) {
                         Some(Ok(n)) => n,
+                        Some(Err(e)) if e == "unbound arithmetic variable" =>
+                            return Err(crate::arithmetic::shell_error(e, expression, env.session)),
                         Some(Err(e)) => return Err(crate::expansion::Error::discard(e)),
                         None => env.arithmetic(expression)?,
                     };

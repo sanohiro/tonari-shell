@@ -12,12 +12,13 @@ pub(crate) fn terminal_size(fd: std::os::fd::RawFd) -> Option<(u16, u16)> {
     Some((size.ws_row, size.ws_col))
 }
 
-pub(super) fn terminal_read(buf: &mut [u8], raw: bool) -> io::Result<usize> {
+pub(super) fn terminal_read(buf: &mut [u8], raw: bool, terminal: bool) -> io::Result<usize> {
     unsafe {
         let mut blocked = std::mem::zeroed();
         libc::sigfillset(&mut blocked);
         let original = traps::SignalMask::block(&blocked)?;
-        if INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || traps::input_interrupted() {
+        if INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || traps::input_interrupted()
+            || raw && editor::RESIZED.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(io::ErrorKind::Interrupted.into());
         }
         let mut read_set = std::mem::zeroed();
@@ -43,12 +44,12 @@ pub(super) fn terminal_read(buf: &mut [u8], raw: bool) -> io::Result<usize> {
         // A terminal interrupt can flush even bytes already reported readable.
         // VMIN=0 makes the editor read nonblocking after pselect without modifying
         // the open file description shared with external foreground programs.
-        if raw {
+        if raw || !terminal {
             let n = libc::read(0, buf.as_mut_ptr().cast(), buf.len());
             if n < 0 {
                 return Err(io::Error::last_os_error());
             }
-            if n == 0 {
+            if raw && n == 0 {
                 let mut p = libc::pollfd {
                     fd: 0,
                     events: libc::POLLIN,
@@ -83,7 +84,7 @@ fn read_terminal_line(source: &mut Vec<u8>, terminal: bool) -> io::Result<bool> 
     let mut buf = [0u8; 4096];
     loop {
         let size = if terminal || seekable { buf.len() } else { 1 };
-        let n = match terminal_read(&mut buf[..size], false) {
+        let n = match terminal_read(&mut buf[..size], false, terminal) {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
             result => result?,
         };
@@ -116,9 +117,7 @@ pub(super) fn interactive(session: &mut Session, status: u8, editing: bool) -> i
             .scalar_setting("TERM")
             .is_some_and(|term| term != "dumb");
     history::start_interactive(session);
-    let result = interactive_loop(session, status, editing, terminal_input);
-    history::finish_interactive(session);
-    result
+    interactive_loop(session, status, editing, terminal_input)
 }
 
 pub(super) fn interactive_loop(
@@ -131,18 +130,28 @@ pub(super) fn interactive_loop(
     let mut history = history::History::default();
     let mut eof_count = 0;
     let mut editable_history = String::new();
+    let mut incomplete = None;
+    let mut history_quote = None;
+    let mut here_doc: Option<parser::HereDocHint> = None;
+    let mut paste = String::new();
+    let mut paste_offset = 0;
+    let mut paste_recorded = false;
     loop {
+        if source.is_empty() { incomplete = None; history_quote = None; here_doc = None; }
+        let start = source.len();
         interrupted();
         if let Flow::Exit(code) = traps::dispatch(session, status) {
             return Ok(code);
         }
         session.jobs.poll();
         session.jobs.report_foreground();
-        if (session.notify || session.posix) && session.jobs.monitor {
+        if session.jobs.monitor {
             session.jobs.report_changes(session.posix);
         }
-        let terminal_size = session.refresh_terminal_size();
-        if source.is_empty() {
+        let queued = paste_offset < paste.len();
+        if !queued && source.is_empty() { paste.clear(); paste_offset = 0; paste_recorded = false; }
+        let terminal_size = if queued { None } else { session.refresh_terminal_size() };
+        if source.is_empty() && !queued {
             for hook in session.array_values("PROMPT_COMMAND") {
                 if !hook.is_empty()
                     && let Flow::Exit(code) = eval_text(session, &hook, status)
@@ -152,13 +161,19 @@ pub(super) fn interactive_loop(
             }
         }
         let line_editing = editing && (session.emacs || session.vi);
-        let prompt = prompt::render(session, !source.is_empty(), status, line_editing);
+        let prompt = if queued { String::new() } else { prompt::render(session, !source.is_empty(), status, line_editing) };
         let timeout = session
             .get("TMOUT")
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&n| n > 0);
         let deadline = input_deadline(timeout.map(std::time::Duration::from_secs));
-        let result = if line_editing {
+        let result = if queued {
+            let rest = &paste[paste_offset..];
+            let size = memchr::memchr(b'\n', rest.as_bytes()).map_or(rest.len(), |i| i + 1);
+            source.extend_from_slice(&rest.as_bytes()[..size]);
+            paste_offset += size;
+            Ok(Some(true))
+        } else if line_editing {
             match editor::line(
                 &prompt,
                 &mut history,
@@ -170,12 +185,19 @@ pub(super) fn interactive_loop(
             ) {
                 Ok(editor::Input::Control(Flow::Exit(code))) => return Ok(code),
                 Ok(editor::Input::Control(flow)) => {
-                    source.clear();
                     status = flow.child_status();
                     continue;
                 }
                 Ok(editor::Input::Line(line)) => {
-                    source.extend_from_slice(line.as_bytes());
+                    if let Some(i) = memchr::memchr(b'\n', line.as_bytes()) && i + 1 < line.len() {
+                        source.extend_from_slice(&line.as_bytes()[..=i]);
+                        paste = line;
+                        paste_offset = i + 1;
+                    } else {
+                        paste.clear();
+                        paste_offset = 0;
+                        source.extend_from_slice(line.as_bytes());
+                    }
                     Ok(Some(true))
                 }
                 Ok(editor::Input::Directory(result)) => {
@@ -233,7 +255,7 @@ pub(super) fn interactive_loop(
                 continue;
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                eprintln!();
+                stderr_line!();
                 source.clear();
                 if traps::pending().is_none() {
                     status = 130;
@@ -242,14 +264,19 @@ pub(super) fn interactive_loop(
             }
             Err(e) => return Err(e),
         };
-        if more {
+        if more && !queued {
             // The terminal can be resized while this line is being edited.
             session.refresh_terminal_size();
+        }
+        if !more && !source.is_empty() && session.ignoreeof && eof_count < session.ignoreeof_limit {
+            diagnostic!("unexpected end of file");
+            source.clear();
+            status = 2;
         }
         if !more && source.is_empty() {
             if session.ignoreeof && eof_count < session.ignoreeof_limit {
                 eof_count += 1;
-                eprintln!(
+                stderr_line!(
                     "Use \"{}\" to leave the shell.",
                     if session.login { "logout" } else { "exit" }
                 );
@@ -261,56 +288,61 @@ pub(super) fn interactive_loop(
             return Ok(startup::logout(session, status, status));
         }
         eof_count = 0;
-        let expanded;
-        let text = std::str::from_utf8(&source);
-        let text = if session.histexpand
-            && let Ok(line) = text
-        {
-            match history::expand::expand(session, line) {
-                Ok(event) => {
-                    expanded = event.text;
-                    if event.print {
-                        eprint!("{}", expanded);
-                        session.begin_history_line(&expanded);
+        let line = std::str::from_utf8(&source[start..]);
+        if more && let Ok(line) = line {
+            if let Some(hint) = &mut here_doc {
+                if !hint.may_finish(line) { continue; }
+                here_doc = None;
+            } else if session.histexpand {
+                match history::expand::expand_line(session, line, history_quote) {
+                    Ok(event) if event.print => {
+                        stderr_text!("{}", event.text);
+                        session.begin_history_line(&event.text);
                         session.finish_history_line();
                         source.clear();
                         continue;
                     }
-                    if matches!(expanded, std::borrow::Cow::Owned(_)) {
-                        if session.shopt.histverify && editing && (session.vi || session.emacs) {
-                            editable_history = expanded.into_owned();
-                            if editable_history.ends_with('\n') {
-                                editable_history.pop();
-                            }
-                            source.clear();
+                    Ok(event) => if let std::borrow::Cow::Owned(expanded) = event.text {
+                        if session.shopt.histverify && line_editing {
+                            editable_history = expanded.trim_end_matches('\n').to_owned();
+                            source.truncate(start);
                             continue;
                         }
-                        eprint!("{}", expanded);
+                        stderr_text!("{}", expanded);
+                        source.truncate(start);
+                        source.extend_from_slice(expanded.as_bytes());
+                    },
+                    Err(error) => {
+                        diagnostic!("{error}");
+                        if session.shopt.histreedit && line_editing {
+                            editable_history = line.trim_end_matches('\n').to_owned();
+                        }
+                        source.truncate(start);
+                        status = 1;
+                        continue;
                     }
-                    Ok(expanded.as_ref())
-                }
-                Err(e) => {
-                    diagnostic!("{e}");
-                    if session.shopt.histreedit && editing && (session.vi || session.emacs) {
-                        editable_history = line.strip_suffix('\n').unwrap_or(line).to_owned();
-                    }
-                    source.clear();
-                    status = 1;
-                    continue;
                 }
             }
-        } else {
-            text
-        };
+        }
+        if more && incomplete.is_some()
+            && let Ok(line) = std::str::from_utf8(&source[start..])
+            && input::still_open(incomplete, line, session)
+        { continue; }
+        let text = std::str::from_utf8(&source);
         match text {
             Ok(text) => match parser::session_source(text, !more, session) {
                 Ok(program) if program.is_empty() => {}
                 Ok(program) => {
                     if let Some(p) = session.get("PS0").filter(|p| !p.is_empty()) {
-                        eprint!("{}", prompt::render_text(session, p, status));
+                        stderr_text!("{}", prompt::render_text(session, p, status));
                     }
                     session.command_number += 1;
-                    let record = session.begin_history_line(text);
+                    let record = if paste_offset != 0 {
+                        if paste_recorded { false } else {
+                            paste_recorded = true;
+                            session.begin_history_line(&paste)
+                        }
+                    } else { session.begin_history_line(text) };
                     let cwd = if record { session.get("PWD") } else { None };
                     let flow = if session.noexec {
                         Flow::Continue(0)
@@ -329,7 +361,15 @@ pub(super) fn interactive_loop(
                         return Ok(status);
                     }
                 }
-                Err(e) if more && e.incomplete() => continue,
+                Err(e) if more && e.incomplete() => {
+                    history_quote = e.pending_quote();
+                    match e {
+                        parser::Error::Incomplete(reason) => incomplete = Some(reason),
+                        parser::Error::HereDoc(hint) => here_doc = Some(hint),
+                        _ => {}
+                    }
+                    continue
+                },
                 Err(e) => {
                     diagnostic!("{}", e.message());
                     status = 2;

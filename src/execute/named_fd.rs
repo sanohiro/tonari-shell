@@ -53,7 +53,7 @@ impl Scope {
                             source.as_raw_fd()
                         }
                         Action::HereInput(_, text) => {
-                            source = here_input::open(text, libc::PIPE_BUF)?;
+                            source = here_input::open(text, libc::PIPE_BUF, session)?;
                             source.as_raw_fd()
                         }
                         Action::Dup(fd, _) => {
@@ -88,7 +88,7 @@ impl Scope {
                 self.restore
                     .push((r.fd, SavedFd::capture(&action, actions)?));
             }
-            if apply_protected(actions, libc::PIPE_BUF).is_err() {
+            if apply_protected(actions, libc::PIPE_BUF, session).is_err() {
                 return Ok(false);
             }
             match action {

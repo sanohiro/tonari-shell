@@ -613,7 +613,9 @@ impl Spec {
             let (reply, retry) = callback(session, func, prefix, last, context);
             reload = retry;
             words.extend(reply);
-            self.options = std::mem::replace(&mut session.completions.active, old_options).unwrap();
+            if let Some(options) = std::mem::replace(&mut session.completions.active, old_options) {
+                self.options = options;
+            }
         }
         if let Some(command) = &self.command {
             words.extend(command_callback(session, command, prefix, last, context)?);
@@ -682,8 +684,8 @@ impl<'a> CallbackContext<'a> {
             Some(c) => Self {
                 name: &c.words[0],
                 previous: c.current.checked_sub(1).map_or("", |i| c.words[i].as_str()),
-                line: c.line,
-                point: c.line[..c.cursor].chars().count(),
+                line: &c.line[c.command_start..c.command_end],
+                point: c.line[c.command_start..c.cursor].chars().count(),
                 key: "9",
             },
             None => Self {
@@ -1042,6 +1044,7 @@ pub fn for_tab(
     command: Option<&str>,
     prefix: &str,
     context: Option<&complete::Context<'_>>,
+    list: bool,
 ) -> Option<Generated> {
     if !session.shopt.progcomp || session.completions.specs.is_empty() {
         return None;
@@ -1069,12 +1072,12 @@ pub fn for_tab(
             if session.completions.lookup(Some(&name), prefix).is_some() {
                 let expanded =
                     expanded.programmable(&session.completion_breaks(), session.shopt.hostcomplete);
-                return generate_for_tab(session, Some(&name), prefix, Some(&expanded));
+                return generate_for_tab(session, Some(&name), prefix, Some(&expanded), list);
             }
         }
         return None;
     }
-    generate_for_tab(session, command, prefix, context)
+    generate_for_tab(session, command, prefix, context, list)
 }
 
 fn generate_for_tab(
@@ -1082,6 +1085,7 @@ fn generate_for_tab(
     command: Option<&str>,
     prefix: &str,
     context: Option<&complete::Context<'_>>,
+    list: bool,
 ) -> Option<Generated> {
     let initial = session.completions.lookup(command, prefix)?;
     if let Some(generated) = initial.native_generator() {
@@ -1131,21 +1135,6 @@ fn generate_for_tab(
             .actions
             .iter()
             .any(|a| matches!(a, CompAction::Directory | CompAction::File));
-    if filenames && !session.bindings.unmarked_dirs {
-        for word in &mut words {
-            let directory = word
-                .strip_prefix("~/")
-                .and_then(|rest| session.get("HOME").map(|h| Path::new(&h).join(rest)));
-            if !word.ends_with('/')
-                && directory
-                    .as_deref()
-                    .unwrap_or_else(|| Path::new(word))
-                    .is_dir()
-            {
-                word.push('/');
-            }
-        }
-    }
     if spec.options.contains(CompOption::Nosort) {
         // Borrow the candidates while recording first occurrences, then compact in place.
         if words.len() > 1 {
@@ -1161,6 +1150,21 @@ fn generate_for_tab(
     } else {
         words.sort_unstable();
         words.dedup();
+    }
+    if filenames && !session.bindings.unmarked_dirs && (list || words.len() == 1 || words.iter().any(|w| w.contains('/'))) {
+        for word in &mut words {
+            let directory = word
+                .strip_prefix("~/")
+                .and_then(|rest| session.get("HOME").map(|h| Path::new(&h).join(rest)));
+            if !word.ends_with('/')
+                && directory
+                    .as_deref()
+                    .unwrap_or_else(|| Path::new(word))
+                    .is_dir()
+            {
+                word.push('/');
+            }
+        }
     }
     Some(Generated {
         source: complete::Source::Words(words),
@@ -1262,7 +1266,7 @@ mod tests {
                 .contains(" -o nospace ")
         );
         invoke(&mut session, "complete", &["-r", "demo"]);
-        assert!(for_tab(&mut session, Some("demo"), "tw", None).is_none());
+        assert!(for_tab(&mut session, Some("demo"), "tw", None, true).is_none());
     }
 
     #[test]
@@ -1321,7 +1325,7 @@ mod tests {
         let completion = complete::at(line, line.len(), &mut session, false, false).unwrap();
         assert_eq!(completion.replacement, "start ");
         session.shopt.progcomp = false;
-        assert!(for_tab(&mut session, Some("demo"), "sta", None).is_none());
+        assert!(for_tab(&mut session, Some("demo"), "sta", None, true).is_none());
     }
 
     #[test]
@@ -1333,7 +1337,7 @@ mod tests {
             &["-W", "\"$items\" $items ab;cd #hi /x*", "demo"],
         );
         session.assign("items", "two words");
-        let complete::Source::Words(known) = for_tab(&mut session, Some("demo"), "", None)
+        let complete::Source::Words(known) = for_tab(&mut session, Some("demo"), "", None, true)
             .unwrap()
             .source
         else {
@@ -1341,7 +1345,7 @@ mod tests {
         };
         assert_eq!(known, ["#hi", "/x*", "ab;cd", "two", "two words", "words"]);
         assert!(
-            matches!(for_tab(&mut session, Some("demo"), "$(echo two)", None).unwrap().source,
+            matches!(for_tab(&mut session, Some("demo"), "$(echo two)", None, true).unwrap().source,
                          complete::Source::Words(words) if words.is_empty())
         );
         assert_eq!(

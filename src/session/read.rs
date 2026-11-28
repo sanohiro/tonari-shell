@@ -5,12 +5,40 @@ use super::Session;
 use crate::Flow;
 use crate::parser::is_identifier;
 
+// A shell delimiter is one UTF-8 character. Empty -d selects the NUL byte.
+#[derive(Clone, Copy)]
+pub(super) struct Delimiter<'a>(&'a [u8]);
+
+impl<'a> Delimiter<'a> {
+    pub(super) const NEWLINE: Self = Self(b"\n");
+
+    pub(super) fn first(value: &'a str) -> Self {
+        Self(value.chars().next().map_or(b"\0", |c| &value.as_bytes()[..c.len_utf8()]))
+    }
+
+    pub(super) fn bytes(self) -> &'a [u8] { self.0 }
+
+    fn find(self, bytes: &[u8]) -> Option<usize> {
+        if let [b] = self.0 { memchr::memchr(*b, bytes) } else { memchr::memmem::find(bytes, self.0) }
+    }
+
+    // UTF-8 continuation bytes can never begin another occurrence.
+    pub(super) fn advance(self, b: u8, matched: &mut usize) -> bool {
+        if b == self.0[*matched] {
+            *matched += 1;
+        } else {
+            *matched = usize::from(b == self.0[0]);
+        }
+        *matched == self.0.len()
+    }
+}
+
 struct Options<'a> {
     raw: bool,
     silent: bool,
     edit: Option<bool>,
     initial: Option<&'a str>,
-    delimiter: u8,
+    delimiter: Delimiter<'a>,
     max_chars: Option<usize>,
     exact: bool,
     fd: i32,
@@ -26,7 +54,7 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
         silent: false,
         edit: None,
         initial: None,
-        delimiter: b'\n',
+        delimiter: Delimiter::NEWLINE,
         max_chars: None,
         exact: false,
         fd: 0,
@@ -63,10 +91,10 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
                     }
                     opts.array = Some(value);
                 }
-                'd' => opts.delimiter = value.as_bytes().first().copied().unwrap_or(0),
+                'd' => opts.delimiter = Delimiter::first(value),
                 'n' | 'N' => {
                     opts.max_chars =
-                        Some(value.parse().map_err(|_| (1, "invalid character count"))?);
+                        Some(crate::builtins::integer_operand(value).and_then(|v| i32::try_from(v).ok()).filter(|v| *v >= 0).ok_or((1, "invalid character count"))? as usize);
                     opts.exact = flag == 'N';
                 }
                 'u' => {
@@ -113,7 +141,7 @@ fn timeout(value: &str) -> Option<Duration> {
 
 pub(super) struct Input {
     fd: i32,
-    seekable: bool,
+    pub(super) seekable: bool,
     data: [std::mem::MaybeUninit<u8>; 4096],
     position: usize,
     end: usize,
@@ -187,7 +215,9 @@ impl Input {
         Ok(self.chunk(1, 1)?.first().copied())
     }
 
-    fn chunk(&mut self, read_ahead: usize, take: usize) -> io::Result<&[u8]> {
+    pub(super) fn unconsume(&mut self, count: usize) { self.position -= count; }
+
+    pub(super) fn chunk(&mut self, read_ahead: usize, take: usize) -> io::Result<&[u8]> {
         if self.position == self.end {
             // Reading beyond a delimiter on a pipe would take input from the
             // following shell command, since the kernel cannot rewind its fd.
@@ -276,7 +306,7 @@ fn memory_record<'a>(
         && (!opts.names.is_empty() || session.plain_read_target("REPLY"))
     {
         let delimiter = (!opts.exact)
-            .then(|| memchr::memchr(opts.delimiter, bytes))
+            .then(|| opts.delimiter.find(bytes))
             .flatten();
         let end = delimiter.unwrap_or(bytes.len());
         let line = &bytes[..end];
@@ -355,7 +385,7 @@ pub(super) fn run(
         opts.fd == 0
             && !opts.silent
             && opts.max_chars.is_none()
-            && opts.delimiter == b'\n'
+            && opts.delimiter.bytes() == b"\n"
             && unsafe { libc::isatty(0) } == 1
     });
     if let Some(files_only) = edit {
@@ -393,7 +423,7 @@ pub(super) fn run(
         && let Some(prompt) = opts.prompt
         && unsafe { libc::isatty(opts.fd) } == 1
     {
-        eprint!("{prompt}");
+        stderr_text!("{prompt}");
     }
     // A pending signal may run another read. Take ownership until assignment
     // completes and only retain buffers suitable for ordinary line input.
@@ -401,6 +431,7 @@ pub(super) fn run(
     let mut line = LINE.take();
     let mut escaped = Vec::new();
     let mut slash = false;
+    let mut delimiter_prefix = 0;
     let mut chars = 0;
     let mut validated = 0;
     let started = opts.timeout.map(|timeout| (Instant::now(), timeout));
@@ -417,7 +448,7 @@ pub(super) fn run(
                 && opts.names.iter().all(|s| is_identifier(s))
         })
         .map_or(0, |(_, data)| {
-            memchr::memchr(opts.delimiter, data).map_or(data.len(), |n| n + 1)
+            opts.delimiter.find(data).map_or(data.len(), |n| n + opts.delimiter.bytes().len())
         });
     let mut watch = session.interactive || session.traps.active();
     let status = loop {
@@ -444,7 +475,28 @@ pub(super) fn run(
         }
         let input_byte = if let Some(bytes) = &mut edited {
             Ok(bytes.next())
+        } else if !opts.raw && !slash && !opts.exact && opts.max_chars.is_none()
+            && opts.delimiter.bytes().len() == 1 && input.seekable
+        {
+            match input.chunk(1, usize::MAX) {
+                Ok([]) => Ok(None),
+                Ok(bytes) => {
+                    let special = memchr::memchr3(opts.delimiter.bytes()[0], b'\\', 0, bytes);
+                    let n = special.unwrap_or(bytes.len());
+                    line.extend_from_slice(&bytes[..n]);
+                    if let Some(index) = special {
+                        let b = bytes[index];
+                        let unused = bytes.len() - index - 1;
+                        input.position -= unused;
+                        Ok(Some(b))
+                    } else {
+                        continue;
+                    }
+                }
+                Err(e) => Err(e),
+            }
         } else if opts.raw
+            && opts.delimiter.bytes().len() == 1
             && !opts.exact
             && opts.timeout.is_none()
             && (input.seekable || known_prefix != 0)
@@ -458,7 +510,7 @@ pub(super) fn run(
                 Ok([]) => Ok(None),
                 Ok(bytes) => {
                     known_prefix = known_prefix.saturating_sub(bytes.len());
-                    let end = memchr::memchr(opts.delimiter, bytes);
+                    let end = opts.delimiter.find(bytes);
                     let data = &bytes[..end.unwrap_or(bytes.len())];
                     let unused = bytes.len() - data.len();
                     if opts.max_chars.is_some() {
@@ -521,12 +573,14 @@ pub(super) fn run(
             }
         };
         if slash {
+            delimiter_prefix = 0;
             slash = false;
             if b == b'\n' || b == 0 {
                 continue;
             }
             escaped.push(line.len());
-        } else if !opts.exact && b == opts.delimiter {
+        } else if !opts.exact && opts.delimiter.advance(b, &mut delimiter_prefix) {
+            line.truncate(line.len() - (opts.delimiter.bytes().len() - 1));
             break 0;
         } else if b == b'\\' && !opts.raw {
             slash = true;

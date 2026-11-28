@@ -159,9 +159,13 @@ impl Variables {
                 .collect();
             *cache = Some((prefix.to_owned(), keys));
         }
-        for key in &cache.as_ref().unwrap().1 {
-            if key.starts_with(prefix)
-                && let Some((key, var)) = self.entries.get_key_value(key)
+        let (old, keys) = cache.as_mut().unwrap();
+        if old.len() < prefix.len() {
+            keys.retain(|key| key.starts_with(prefix));
+            prefix.clone_into(old);
+        }
+        for key in keys.iter() {
+            if let Some((key, var)) = self.entries.get_key_value(key)
                 && var.declared
             {
                 names.push(key.as_str());
@@ -287,6 +291,7 @@ pub struct Session {
     pub interactive: bool,
     pub login: bool,
     pub posix: bool,
+    pub privileged: bool,
     pub physical: bool,
     pub keyword: bool,
     pub logout_started: bool,
@@ -457,7 +462,7 @@ impl Session {
         }
         let name = NAMES
             .iter()
-            .find_map(|name| self.get(name).filter(|s| !s.is_empty()));
+            .find_map(|name| self.scalar_setting(name).filter(|s| !s.is_empty()));
         CharacterLocale::from_name(name.as_deref().unwrap_or(""))
     }
 
@@ -596,12 +601,12 @@ impl Session {
         }
         let count = args.first().map_or(Ok(1), |s| s.trim().parse::<i64>());
         let Ok(count) = count else {
-            diagnostic!("shift: numeric argument required");
+            diagnostic!("shift: {}: numeric argument required", args[0]);
             return 1;
         };
         if count < 0 || count as u64 > self.positional.len() as u64 {
-            if self.shopt.shift_verbose {
-                diagnostic!("shift: shift count out of range");
+            if count < 0 || self.shopt.shift_verbose {
+                diagnostic!("shift: {count}: shift count out of range");
             }
             return 1;
         }
@@ -1087,19 +1092,16 @@ impl Session {
         if self.protected_array(name) {
             return;
         }
+        let live = dynamic::is_dynamic(name) && self.variables.get(name).is_none_or(|v| v.dynamic);
+        if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
+            value = Cow::Owned(self.convert_case(value.into_owned(), Some(upper)));
+        }
         self.apply_variable_effects(name, &value);
         if matches!(name, "HISTSIZE" | "HISTFILESIZE") {
             self.apply_history_limit(name, &value);
         }
-        if name == "BASH_ARGV0" {
+        if name == "BASH_ARGV0" && !self.locals.iter().any(|scope| scope.variables.contains_key(name)) {
             self.arg0 = value.to_string();
-        }
-        if name == "OPTIND" {
-            value = Cow::Owned(value.trim().parse::<i64>().unwrap_or(0).to_string());
-        }
-        let live = dynamic::is_dynamic(name) && self.variables.get(name).is_none_or(|v| v.dynamic);
-        if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
-            value = Cow::Owned(self.convert_case(value.into_owned(), Some(upper)));
         }
         if live {
             self.set_dynamic(name, &value);
@@ -1122,7 +1124,7 @@ impl Session {
             name.into(),
             Variable {
                 dynamic: live,
-                integer: live && dynamic::integer_attribute(name),
+                integer: dynamic::integer_attribute(name),
                 declared: true,
                 value: Some(value.into_owned()),
                 exported,
@@ -1402,6 +1404,8 @@ impl Session {
                     }
                 }
             }
+            let case = self.variables.get(&name).and_then(|v| v.letter_case);
+            let value = self.convert_case(value, case);
             self.apply_variable_effects(&name, &value);
             let var = self.variables.entry(name).or_default();
             var.exported = true;
@@ -1434,11 +1438,7 @@ impl Session {
                 saved.opt_offset.get_or_insert(self.opt_offset);
             }
             self.apply_variable_effects(name, value);
-            saved
-                .variables
-                .entry(name.clone())
-                .or_insert_with(|| self.variables.get(name).cloned());
-            self.variables.insert(
+            let original = self.variables.insert(
                 name.clone(),
                 Variable {
                     temporary: true,
@@ -1448,6 +1448,7 @@ impl Session {
                     ..Variable::default()
                 },
             );
+            saved.variables.entry(name.clone()).or_insert(original);
         }
         saved
     }

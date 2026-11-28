@@ -220,11 +220,17 @@ pub(super) fn open_redirect(path: &str, flags: i32) -> Option<OwnedFd> {
     {
         return network_redirect(path, address, kind);
     }
-    let mut fd = unsafe { libc::open(path.as_ptr(), flags, 0o666 as libc::c_int) };
+    let open = |flags| loop {
+        let fd = unsafe { libc::open(path.as_ptr(), flags, 0o666 as libc::c_int) };
+        if fd >= 0 || errno() != libc::EINTR || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || crate::traps::hanging_up() {
+            break fd;
+        }
+    };
+    let mut fd = open(flags);
     if fd < 0 && flags & libc::O_EXCL != 0 && errno() == libc::EEXIST {
         // Open without truncation and inspect the opened object. A path swap
         // cannot turn a permitted device write into truncation of a regular file.
-        fd = unsafe { libc::open(path.as_ptr(), libc::O_WRONLY) };
+        fd = open(libc::O_WRONLY);
         if fd >= 0 {
             let file = unsafe { std::fs::File::from_raw_fd(fd) };
             if file.metadata().is_ok_and(|m| !m.is_file()) {
@@ -293,19 +299,19 @@ pub(super) fn protect_fds(actions: &[Action<'_>]) -> io::Result<()> {
     Ok(())
 }
 
-pub(super) fn apply(actions: &[Action<'_>], pipe_limit: usize) -> bool {
+pub(super) fn apply(actions: &[Action<'_>], pipe_limit: usize, session: &Session) -> bool {
     if let Err(e) = protect_fds(actions) {
         diagnostic!("redirection: {e}");
         return false;
     }
-    apply_protected(actions, pipe_limit).is_ok()
+    apply_protected(actions, pipe_limit, session).is_ok()
 }
 
-pub(super) fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> Result<(), usize> {
+pub(super) fn apply_protected(actions: &[Action<'_>], pipe_limit: usize, session: &Session) -> Result<(), usize> {
     for (index, a) in actions.iter().enumerate() {
         match a {
             Action::HereInput(dest, body) => {
-                let redirected = here_input::open(body, pipe_limit).and_then(|fd| {
+                let redirected = here_input::open(body, pipe_limit, session).and_then(|fd| {
                     if fd.as_raw_fd() != *dest {
                         return duplicate(fd.as_raw_fd(), *dest);
                     }
@@ -334,7 +340,7 @@ pub(super) fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> Resu
             Action::Dup(src, dst) => {
                 if let Err(error) = duplicate(*src, *dst) {
                     if error.raw_os_error() == Some(libc::EBADF) {
-                        write_error(b"redirection", b": Bad file descriptor");
+                        diagnostic!("{src}: Bad file descriptor");
                     } else {
                         write_error(b"redirection", b": cannot duplicate file descriptor");
                     }

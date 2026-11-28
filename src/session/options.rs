@@ -132,6 +132,7 @@ macro_rules! compat_entry {
 macro_rules! set_options {
     ($( $name:literal $( ( $short:literal ) )? => $($field:ident).+ ),+ $(,)?) => {
         const SET_OPTIONS: &[OptionEntry] = &[$(option_entry!($name, $($field).+)),+];
+        const _: () = assert!(SET_OPTIONS.len() <= 31);
         fn set_short_option(s: &mut Session, flag: char, enabled: bool) -> bool {
             $( set_options!(@apply s, flag, enabled, $($field).+ $(, $short)?); )+
             false
@@ -173,6 +174,7 @@ set_options! {
     "physical" ('P') => physical,
     "pipefail" => pipefail,
     "posix" => posix,
+    "privileged" ('p') => privileged,
     "verbose" ('v') => verbose,
     "vi" => vi,
     "xtrace" ('x') => xtrace,
@@ -234,6 +236,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("progcomp", shopt.progcomp),
     option_entry!("progcomp_alias", shopt.progcomp_alias),
     option_entry!("promptvars", shopt.promptvars),
+    OptionEntry { name: "restricted_shell", read: |_| false, write: None },
     option_entry!("shift_verbose", shopt.shift_verbose),
     option_entry!("sourcepath", shopt.sourcepath),
     option_entry!("varredir_close", shopt.varredir_close),
@@ -431,17 +434,12 @@ impl Session {
         if let Some(value) = &env.compat {
             self.apply_compat(value);
         }
-        let allowed = std::cell::LazyCell::new(|| unsafe {
-            libc::getuid() == libc::geteuid() && libc::getgid() == libc::getegid()
-        });
+
         for (variable, set, list) in [
             ("SHELLOPTS", true, &env.shellopts),
             ("BASHOPTS", false, &env.bashopts),
         ] {
             if let Some(list) = list {
-                if !*allowed {
-                    return;
-                }
                 for name in list.split(':') {
                     if !set
                         && name.starts_with("compat")
@@ -599,6 +597,9 @@ impl Session {
         }
         if self.noexec {
             flags.push('n');
+        }
+        if self.privileged {
+            flags.push('p');
         }
         if self.onecmd {
             flags.push('t');

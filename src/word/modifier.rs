@@ -183,7 +183,7 @@ fn as_number(word: &mut Word, env: &mut Expansion<'_>) -> Result<i64, Error> {
         return Ok(n);
     }
     let text = env.scalar(std::mem::take(word))?;
-    env.arithmetic(&text)
+    env.arithmetic_value(&text)
 }
 
 fn scalar_part(text: String, quoted: bool) -> Part {
@@ -462,6 +462,18 @@ impl Modification {
                 }))
             }
             Self::Slice { offset, length } => {
+                // Nonconstant bounds can assign to the parameter being sliced.
+                // Snapshot ordinary scalars before either arithmetic expression.
+                let constant = |word: &Word| word.as_literal().is_some_and(|s| crate::Session::plain_decimal(s.trim_ascii()).is_some());
+                if !(constant(offset) && length.as_ref().is_none_or(constant))
+                    && super::is_identifier(name)
+                {
+                    let before = value(name,env)?;
+                    if env.session.nounset && before.is_none() { return Err(env.missing(name, "unbound variable")); }
+                    let start = as_number(offset,env)?;
+                    let len = length.as_mut().map(|w|as_number(w,env)).transpose()?;
+                    return Ok(scalar(substring(before.as_deref().unwrap_or(""), start, len)?.to_owned()));
+                }
                 let start = as_number(offset, env)?;
                 let len = length.as_mut().map(|w| as_number(w, env)).transpose()?;
                 if let Some((base, _, false)) = array_elements_name(name) {

@@ -156,10 +156,16 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
             }
             '`' if quote.is_none() => {
                 text.push(c);
-                for c in chars.by_ref() {
-                    text.push(c);
-                    if c == '`' {
+                loop {
+                    let ch = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
+                        "unterminated backquote in here-document delimiter",
+                    )))?;
+                    text.push(ch);
+                    if ch == '`' {
                         break;
+                    }
+                    if ch == '\\' && let Some(escaped) = chars.next() {
+                        text.push(escaped);
                     }
                 }
             }
@@ -179,12 +185,14 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
 }
 
 pub(super) fn collect(
+    source_len: usize,
     chars: &mut Chars<'_>,
     tokens: &mut [Token],
     pending: &mut Vec<Pending>,
     final_input: bool,
 ) -> Result<(), Error> {
     for doc in pending.drain(..) {
+        let start = source_len - chars.as_str().len();
         let mut body = String::new();
         let mut continued = String::new();
         let mut was_continued = false;
@@ -236,7 +244,7 @@ pub(super) fn collect(
             body.push('\n');
             continued.clear();
         }
-        tokens[doc.index] = body_token(body);
+        tokens[doc.index] = Token::HereBody(body, (start, source_len - chars.as_str().len()));
     }
     Ok(())
 }

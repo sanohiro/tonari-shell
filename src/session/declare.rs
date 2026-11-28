@@ -164,7 +164,7 @@ impl Options {
         if self.remove_array && var.elements.is_some() && var.associative().is_none()
             || self.remove_associative && var.associative().is_some()
         {
-            return Err("cannot remove array attribute");
+            return Err("cannot destroy array variables in this way");
         }
         if self.array && var.associative().is_some() {
             return Err("cannot convert associative to indexed array");
@@ -528,6 +528,7 @@ impl Session {
             let name = if !creates_local
                 && (flags.nameref.is_none()
                     || flags.nameref == Some(false)
+                        && (flags.global || base_scope.is_none())
                         && (value.is_some() || array.is_some() || flags.changes_target()))
                 && self.has_namerefs
             {
@@ -612,11 +613,18 @@ impl Session {
             }
             let mut var = if fresh_unbound {
                 Variable::default()
+            } else if fresh_local
+                && !flags.inherit
+                && !self.shopt.localvar_inherit
+                && let Some(outer) = self.variables.get(name).filter(|v| !v.temporary)
+            {
+                // Only these attributes survive shadowing. Keep the outer
+                // value in its binding until the declaration is accepted.
+                Variable { readonly: outer.readonly, exported: outer.exported, ..Variable::default() }
             } else {
-                self.declared_variable(name, flags.global)
-                    .unwrap_or_default()
+                self.declared_variable(name, flags.global).unwrap_or_default()
             };
-            let outer_local = fresh_local
+            let outer_local = var.readonly && fresh_local
                 && self.locals[..scope_index.unwrap()]
                     .iter()
                     .any(|scope| scope.variables.contains_key(name));
@@ -640,26 +648,6 @@ impl Session {
             }
             let new_global = !fresh_local && !var.declared && !self.variables.contains_key(name);
             var.declared = true;
-            let mut previous_local = fresh_local.then(|| {
-                let previous = bindings.variables.get(name).cloned().unwrap_or_else(|| {
-                    if fresh_unbound {
-                        None
-                    } else {
-                        self.variables.get(name).cloned()
-                    }
-                });
-                (scope_index.unwrap(), previous, self.opt_offset)
-            });
-            let mut record_scope = |s: &mut Session| {
-                if let Some((i, previous, offset)) = previous_local.take() {
-                    let scope = &mut s.locals[i];
-                    if name == "OPTIND" {
-                        scope.opt_offset = Some(offset);
-                        s.opt_offset = 0;
-                    }
-                    scope.variables.insert(name.into(), previous);
-                }
-            };
             if fresh_local {
                 var.dynamic = false;
                 var.nameref = false;
@@ -680,7 +668,7 @@ impl Session {
                 && (var.nameref || flags.nameref == Some(true))
                 && var.elements.is_none()
             {
-                if var.nameref && flags.nameref != Some(true) {
+                if var.nameref && var.value.is_some() && flags.nameref != Some(true) {
                     diagnostic!("warning: {name}: removing nameref attribute");
                 }
                 var.nameref = false;
@@ -697,7 +685,11 @@ impl Session {
                             && !Session::valid_reference_target(dest)
                         || dest == name)
                 {
-                    diagnostic!("{command}: {name}: invalid name reference");
+                    if dest == name {
+                        diagnostic!("{command}: {name}: nameref variable self references not allowed");
+                    } else {
+                        diagnostic!("{command}: `{dest}': invalid variable name for name reference");
+                    }
                     status = 1;
                     continue;
                 }
@@ -724,6 +716,23 @@ impl Session {
                 status = 1;
                 continue;
             }
+            if fresh_local {
+                let previous = match bindings.variables.remove(name) {
+                    Some(original) => original,
+                    None => self.variables.remove(name),
+                };
+                let scope = &mut self.locals[scope_index.unwrap()];
+                if name == "OPTIND" {
+                    scope.opt_offset = Some(self.opt_offset);
+                    self.opt_offset = 0;
+                }
+                scope.variables.insert(name.into(), previous);
+                // Arithmetic and subscript expressions see the new local even
+                // while its initializer is still being evaluated.
+                if var.integer || target.is_some() || array.is_some() {
+                    self.store_variable(name, var.clone(), false);
+                }
+            }
             let mut initializer_error = array.and_then(|d| d.items.initializer_error());
             if let Some(text) = value
                 && (target.is_none() || flags.array || flags.associative)
@@ -749,7 +758,6 @@ impl Session {
                 }) {
                     Ok(()) => {}
                     Err(e) => {
-                        record_scope(self);
                         self.store_variable(name, var, flags.global);
                         e.report(&format!("{command}: {name}: "));
                         return e.flow(self);
@@ -766,7 +774,14 @@ impl Session {
                     flags.global,
                 )
             {
-                diagnostic!("{command}: {e}");
+                if var.integer && var.nameref {
+                    if fresh_local {
+                        var.nameref = false;
+                        self.store_variable(name, var, false);
+                    }
+                } else {
+                    diagnostic!("{command}: {e}");
+                }
                 status = 1;
                 continue;
             }
@@ -781,7 +796,6 @@ impl Session {
             if let Some(d) = array
                 && let Err(e) = self.array_items(name, flags.global, &mut var, d.append, &d.items)
             {
-                record_scope(self);
                 self.store_variable(name, var, flags.global);
                 diagnostic!("{command}: {name}: {e}");
                 return crate::Flow::Discard(1);
@@ -792,6 +806,12 @@ impl Session {
             if matches!(name, "IGNOREEOF" | "ignoreeof") && (!flags.global || scope_index.is_none())
             {
                 self.set_eof_variable(var.value.as_deref());
+            }
+            if name == "BASH_ARGV0" && value.is_some() &&
+                (flags.global || !self.locals.iter().any(|scope| scope.variables.contains_key(name))) {
+                if let Some(text) = var.value.as_deref() {
+                    self.arg0 = text.to_owned();
+                }
             }
             if name == "GLOBIGNORE" && value.is_some() {
                 self.shopt.glob.set_ignore(var.value.as_deref());
@@ -816,7 +836,6 @@ impl Session {
             {
                 bindings.variables.remove(name);
             }
-            record_scope(self);
             self.store_variable(name, var, flags.global);
             if let Some(source) = remove_reference
                 && let Some(reference) = self.variables.get_mut(source)

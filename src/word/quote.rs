@@ -33,6 +33,10 @@ pub(crate) fn push_single_quote(output: &mut String, text: &str) {
     output.push('\'');
 }
 
+pub(crate) fn tilde_at(bytes: &[u8], i: usize) -> bool {
+    bytes[i] == b'~' && (i == 0 || matches!(bytes[i - 1], b'=' | b':'))
+}
+
 pub(crate) fn shell_quote(text: &str) -> String {
     if !text.is_empty()
         && text
@@ -54,6 +58,14 @@ pub(crate) fn parameter_quote(text: &str, session: &crate::Session) -> String {
     }
 }
 
+fn escaped_scalar(c: char) -> bool {
+    !c.is_ascii() && c.escape_debug().next() == Some('\\')
+}
+
+fn contains_nonprinting(data: &[u8]) -> bool {
+    !data.is_ascii() && std::str::from_utf8(data).is_ok_and(|s| s.chars().any(escaped_scalar))
+}
+
 pub(crate) fn needs_ansi(data: &[u8], ascii: bool) -> bool {
     let (blocks, tail) = data.as_chunks::<8>();
     let ones = u64::from_ne_bytes([1; 8]);
@@ -67,14 +79,32 @@ pub(crate) fn needs_ansi(data: &[u8], ascii: bool) -> bool {
             || has_zero(word ^ (ones * 0x7f))
     }) || tail
         .iter()
-        .any(|b| b.is_ascii_control() || ascii && !b.is_ascii())
+        .any(|b| b.is_ascii_control() || ascii && !b.is_ascii()) || !ascii && contains_nonprinting(data)
 }
 
 pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
     let mut out = Vec::new();
 
     out.extend_from_slice(b"$'");
-    for &b in data {
+    let mut bytes = data;
+    while let Some((&b, tail)) = bytes.split_first() {
+        if !ascii_locale && b >= 0xc2 {
+            // Inspect a single scalar; validating the remaining string for
+            // every character would turn a Unicode listing into quadratic work.
+            let width = if b < 0xe0 { 2 } else if b < 0xf0 { 3 } else { 4 };
+            if let Some(scalar) = bytes.get(..width).and_then(|v| std::str::from_utf8(v).ok())
+                && let Some(c) = scalar.chars().next()
+            {
+                if escaped_scalar(c) {
+                    for &byte in scalar.as_bytes() { push_octal(&mut out, byte); }
+                } else {
+                    out.extend_from_slice(scalar.as_bytes());
+                }
+                bytes = &bytes[width..];
+                continue;
+            }
+        }
+        bytes = tail;
         match b {
             7 => out.extend_from_slice(b"\\a"),
             8 => out.extend_from_slice(b"\\b"),
@@ -86,12 +116,7 @@ pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
             27 => out.extend_from_slice(b"\\E"),
             b'\'' | b'\\' => out.extend_from_slice(&[b'\\', b]),
             b if b.is_ascii_control() || (ascii_locale && !b.is_ascii()) => {
-                out.extend_from_slice(&[
-                    b'\\',
-                    b'0' + (b >> 6),
-                    b'0' + ((b >> 3) & 7),
-                    b'0' + (b & 7),
-                ]);
+                push_octal(&mut out, b);
             }
             _ => out.push(b),
         }
@@ -99,6 +124,15 @@ pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
     out.push(b'\'');
 
     out
+}
+
+fn push_octal(out: &mut Vec<u8>, b: u8) {
+    out.extend_from_slice(&[
+                    b'\\',
+                    b'0' + (b >> 6),
+                    b'0' + ((b >> 3) & 7),
+                    b'0' + (b & 7),
+                ]);
 }
 
 #[cfg(test)]

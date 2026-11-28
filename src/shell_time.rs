@@ -5,6 +5,28 @@ use std::ffi::CString;
 #[cfg(target_env = "musl")]
 mod regional;
 
+// Limit padding independently of the literal text supplied by the caller.
+// The GNU builtin formats time in a fixed buffer; Tonari also accepts long
+// literal formats, but a short prompt cannot request unbounded expansion.
+const MAX_TIME_PADDING: usize = 64 * 1024;
+
+fn valid_widths(format: &str) -> bool {
+    let mut rest = format;
+    let mut total = 0usize;
+    while let Some((_, next)) = rest.split_once('%') {
+        if let Some(tail) = next.strip_prefix('%') { rest = tail; continue; }
+        let width = next.trim_start_matches(['_', '-', '0', '^', '#']);
+        let code = width.trim_start_matches(|c: char| c.is_ascii_digit());
+        if code.len() != width.len() {
+            let Some(n) = width[..width.len() - code.len()].parse::<usize>().ok() else { return false; };
+            total = total.saturating_add(n);
+            if total > MAX_TIME_PADDING { return false; }
+        }
+        rest = code;
+    }
+    true
+}
+
 struct Clock {
     #[cfg(target_env = "musl")]
     region: tonari_time_locales::Locale,
@@ -43,7 +65,11 @@ impl Clock {
                     .or_else(|_| tz::TimeZone::from_posix_tz(&format!("{name},M3.2.0/2,M11.1.0/2")))
             }),
         }
-        .unwrap_or_else(|_| tz::TimeZone::utc());
+        .or_else(|error| {
+            if let Some(name) = name.as_deref().filter(|n| n.len() >= 3 && n.bytes().all(|c| c.is_ascii_alphabetic())) {
+                tz::TimeZone::from_posix_tz(&format!("{name}0"))
+            } else { Err(error) }
+        }).unwrap_or_else(|_| tz::TimeZone::utc());
         #[cfg(not(target_env = "musl"))]
         let locale =
             CString::new(locale_name.as_str())
@@ -65,16 +91,29 @@ impl Clock {
 }
 
 pub(crate) fn format(session: &Session, format: &str, seconds: libc::time_t) -> String {
-    with_formatter(session, format, |stamp| stamp(seconds))
+    try_format(session, format, seconds).unwrap_or_default()
+}
+
+pub(crate) fn try_format(session: &Session, format: &str, seconds: i64) -> Option<String> {
+    using_clock(session, format, |stamp| stamp(seconds))
 }
 
 pub(crate) fn with_formatter<T>(
+    session: &Session, format: &str, run: impl FnOnce(&dyn Fn(i64) -> String) -> T,
+) -> T {
+    using_clock(session, format, |stamp| run(&|seconds| stamp(seconds).unwrap_or_default()))
+}
+
+fn using_clock<T>(
     session: &Session,
     format: &str,
-    run: impl FnOnce(&dyn Fn(i64) -> String) -> T,
+    run: impl FnOnce(&dyn Fn(i64) -> Option<String>) -> T,
 ) -> T {
     if format == "%s" {
-        return run(&|seconds| seconds.to_string());
+        return run(&|seconds| Some(seconds.to_string()));
+    }
+    if format.as_bytes().iter().any(u8::is_ascii_digit) && !valid_widths(format) {
+        return run(&|_| None);
     }
     let name = session
         .is_exported("TZ")
@@ -90,7 +129,7 @@ pub(crate) fn with_formatter<T>(
             *slot = Some(Clock::new(name, locale.into_owned()));
         }
         let clock = slot.as_ref().unwrap();
-        run(&|seconds| format_in_zone(clock, format, seconds).unwrap_or_default())
+        run(&|seconds| format_in_zone(clock, format, seconds))
     })
 }
 
@@ -147,8 +186,9 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
         let remaining = chars.as_str();
         let width = remaining.trim_start_matches(['-', '_', '^', '#', '0']);
         let tail = width.trim_start_matches(|c: char| c.is_ascii_digit());
-        if tail.len() != remaining.len()
-            && let Some(spec @ ('s' | 'Z' | 'z')) = tail.chars().next()
+        let conversion = tail.strip_prefix(['E', 'O']).unwrap_or(tail);
+        if conversion.len() != remaining.len()
+            && let Some(spec @ ('s' | 'Z' | 'z')) = conversion.chars().next()
         {
             let mut value = match spec {
                 's' => seconds.to_string(),
@@ -173,7 +213,7 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
             } else {
                 digits.parse::<i32>().ok()? as usize
             };
-            let pad = if flags.ends_with('0') || spec == 's' && !flags.contains(['_', '-']) {
+            let pad = if flags.ends_with('0') {
                 '0'
             } else {
                 ' '
@@ -182,7 +222,7 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
             fmt.try_reserve(count).ok()?;
             fmt.extend(std::iter::repeat_n(pad, count));
             fmt.push_str(&value.replace('%', "%%"));
-            chars = tail[1..].chars();
+            chars = conversion[1..].chars();
             continue;
         }
         match chars.next() {
@@ -226,7 +266,9 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
         };
         if n > 0 {
             unsafe { bytes.set_len(n) };
-            return Some(String::from_utf8_lossy(&bytes[1..]).into_owned());
+            bytes.copy_within(1.., 0);
+            bytes.pop();
+            return Some(String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()));
         }
         if size >= max {
             return None;

@@ -20,6 +20,12 @@ if [ "${1-}" = --host-toolchain ]; then
     distribution=no
     shift
 fi
+for argument do
+    if [ "$argument" = -- ]; then
+        echo "Pass Cargo build options directly; rustc arguments use RUSTFLAGS." >&2
+        exit 2
+    fi
+done
 host=$(rustc -vV | sed -n 's/^host: //p')
 case "$host:$distribution" in
     aarch64-apple-darwin:yes|aarch64-*-linux-*:yes|x86_64-*-linux-*:yes)
@@ -46,10 +52,10 @@ case "$host:$distribution" in
 esac
 case "$host" in
     aarch64-apple-darwin)
-        tuning='-C link-arg=-Wl,-dead_strip_dylibs -C target-cpu=native -C llvm-args=--enable-machine-outliner=always -C llvm-args=--outliner-benefit-threshold=384'
+        tuning='-C link-arg=-Wl,-dead_strip_dylibs -C target-cpu=apple-m1 -C llvm-args=--enable-machine-outliner=always -C llvm-args=--outliner-benefit-threshold=384'
         ;;
     aarch64-*-linux-gnu|aarch64-*-linux-musl)
-        tuning='-C target-cpu=native'
+        tuning='-C target-cpu=generic'
         ;;
     x86_64-*-linux-gnu|x86_64-*-linux-musl)
         tuning='-C target-cpu=x86-64-v3'

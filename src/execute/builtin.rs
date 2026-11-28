@@ -311,7 +311,7 @@ pub(super) fn eval_builtin(
         Builtin::Hash => Flow::Continue(hash::run(session, args)),
         Builtin::Shopt => Flow::Continue(session.shopt(args)),
         Builtin::Getopts => session.getopts(args),
-        Builtin::Let => Flow::Continue(crate::arithmetic::let_builtin(args, session)),
+        Builtin::Let => crate::arithmetic::let_builtin(args, session),
         Builtin::Shift => Flow::Continue(session.shift(args)),
         Builtin::Declare => session.declare(
             &cmd.words[0],
@@ -355,11 +355,11 @@ pub(super) fn eval_builtin(
                         }
                     }
                     Err(_) => {
-                        write_error(cmd.words[0].as_bytes(), b": numeric argument required");
+                        diagnostic!("{}: {}: numeric argument required", cmd.words[0], args[0]);
                         Flow::Exit(128)
                     }
                     Ok(_) => {
-                        write_error(cmd.words[0].as_bytes(), b": invalid loop count");
+                        diagnostic!("{}: {}: loop count out of range", cmd.words[0], args[0]);
                         Flow::Break(session.loop_depth, 1)
                     }
                 }
@@ -383,14 +383,14 @@ pub(super) fn eval_builtin(
                 Flow::Continue(apply_array_declarations(cmd, status, session))
             }
         }
-        Builtin::Unset => Flow::Continue(session.unset(args)),
+        Builtin::Unset => session.unset(args),
         Builtin::DirectoryStack => Flow::Continue(session.directory_stack(
             &cmd.words[0],
             args,
             &mut crate::builtins::listing_stdout(&cmd.words[0]),
         )),
         Builtin::AutoCd => {
-            eprintln!("cd -- {}", cmd.words.join(" "));
+            stderr_line!("cd -- {}", cmd.words.join(" "));
             cmd.words.insert(0, "--".into());
             let status = session.directory_builtin("cd", &cmd.words);
             cmd.words.remove(0);
@@ -432,7 +432,7 @@ pub(super) fn eval_builtin(
                 };
                 Flow::Return(code)
             } else {
-                write_error(b"return", b": numeric argument required");
+                diagnostic!("return: {}: numeric argument required", status_operands(args)[0]);
                 Flow::Return(2)
             }
         }
@@ -450,7 +450,7 @@ pub(super) fn eval_builtin(
         }
         Builtin::Exit(code) => Flow::Exit(crate::startup::logout(session, code, last_status)),
         Builtin::InvalidExit => {
-            write_error(b"exit", b": numeric argument required");
+            diagnostic!("exit: {}: numeric argument required", status_operands(args)[0]);
             Flow::Exit(2)
         }
         Builtin::ExtraExitArgs => {
@@ -458,10 +458,11 @@ pub(super) fn eval_builtin(
             Flow::Continue(1)
         }
     };
-    let result = match result {
-        Flow::Exit(code) => Flow::Exit(crate::traps::exit_action(session, code)),
-        other => other,
-    };
+    // Bash exits a function in its dynamic execution environment, including
+    // the function's redirections and positional parameters.
+    let result = if session.function_depth != 0 || session.source_depth != 0 {
+        crate::traps::leaving_scope(session, result)
+    } else { result };
     if !persistent {
         session.restore(bindings);
     }
@@ -698,10 +699,14 @@ fn silent_redirect(
         if backup >= 0 {
             unsafe { libc::close(backup) };
         } else if errno() == libc::EBADF {
-            duplicate(fd.as_raw_fd(), dest)?;
+            if let Err(error) = duplicate(fd.as_raw_fd(), dest) {
+                diagnostic!("redirection: {dest}: {error}");
+                return Ok(redirect_failure(cmd, session));
+            }
             unsafe { libc::close(dest) };
         } else {
-            return Err(io::Error::last_os_error());
+            diagnostic!("redirection: {dest}: {}", io::Error::last_os_error());
+            return Ok(redirect_failure(cmd, session));
         }
     }
     Ok(Flow::Continue(code))
@@ -760,7 +765,7 @@ pub(super) fn run_builtin(
         && let [Action::HereInput(0, bytes)] = actions
         && !bytes.is_empty()
         && bytes.len() <= here_input::PIPE_LIMIT
-        && !session.traps.active()
+        && !session.traps.observes_commands()
         && (cmd.assignments.is_empty()
             || matches!(cmd.assignments.as_slice(), [(key, _)] if key == "IFS" && !session.is_nameref(key) && !session.integer(key)))
         && session.memory_input(matches!(builtin, Builtin::Read), &cmd.words[1..], bytes)
@@ -817,7 +822,7 @@ pub(super) fn run_builtin(
     }
     let mut saved = [const { SavedFd::Unchanged }; 3];
     let mut extra = Vec::new();
-    if !final_command || can_install_trap(builtin, cmd) {
+    if !final_command || can_install_trap(builtin, cmd) || session.traps.catches(0) {
         for action in actions {
             let fd = action.destination();
             if let Some(slot) = saved.get_mut(fd as usize) {
@@ -829,7 +834,7 @@ pub(super) fn run_builtin(
             }
         }
     }
-    let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
+    let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd), session);
     let applied = redirection.is_ok();
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
@@ -852,13 +857,16 @@ pub(super) fn run_builtin(
         }
         return Ok(flow);
     }
-    SavedFd::restore_all(
+    if let Err(error) = SavedFd::restore_all(
         saved
             .into_iter()
             .enumerate()
             .map(|(fd, v)| (fd as RawFd, v))
             .chain(extra),
-    )?;
+    ) {
+        diagnostic!("redirection: cannot restore file descriptor: {error}");
+        if matches!(flow, Flow::Continue(_)) { return Ok(Flow::Continue(1)); }
+    }
     // Failures in a compound command's body are tested by its own statement
     // list. A redirect failure happens before that list can run.
     if let Err(index) = redirection

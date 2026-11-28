@@ -81,6 +81,11 @@ const LIMITS: &[Limit] = &[
 ];
 
 impl Limit {
+    fn in_mode(mut self, posix: bool) -> Self {
+        if posix && matches!(self.flag, 'f' | 'c') { self.unit = 512; }
+        self
+    }
+
     fn current(&self) -> io::Result<libc::rlimit> {
         let mut values = libc::rlimit {
             rlim_cur: libc::PIPE_BUF as libc::rlim_t,
@@ -161,6 +166,9 @@ impl Limit {
         if unsafe { libc::setrlimit(resource, &values) } == -1 {
             Err(io::Error::last_os_error())
         } else {
+            if resource == libc::RLIMIT_STACK {
+                crate::update_stack_budget(values.rlim_cur);
+            }
             Ok(())
         }
     }
@@ -200,10 +208,7 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
     if all {
         let mut lines = Vec::with_capacity(LIMITS.len() * 60);
         for &limit in LIMITS {
-            let mut limit = limit;
-            if posix && matches!(limit.flag, 'f' | 'c') {
-                limit.unit = 512;
-            }
+            let limit = limit.in_mode(posix);
             if let Ok(values) = limit.current()
                 && limit
                     .report(&mut lines, &values, hard && !soft, true)
@@ -226,10 +231,7 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
         }
         let label = requests.len() > 1;
         for (limit, arg) in requests {
-            let mut limit = *limit;
-            if posix && matches!(limit.flag, 'f' | 'c') {
-                limit.unit = 512;
-            }
+            let limit = limit.in_mode(posix);
             let result = limit.current().and_then(|values| match arg {
                 Some(arg) => limit.set(values, arg, soft || !hard, hard || !soft),
                 None => limit.report(out, &values, hard && !soft, label),

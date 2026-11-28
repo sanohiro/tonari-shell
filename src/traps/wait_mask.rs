@@ -148,6 +148,9 @@ impl WaitMask {
     }
 
     pub fn interrupt_status(&self) -> Option<u8> {
+        if crate::INTERRUPTED.load(Relaxed) {
+            return Some(crate::traps::signal_status(libc::SIGINT));
+        }
         let sig = TERMINATING.load(Relaxed);
         if sig != 0 {
             return Some(crate::traps::signal_status(sig));

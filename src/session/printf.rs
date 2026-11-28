@@ -106,6 +106,7 @@ pub(crate) fn run(
         values,
         status: 0,
         locale: None,
+        byte_char_codes: variables.read().ascii_quoting(),
     };
     let mut output = Vec::new();
     if matches!(format.as_str(), "%s\\n" | "%s\n") {
@@ -160,6 +161,7 @@ struct Arguments<'a> {
     values: &'a [String],
     status: u8,
     locale: Option<Numeric>,
+    byte_char_codes: bool,
 }
 
 impl<'a> Arguments<'a> {
@@ -183,7 +185,11 @@ impl<'a> Arguments<'a> {
             return from_char(0);
         }
         if let Some(rest) = value.strip_prefix(['\'', '"']) {
-            return from_char(rest.chars().next().unwrap_or('\0') as u32);
+            return from_char(if self.byte_char_codes {
+                rest.as_bytes().first().copied().unwrap_or(0).into()
+            } else {
+                rest.chars().next().map_or(0, u32::from)
+            });
         }
         let translated;
         let input = if decimal == "." {
@@ -218,8 +224,12 @@ impl<'a> Arguments<'a> {
             *errno = 0;
         }
         let result = parse(input.as_ptr(), &mut end);
-        if unsafe { *errno != 0 || *end != 0 } {
-            diagnostic!("printf: {value}: invalid or out-of-range number");
+        let (error, remaining) = unsafe { (*errno, *end) };
+        if remaining != 0 || error != 0 && error != libc::ERANGE {
+            diagnostic!("printf: {value}: invalid number");
+            self.status = 1;
+        } else if error == libc::ERANGE {
+            diagnostic!("printf: {value}: value out of range");
             self.status = 1;
         }
         result
@@ -652,6 +662,7 @@ fn render(
     out: &mut Vec<u8>,
     variables: &mut Variables,
 ) -> Result<bool, &'static str> {
+    let start = out.len();
     while let Some((&byte, rest)) = input.split_first() {
         input = rest;
         match byte {
@@ -694,11 +705,11 @@ fn render(
                                 -2 => variables.read().started_at,
                                 t => t,
                             };
-                            let stamp = crate::shell_time::format(
+                            let stamp = crate::shell_time::try_format(
                                 variables.read(),
                                 if format.is_empty() { "%X" } else { format },
                                 seconds,
-                            );
+                            ).ok_or("time or format out of range")?;
                             spec.bytes(stamp.as_bytes(), out)?;
                         } else {
                             diagnostic!("printf: warning: invalid time format specification");
@@ -748,7 +759,7 @@ fn render(
                                 diagnostic!("printf: {name}: readonly variable");
                                 args.status = 1;
                             } else {
-                                variables.write().assign(name, &out.len().to_string());
+                                variables.write().assign(name, &(out.len() - start).to_string());
                             }
                         }
                     }
@@ -757,11 +768,7 @@ fn render(
                         let mut locale = numeric::C;
                         if float || spec.has(b'\'') {
                             locale = *args.locale.get_or_insert_with(|| {
-                                ["LC_ALL", "LC_NUMERIC", "LANG"]
-                                    .into_iter()
-                                    .find_map(|key| {
-                                        variables.read().get(key).filter(|s| !s.is_empty())
-                                    })
+                                variables.read().locale_category("LC_NUMERIC")
                                     .as_deref()
                                     .map(numeric::find)
                                     .unwrap_or(numeric::C)
@@ -806,7 +813,8 @@ fn quote(data: &[u8], session: &Session, single: bool) -> Vec<u8> {
     for (i, &b) in data.iter().enumerate() {
         if b.is_ascii_whitespace()
             || b"!\"$&'()*,;<>?[\\]^`{|}".contains(&b)
-            || i == 0 && matches!(b, b'#' | b'~')
+            || i == 0 && b == b'#'
+            || crate::word::quote::tilde_at(data, i)
         {
             out.push(b'\\');
         }

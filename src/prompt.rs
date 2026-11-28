@@ -3,14 +3,8 @@ use std::ffi::CStr;
 use crate::Session;
 
 pub fn render(session: &mut Session, secondary: bool, status: u8, editing: bool) -> String {
-    let (name, fallback) = if secondary {
-        ("PS2", "> ")
-    } else {
-        ("PS1", "tonari$ ")
-    };
-    let Some(prompt) = session.get(name) else {
-        return fallback.to_string();
-    };
+    let name = if secondary { "PS2" } else { "PS1" };
+    let Some(prompt) = session.get(name) else { return String::new() };
     render_mode(session, prompt, status, editing)
 }
 
@@ -138,7 +132,14 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
                 }
                 n as u8
             };
+            let rest = chars.as_str();
             let first = octet(c, chars);
+            if first == 0 {
+                output.push('\\');
+                output.push(c);
+                output.push_str(&rest[..rest.len() - chars.as_str().len()]);
+                return;
+            }
             if first.is_ascii() {
                 output.push(first as char);
             } else {
@@ -173,7 +174,9 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
         }
         c @ ('w' | 'W') => {
             let start = output.len();
-            let path = session.scalar_setting("PWD").unwrap_or_default();
+            let path = session.scalar_setting("PWD").or_else(|| {
+                session.logical_directory_ref().ok()?.to_str().map(std::borrow::Cow::Borrowed)
+            }).unwrap_or_default();
             let home = session
                 .scalar_setting("HOME")
                 .filter(|h| !h.is_empty() && h.as_ref() != "/");
@@ -207,10 +210,9 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
                 let prefix = if pwd.starts_with("~/") { "~/" } else { "" };
                 let path = pwd
                     .strip_prefix("~/")
-                    .unwrap_or(pwd)
-                    .trim_start_matches('/');
+                    .unwrap_or(pwd);
                 if let Some((i, _)) = path.rmatch_indices('/').nth(limit - 1)
-                    && path[..i].chars().take(4).count() > 3
+                    && i > 3
                 {
                     let short = format!("{prefix}.../{}", &path[i + 1..]);
                     output.truncate(start);

@@ -153,9 +153,7 @@ pub(super) fn print_declaration(out: &mut dyn Write, name: &str, var: &Variable)
 pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Cow<'_, str> {
     let ascii = matches!(locale, CharacterLocale::Ascii);
     if !posix
-        && value
-            .bytes()
-            .any(|c| c.is_ascii_control() || ascii && !c.is_ascii())
+        && crate::word::quote::needs_ansi(value.as_bytes(), ascii)
     {
         return String::from_utf8(crate::word::quote::ansi_quote(value.as_bytes(), ascii))
             .unwrap()
@@ -164,7 +162,7 @@ pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Co
     if value == "'" {
         return Cow::Borrowed("\\'");
     }
-    if value.starts_with(['#', '~'])
+    if value.starts_with('#') || memchr::memchr_iter(b'~', value.as_bytes()).any(|i| crate::word::quote::tilde_at(value.as_bytes(), i))
         || value.bytes().any(|c| {
             c.is_ascii_whitespace()
                 || matches!(
@@ -277,7 +275,7 @@ fn double_quote_escape(byte: u8) -> bool {
 }
 
 pub(super) fn print_value(out: &mut dyn Write, value: &str) -> io::Result<()> {
-    if value.bytes().any(|c| c.is_ascii_control()) {
+    if crate::word::quote::needs_ansi(value.as_bytes(), false) {
         return out.write_all(&crate::word::quote::ansi_quote(value.as_bytes(), false));
     }
     out.write_all(b"\"")?;

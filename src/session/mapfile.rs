@@ -11,7 +11,7 @@ struct Options<'a> {
     origin: Option<u32>,
     skip: u32,
     limit: u32,
-    delimiter: u8,
+    delimiter: super::read::Delimiter<'a>,
     trim: bool,
     callback: Option<&'a str>,
     quantum: u32,
@@ -25,7 +25,7 @@ impl<'a> Options<'a> {
             origin: None,
             skip: 0,
             limit: 0,
-            delimiter: b'\n',
+            delimiter: super::read::Delimiter::NEWLINE,
             trim: false,
             callback: None,
             quantum: 5000,
@@ -44,7 +44,7 @@ impl<'a> Options<'a> {
                 let value = crate::builtins::flags::value(flags.as_str(), &mut args)
                     .ok_or((2, "option requires an argument"))?;
                 match flag {
-                    'd' => result.delimiter = value.as_bytes().first().copied().unwrap_or(0),
+                    'd' => result.delimiter = super::read::Delimiter::first(value),
                     'O' => {
                         result.origin =
                             Some(value.parse().map_err(|_| (1, "invalid array origin"))?)
@@ -134,7 +134,8 @@ fn records(
 ) -> io::Result<()> {
     let mut pending = Vec::new();
     let mut skip = options.skip;
-    let delim = options.delimiter;
+    let delimiter = options.delimiter.bytes();
+    let delim = delimiter[0];
     let mut append = |bytes: &[u8], has_nul: bool| -> io::Result<()> {
         if skip > 0 {
             skip -= 1;
@@ -145,9 +146,24 @@ fn records(
         } else {
             bytes
         };
-        store(std::str::from_utf8(bytes).map_err(io::Error::other)?);
+        store(std::str::from_utf8(bytes).map_err(|_| io::Error::other("expected UTF-8 input"))?);
         Ok(())
     };
+    if delimiter.len() > 1 {
+        let last = *delimiter.last().unwrap();
+        loop {
+            let consumed = reader.read_until(last, &mut pending)?;
+            let complete = pending.ends_with(delimiter);
+            if complete || consumed == 0 {
+                if !pending.is_empty() {
+                    let end = pending.len() - if complete && options.trim { delimiter.len() } else { 0 };
+                    append(&pending[..end], true)?;
+                    pending.clear();
+                }
+                if consumed == 0 { return Ok(()); }
+            }
+        }
+    }
     loop {
         let buf = reader.fill_buf()?;
         if buf.is_empty() {
@@ -289,6 +305,7 @@ pub(crate) fn run(
         bytes.clear();
         let mut any = false;
         let mut truncated = false;
+        let mut delimiter_prefix = 0;
         loop {
             if watch {
                 match input.wait(session, last, command, None, true) {
@@ -300,12 +317,43 @@ pub(crate) fn run(
                     Err(flow) => return flow,
                 }
             }
+            // A regular descriptor can return its unused suffix before a
+            // callback runs. Consume only one byte at a time on shared pipes.
+            if input.seekable && !watch && options.delimiter.bytes().len() == 1 {
+                match input.chunk(1, usize::MAX) {
+                    Ok([]) => break,
+                    Ok(chunk) => {
+                        any = true;
+                        let delim = options.delimiter.bytes()[0];
+                        let end = memchr::memchr(delim, chunk);
+                        let consumed = end.map_or(chunk.len(), |i| i + 1);
+                        let retained = consumed - usize::from(end.is_some() && (options.trim || delim == 0));
+                        if !truncated {
+                            let nul = memchr::memchr(0, &chunk[..retained]);
+                            bytes.extend_from_slice(&chunk[..nul.unwrap_or(retained)]);
+                            truncated = nul.is_some();
+                        }
+                        if end.is_some() {
+                            let unused = chunk.len() - consumed;
+                            input.unconsume(unused);
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) => { diagnostic!("{command}: {e}"); return Flow::Continue(1); }
+                }
+            }
             match input.next() {
                 Ok(Some(b)) => {
                     any = true;
-                    if b == options.delimiter {
-                        if !options.trim && b != 0 && !truncated {
-                            bytes.push(b);
+                    if options.delimiter.advance(b, &mut delimiter_prefix) {
+                        if !truncated {
+                            if options.trim {
+                                bytes.truncate(bytes.len() - (options.delimiter.bytes().len() - 1));
+                            } else if b != 0 {
+                                bytes.push(b);
+                            }
                         }
                         break;
                     }
@@ -316,7 +364,7 @@ pub(crate) fn run(
                     }
                 }
                 Ok(None) => break,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted && watch => continue,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => {
                     diagnostic!("{command}: {e}");
                     return Flow::Continue(1);

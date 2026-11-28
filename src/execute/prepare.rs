@@ -101,7 +101,7 @@ impl PreparedCommand {
         if self.literal_has_braces && !session.shopt.braceexpand
             || session.keyword && self.literal_has_keywords
             || session.xtrace
-            || session.traps.active()
+            || session.traps.observes_commands()
             || session.jobs.monitor
         {
             return None;
@@ -356,6 +356,8 @@ pub(super) fn prepare_expanded(
     let mut traced_operands = Vec::new();
     // Each assignment sees its predecessors, while command arguments saw the
     // outer environment. Standalone assignments persist even on redirect failure.
+    let typed_assignment = words.is_empty()
+        || session.posix && words.first().is_some_and(|word| super::special_builtin(word));
     for (mut key, word) in raw.assignments {
         let mut exp = Expansion::with_assignments(
             session,
@@ -489,7 +491,7 @@ pub(super) fn prepare_expanded(
                         let old = append
                             .then(|| exp.session.assoc_value(base, &key).map(str::to_owned))
                             .flatten();
-                        let value = if exp.session.integer(base) {
+                        let value = if typed_assignment && exp.session.integer(base) {
                             exp.session.integer_value(old.as_deref(), &value, append)?
                         } else if append {
                             old.unwrap_or_default() + &value
@@ -521,14 +523,14 @@ pub(super) fn prepare_expanded(
                     Some(i) => exp.session.element(base, i),
                     None => exp.lookup(&key),
                 };
-                let value = if exp.session.integer(base) {
+                let value = if typed_assignment && exp.session.integer(base) {
                     let old = if append {
                         let old = old(&exp).unwrap_or_default();
-                        exp.arithmetic(&old)?
+                        exp.arithmetic_value(&old)?
                     } else {
                         0
                     };
-                    old.wrapping_add(exp.arithmetic(&value)?).to_string()
+                    old.wrapping_add(exp.arithmetic_value(&value)?).to_string()
                 } else if append {
                     if direct_assignment && exp.session.append_plain_scalar(&key, &value) {
                         continue;
@@ -544,14 +546,14 @@ pub(super) fn prepare_expanded(
                 if session.is_nameref(&key) && !Session::valid_reference_target(&value) {
                     return Err(crate::expansion::Error::discard("invalid name reference"));
                 }
-                if direct_assignment {
-                    session.assign_value(&key, value.into());
-                    continue;
-                }
                 if standalone && words.is_empty() {
-                    session.assign(&key, &value);
+                    // The assignment is already visible in the shell. Retaining
+                    // it as a command prefix would incorrectly export it to
+                    // substitutions in subsequent operands.
+                    session.assign_value(&key, value.into());
+                } else {
+                    assignments.push((key, value));
                 }
-                assignments.push((key, value));
             }
         }
     }
@@ -619,7 +621,7 @@ fn expand_prepared_redirects(
         let child = assignment_only || builtin(cmd, last_status, session).is_none();
         let process_scope = session.substitutions.scope();
         let mut isolated =
-            (child && redirects.iter().any(redirection_observable)).then(|| session.clone());
+            (child && redirects.iter().any(|r| redirection_observable(r, session))).then(|| session.clone());
         let mut exp = Expansion::with_assignments(
             isolated.as_mut().unwrap_or(session),
             last_status,

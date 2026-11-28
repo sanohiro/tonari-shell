@@ -57,14 +57,14 @@ pub(super) fn run(
                     .unwrap_or(80);
                 let mut display = menu(items, columns);
                 display.push_str(prompt);
-                eprint!("{display}");
+                stderr_text!("{display}");
             } else {
-                eprint!("{prompt}");
+                stderr_text!("{prompt}");
             }
             match s.read(&[], None, last) {
                 Flow::Continue(0) => {}
                 Flow::Continue(_) => {
-                    println!();
+                    crate::builtins::write_stdout_for("select", b"\n");
                     return Err(Flow::Continue(1));
                 }
                 flow => return Err(flow),

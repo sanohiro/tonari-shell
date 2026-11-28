@@ -42,13 +42,17 @@ fn sequence<const PATHNAME: bool>(
                 return None;
             }
             let mut alternatives = Vec::new();
-            loop {
-                alternatives.push(sequence::<PATHNAME>(source, depth + 1, extended)?);
-                let sep = source.as_bytes().first()?;
+            let closed = loop {
+                let Some(sequence) = sequence::<PATHNAME>(source, depth + 1, extended) else { break false; };
+                alternatives.push(sequence);
+                let Some(&sep) = source.as_bytes().first() else { break false; };
                 *source = &source[1..];
-                if *sep == b')' {
-                    break;
-                }
+                if sep == b')' { break true; }
+            };
+            if !closed {
+                atoms.push(Atom::Text(rest.into()));
+                *source = "";
+                break;
             }
             if bytes[0] == b'@'
                 && alternatives

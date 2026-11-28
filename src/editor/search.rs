@@ -107,9 +107,10 @@ impl ReverseSearch {
         result.filter(|found| found != text)
     }
 
-    pub(super) fn prompt(&self, width: usize) -> String {
+    pub(super) fn prompt(&self, width: usize, display: &mut String) {
         let query = &self.query;
-        let mut display = String::from("(reverse-i-search) `");
+        display.clear();
+        display.push_str("(reverse-i-search) `");
         let visible = if query.len() > super::VIEWPORT_THRESHOLD {
             display.push('…');
             let mut start = query.len().saturating_sub(width * 2);
@@ -120,8 +121,7 @@ impl ReverseSearch {
         } else {
             query
         };
-        super::push_visible(&mut display, visible);
+        super::push_visible(display, visible);
         display.push_str("': ");
-        display
     }
 }

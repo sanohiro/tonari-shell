@@ -48,6 +48,10 @@ pub(super) fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String 
 
 // Query the OS account database for each named expansion. Keep the common
 // result on the stack and retry only when a larger passwd entry needs space.
+pub(crate) fn named_home(name: &str) -> Option<String> {
+    account_field(Some(name), Field::Home)
+}
+
 pub(crate) fn account_home() -> Option<String> {
     static HOME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     HOME.get_or_init(|| account_field(None, Field::Home))

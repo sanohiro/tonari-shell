@@ -176,8 +176,9 @@ impl Session {
     }
 
     pub(super) fn remove_key(&mut self, name: &str, key: &str) {
-        if let Some(var) = self.variables.get_mut(name)
-            && let Ok(map) = var.make_associative()
+        if let Some(var) = self.variables.value_mut(name, false)
+            && let Some(elements) = &mut var.elements
+            && let super::array::Elements::Associative(map) = std::rc::Rc::make_mut(elements)
         {
             map.remove(key);
         }

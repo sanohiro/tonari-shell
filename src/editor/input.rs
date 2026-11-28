@@ -3,6 +3,27 @@ use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::os::fd::RawFd;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub(crate) static RESIZED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn resized(_: libc::c_int) {
+    RESIZED.store(true, Ordering::Relaxed);
+}
+
+fn watch_resize() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| unsafe {
+        let mut previous = std::mem::zeroed::<libc::sigaction>();
+        if libc::sigaction(libc::SIGWINCH, std::ptr::null(), &mut previous) == 0 &&
+            previous.sa_sigaction == libc::SIG_DFL {
+            previous.sa_sigaction = resized as *const () as usize;
+            previous.sa_flags = 0;
+            libc::sigaction(libc::SIGWINCH, &previous, std::ptr::null_mut());
+        }
+    });
+}
+
 pub(super) struct Terminal {
     original: libc::termios,
     bracketed_paste: bool,
@@ -10,6 +31,7 @@ pub(super) struct Terminal {
 
 impl Terminal {
     pub(super) fn enter(bracketed: bool) -> io::Result<Self> {
+        watch_resize();
         let mut old = unsafe { std::mem::zeroed::<libc::termios>() };
         if unsafe { libc::tcgetattr(0, &mut old) } < 0 {
             return Err(io::Error::last_os_error());
@@ -47,7 +69,7 @@ impl Drop for Terminal {
 fn byte() -> io::Result<Option<u8>> {
     let mut key = [0u8];
     loop {
-        match crate::terminal_read(&mut key, true) {
+        match crate::terminal_read(&mut key, true, true) {
             Ok(n) => return Ok((n == 1).then_some(key[0])),
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
             Err(e) => return Err(e),
@@ -67,11 +89,14 @@ pub(crate) fn ready(fd: RawFd, ms: i32) -> bool {
 // Both the key-sequence timer and a containing read -t can bound the wait.
 // Atomically check pending signals before allowing the kernel to sleep.
 pub(super) fn key_ready(session: &Session, millis: i32) -> io::Result<bool> {
-    let delay = std::time::Duration::from_millis(millis as u64);
+    let delay = (millis > 0).then(|| std::time::Duration::from_millis(millis as u64));
     let remaining = crate::remaining_input_time();
-    let wait = remaining.map_or(delay, |t| t.min(delay));
-    let ready = crate::traps::wait_readable(0, Some(wait), Some(&session.traps))?;
-    if !ready && remaining.is_some_and(|t| t <= delay) {
+    let wait = match (delay, remaining) {
+        (Some(d), Some(t)) => Some(t.min(d)),
+        (d, t) => d.or(t),
+    };
+    let ready = crate::traps::wait_readable(0, wait, Some(&session.traps))?;
+    if !ready && remaining.is_some() && remaining == wait {
         return Err(io::ErrorKind::TimedOut.into());
     }
     Ok(ready)
@@ -110,7 +135,7 @@ impl Keys {
         })
     }
 
-    pub(super) fn expand_macro(&mut self, seq: Vec<u8>) -> io::Result<()> {
+    pub(super) fn expand_macro(&mut self, seq: &[u8]) -> io::Result<()> {
         self.expansions += 1;
         if self.expansions > Self::MAX_MACRO_EXPANSIONS
             || self.queued.len().saturating_add(seq.len()) > Self::MAX_QUEUED_BYTES
@@ -118,9 +143,7 @@ impl Keys {
             self.queued.clear();
             io::stderr().write_all(b"\x07")?;
         } else {
-            for key in seq.into_iter().rev() {
-                self.queued.push_front(key);
-            }
+            self.unread(seq);
         }
         Ok(())
     }
@@ -187,9 +210,7 @@ impl Keys {
                 [27, b'[' | b'O', b'D'] => cursor = previous(text, cursor),
                 [27, b'[' | b'O', b'C'] if cursor < text.len() => cursor = next(text, cursor),
                 other => {
-                    for &b in other.iter().rev() {
-                        self.queued.push_front(b);
-                    }
+                    self.unread(other);
                     break;
                 }
             }
@@ -269,9 +290,7 @@ impl Keys {
                         rest = &tail[invalid..];
                     } else {
                         // Display the valid prefix before waiting for a split scalar.
-                        for &b in tail.iter().rev() {
-                            self.queued.push_front(b);
-                        }
+                        self.unread(tail);
                         break;
                     }
                 }
@@ -280,7 +299,7 @@ impl Keys {
         Ok(())
     }
 
-    fn unread(&mut self, bytes: &[u8]) {
+    pub(super) fn unread(&mut self, bytes: &[u8]) {
         for &key in bytes.iter().rev() {
             self.queued.push_front(key);
         }
@@ -387,7 +406,7 @@ impl Keys {
                         displayed = available;
                         painted_at = std::time::Instant::now();
                     }
-                    match crate::terminal_read(&mut chunk[..limit], true) {
+                    match crate::terminal_read(&mut chunk[..limit], true, true) {
                         Ok(0) => break,
                         Ok(n) => n,
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
