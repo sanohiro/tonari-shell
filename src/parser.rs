@@ -336,17 +336,17 @@ pub(crate) fn plain_assignment(command: &str) -> Option<(&str, &str)> {
 }
 
 // Generated eval assignments often change just the value. Construct the same
-// simple-command AST; assignment attributes, traps and exit status stay live.
+// literal assignment as the full parser. Attributes, traps and status stay live.
 pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement> {
     let command = source.strip_suffix('\n').unwrap_or(source);
     let (name, raw) = command.split_once('=')?;
     if !is_identifier(name) {
         return None;
     }
-    let value = if raw.bytes().all(lexer::plain_byte) {
-        raw.to_owned()
+    let spelling = if raw.bytes().all(lexer::plain_byte) {
+        command.to_owned()
     } else if !raw.contains(['\n', '\0']) {
-        if let Some(rest) = raw.strip_prefix("$'") {
+        let value = if let Some(rest) = raw.strip_prefix("$'") {
             let mut chars = rest.chars();
             let decoded = ansi::quoted(&mut chars).ok()?;
             if !chars.as_str().is_empty() {
@@ -359,7 +359,8 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
                 return None;
             }
             quoted.to_owned()
-        }
+        };
+        [name, "=", &value].concat()
     } else {
         return None;
     };
@@ -374,10 +375,7 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
         location,
         condition: Condition::Always,
         negated: false,
-        command: Command::Pipeline(vec![SimpleCommand {
-            assignments: vec![(name.to_owned(), Assignment::Scalar(Word::Literal(value)))],
-            ..Default::default()
-        }]),
+        command: Command::LiteralAssignment(spelling, std::num::NonZeroUsize::new(name.len())?),
     })
 }
 
@@ -495,7 +493,6 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
 }
 
 struct Reader {
-    function_body: bool,
     depth: usize,
     first_line: usize,
     source: Rc<str>,
@@ -537,7 +534,6 @@ impl Reader {
         newlines.extend(memchr::memchr_iter(b'\n', source.as_bytes()));
         Self {
             first_line: source_line(source),
-            function_body: false,
             line_index: std::cell::Cell::new(0),
             depth: 0,
             spans,
@@ -811,15 +807,6 @@ impl Reader {
             Some(compound) => self.compound_stage(compound)?,
             None => self.simple()?,
         };
-        if self.function_body
-            && !self.has_pipe()
-            && first.compound.is_none()
-            && first.redirects.is_empty()
-            && first.assignments.is_empty()
-            && let Some(keywords) = first.keyword_args.inline()
-        {
-            return Ok(Command::Call(FunctionCall::new(first.words, keywords)));
-        }
         if self.has_pipe() {
             first.location = Some(Box::new(self.location(start)));
         }
@@ -1190,10 +1177,7 @@ impl Reader {
         }
         self.alias_newlines(&["{", "if", "while", "until", "for", "case"])?;
         let start = self.position();
-        let outer = std::mem::replace(&mut self.function_body, true);
-        let compound = self.nested(Self::compound);
-        self.function_body = outer;
-        let compound = compound?.ok_or_else(|| {
+        let compound = self.nested(Self::compound)?.ok_or_else(|| {
             if self.peek().is_none() {
                 Error::Incomplete(Incomplete::Message("expected a function body"))
             } else {

@@ -5307,6 +5307,20 @@ history -p '!!:1' '!!:2' '!!:3' '!!:4' '!!:5' '!!:6' '!!:7' '!!:8'""",
                 self.assertEqual((self.cwd / "motion").read_bytes(), b"AAB")
                 (self.cwd / "motion").unlink()
 
+    def test_runtime_review_history_keeps_longer_command_with_tab(self):
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        journal.write_bytes(b"1\t1\t0\t/old\tprintf reached >flag;\t: pick token\n"
+                            b"2\t123\t2\t0\t/new\t: pick token\n" * 2)
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"\x12pick token")
+        self.read_until(fd, b"> : pick token")
+        os.write(fd, b"\x1b[B")
+        self.read_until(fd, b"> printf reached")
+        os.write(fd, b"\r\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "flag").read_bytes(), b"reached")
+
     def test_history_fragment_picker_select_cancel_and_paste(self):
         journal = self.cwd / ".local/state/tonari/history"
         journal.parent.mkdir(parents=True)

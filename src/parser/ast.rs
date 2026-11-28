@@ -42,10 +42,6 @@ impl KeywordArgs {
         }
     }
 
-    pub(super) fn inline(&self) -> Option<u64> {
-        self.other.is_none().then_some(self.plain)
-    }
-
     pub(crate) fn is_empty(&self) -> bool {
         self.plain == 0 && self.other.is_none()
     }
@@ -154,64 +150,12 @@ pub struct Statement {
     pub command: Command,
 }
 
-// Most functions loaded from a startup file are never invoked. Their simple
-// calls only need words and the keyword bitmap until execution first asks for
-// a full stage. The words have already been parsed under the definition's options.
-pub struct FunctionCall {
-    words: std::cell::Cell<Vec<Word>>,
-    keywords: u64,
-    stage: std::cell::OnceCell<Box<SimpleCommand<Word>>>,
-}
-
-impl FunctionCall {
-    pub(super) fn new(words: Vec<Word>, keywords: u64) -> Self {
-        Self {
-            words: words.into(),
-            keywords,
-            stage: Default::default(),
-        }
-    }
-    fn unpack(&self) -> SimpleCommand<Word> {
-        SimpleCommand {
-            words: self.words.take(),
-            keyword_args: KeywordArgs {
-                plain: self.keywords,
-                other: None,
-            },
-            ..Default::default()
-        }
-    }
-    pub(crate) fn stage(&self) -> &SimpleCommand<Word> {
-        self.stage.get_or_init(|| Box::new(self.unpack()))
-    }
-    pub(crate) fn into_stage(mut self) -> SimpleCommand<Word> {
-        self.stage.take().map_or_else(|| self.unpack(), |s| *s)
-    }
-}
-
-impl Clone for FunctionCall {
-    fn clone(&self) -> Self {
-        Self::new(self.stage().words.clone(), self.keywords)
-    }
-}
-impl std::fmt::Debug for FunctionCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.stage().fmt(f)
-    }
-}
-
-impl Command {
-    pub(crate) fn stages(&self) -> Option<&[SimpleCommand<Word>]> {
-        match self {
-            Self::Call(c) => Some(std::slice::from_ref(c.stage())),
-            Self::Pipeline(stages) => Some(stages),
-            _ => None,
-        }
-    }
-}
 impl Statement {
     pub(crate) fn single_stage(&self) -> Option<&SimpleCommand<Word>> {
-        match self.command.stages()? {
+        let Command::Pipeline(stages) = &self.command else {
+            return None;
+        };
+        match stages.as_slice() {
             [cmd] => Some(cmd),
             _ => None,
         }
@@ -296,7 +240,6 @@ pub struct CaseClause {
 pub enum Command {
     Scalar(Box<(String, Word)>),
     LiteralAssignment(String, std::num::NonZeroUsize),
-    Call(FunctionCall),
     Pipeline(Pipeline<Word>),
     Group(Vec<Statement>),
     Timed {

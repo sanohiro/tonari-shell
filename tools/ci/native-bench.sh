@@ -20,6 +20,10 @@ if [[ $SUITE == runtime-review ]]; then
     REFERENCE_BASH="$reference" python3 tests/shell.py "$current" -q -k runtime_review_current_capture
     python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$reference" --timing started --runs 15 --case runtime-current-echo --case current-shell-file-capture > "$out/current-substitution.txt"
   fi
+  REFERENCE_BASH="${reference:-$ref}" python3 tests/shell.py "$current" -q > "$out/shell-tests.txt" 2>&1 || {
+    cat "$out/shell-tests.txt"
+    exit 1
+  }
   exit
 fi
 if [[ $SUITE == expansion-review ]]; then

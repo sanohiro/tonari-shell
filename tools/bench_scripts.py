@@ -75,7 +75,7 @@ CASES = {
         f"IFS='{chars}'; row='" + "".join("x"*128 + chars[j % len(chars)] for j in range(31)) + "x"*128 + "'", 400)
        for chars in (":,", ":,/", ":,/|;")},
     "runtime-ifs": eval_loop('set -- $v', 'echo "$# $4"', "4 d", "v=a:b,c/d; IFS=,:/", 5000),
-    "runtime-eval": eval_loop('eval "${code[i%6]}"', 'echo "$x"', "1", "code=('x=0' 'x=1' 'x=2' 'x=3' 'x=4' 'x=5')", 5000),
+    "runtime-eval": eval_loop('eval "${code[i%6]}"', 'echo "$x"', "1", "code=('x=0; :' 'x=1; :' 'x=2; :' 'x=3; :' 'x=4; :' 'x=5; :')", 5000),
     "review-helper-case": eval_loop('x=$(f "$i")', 'echo "$x"', "v49",
         'f() { local v="$1"; case "$v" in v*) echo "$v";; *) echo "v$v";; esac; }', 50),
     "review-helper-if": eval_loop('x=$(f "/$i")', 'echo "$x"', "49",
@@ -814,7 +814,7 @@ def main():
             if args.spawn_control and case in (
                 "external", "external-env", "redirect-stderr", "pipeline", "merged-pipeline",
                 "merged-pipeline-redirect", "builtin-merged-pipeline",
-                "background-subshell-wait", "descriptor-moves", "external-substitutions",
+                "background-subshell-wait", "descriptor-moves", "external-substitutions", "runtime-file",
                 "glob-sparse", "glob-multi-star", "glob-utf8-once", "glob-utf8-large",
             ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]

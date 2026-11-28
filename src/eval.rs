@@ -80,8 +80,7 @@ fn run_statements<'a>(
         };
         let reports_failure = match subject {
             Command::Pipeline(stages) => stages.len() != 1 || stages[0].compound.is_none(),
-            Command::Call(_)
-            | Command::LiteralAssignment(..)
+            Command::LiteralAssignment(..)
             | Command::Scalar(_)
             | Command::Subshell(_)
             | Command::Test(_)
@@ -166,8 +165,7 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
     let scope = session.substitutions.scope();
     let single = match command.as_ref() {
         Command::Pipeline(stages) => stages.len() == 1,
-        Command::Call(_)
-        | Command::LiteralAssignment(..)
+        Command::LiteralAssignment(..)
         | Command::Scalar(_)
         | Command::Subshell(_)
         | Command::Test(_)
@@ -181,10 +179,6 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
         }
         Cow::Borrowed(Command::Scalar(pair)) => {
             execute::run_scalar(Cow::Borrowed(pair.as_ref()), status, tail, session)
-                .unwrap_or_else(execution_error)
-        }
-        Cow::Borrowed(Command::Call(c)) => {
-            execute::run_single(Cow::Borrowed(c.stage()), status, tail, session)
                 .unwrap_or_else(execution_error)
         }
         Cow::Borrowed(Command::Pipeline(stages)) if stages.len() == 1 => {
@@ -572,8 +566,6 @@ fn run_case(
 
 fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
     match command {
-        Command::Call(c) => execute::run_single(Cow::Owned(c.into_stage()), status, tail, session)
-            .unwrap_or_else(execution_error),
         Command::LiteralAssignment(text, end) => {
             execute::literal_assignment(session, &text, end.get(), status, tail)
                 .unwrap_or_else(execution_error)
@@ -624,12 +616,10 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         Command::Background(mut body) => {
             if body.len() == 1
                 && !body[0].negated
-                && matches!(body[0].command, Command::Pipeline(_) | Command::Call(_))
+                && matches!(body[0].command, Command::Pipeline(_))
             {
-                let stages = match body.pop().unwrap().command {
-                    Command::Pipeline(v) => v,
-                    Command::Call(c) => vec![c.into_stage()],
-                    _ => unreachable!(),
+                let Command::Pipeline(stages) = body.pop().unwrap().command else {
+                    unreachable!()
                 };
                 execute::run_pipeline(stages, status, false, session, true).unwrap_or_else(|e| {
                     diagnostic!("{e}");

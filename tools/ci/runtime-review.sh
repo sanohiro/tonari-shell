@@ -10,7 +10,10 @@ cases=(current-shell-file-capture glob-ignore-simple-class review-length-ascii-w
 while read -r name; do cases+=("$name"); done < <(
   PYTHONPATH=tools python3 -c 'from bench_scripts import CASES; print("\n".join(k for k in CASES if k.startswith("runtime-")))'
 )
-args=()
+control=$(mktemp)
+trap 'rm -f "$control"' EXIT
+cc -O2 tools/bench_spawn.c -o "$control"
+args=(--spawn-control "$control")
 for name in "${cases[@]}"; do args+=(--case "$name"); done
 python3 tools/bench_scripts.py "$current" --previous "$baseline" --bash "$reference" \
   --timing started --runs "$runs" "${args[@]}" > "$out/runtime.txt"

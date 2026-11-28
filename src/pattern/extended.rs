@@ -606,11 +606,16 @@ impl Pattern {
         }
         let mut atoms = self.atoms.as_slice();
         let mut pos = 0;
-        while let [Atom::Text(text), remaining @ ..] = atoms {
-            if !value[pos..].starts_with(text.as_ref()) {
-                return false;
+        while let [
+            edge @ (Atom::Text(_) | Atom::FoldedText(..) | Atom::Choice(_)),
+            remaining @ ..,
+        ] = atoms
+        {
+            match literal_edge(edge, &value[pos..], true) {
+                Ok(Some(rest)) => pos = value.len() - rest.len(),
+                Ok(None) => return false,
+                Err(()) => break, // overlapping alternatives need backtracking
             }
-            pos += text.len();
             atoms = remaining;
         }
         while let [

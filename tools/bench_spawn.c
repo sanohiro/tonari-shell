@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 extern char **environ;
@@ -127,6 +128,22 @@ int main(int argc, char **argv) {
                 !WIFEXITED(status) || WEXITSTATUS(status) != 13) return 1;
         }
         puts("13");
+        return 0;
+    }
+    if (!strcmp(name, "runtime-file.sh")) {
+        static const char contents[] = "contents\n";
+        int fd = open("data", O_CREAT | O_TRUNC | O_WRONLY, 0666);
+        if (fd < 0 || write(fd, contents, sizeof(contents)-1) != sizeof(contents)-1 || close(fd)) return 1;
+        for (int i = 0; i < 500; ++i) {
+            struct stat st;
+            char buf[sizeof(contents)];
+            if (stat("data", &st) || !S_ISREG(st.st_mode)) return 1;
+            fd = open("data", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            if (fd < 0 || fstat(fd, &st) || !S_ISREG(st.st_mode) ||
+                read(fd, buf, sizeof(buf)) != sizeof(contents)-1 ||
+                memcmp(buf, contents, sizeof(contents)-1) || read(fd, buf, 1) != 0 || close(fd)) return 1;
+        }
+        puts("contents");
         return 0;
     }
     if (!strcmp(name, "descriptor-moves.sh")) {
