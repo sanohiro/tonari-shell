@@ -425,7 +425,7 @@ fn assign_value(
         if var.dynamic {
             session.set_dynamic(name, &text);
         }
-        var.value = Some(text);
+        *var.scalar_mut() = Some(text);
     }
     Ok(())
 }
@@ -637,7 +637,7 @@ impl Session {
                     var.readonly = false;
                     var.integer = false;
                     var.letter_case = None;
-                    var.value = None;
+                    *var.scalar_mut() = None;
                     var.elements = None;
                     var.array_assigned = false;
                 }
@@ -842,7 +842,7 @@ impl Session {
         if let Some(var) = entry {
             let mut var = var.clone();
             if var.dynamic || matches!(name, "BASHOPTS" | "SHELLOPTS") {
-                var.value = self.inherited_value(name);
+                *var.scalar_mut() = self.inherited_value(name);
             }
             return Some(var);
         }

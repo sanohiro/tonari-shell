@@ -65,9 +65,16 @@ pub fn echo(args: &[String], session: &Session) -> u8 {
             write_stdout_for("echo", &line[..=word.len()])
         }
         _ => {
-            let mut out = Vec::new();
-            echo_into(args, &mut out, session);
-            write_stdout_for("echo", &out)
+            thread_local! { static BUFFER: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) }; }
+            BUFFER.with_borrow_mut(|out| {
+                out.clear();
+                echo_into(args, out, session);
+                let status = write_stdout_for("echo", out);
+                if out.capacity() > 4096 {
+                    *out = Vec::new();
+                }
+                status
+            })
         }
     }
 }

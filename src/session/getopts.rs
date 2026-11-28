@@ -76,7 +76,7 @@ impl Session {
             let var = self.variables.get_mut("OPTIND").unwrap();
             if index != Some(pos + 1) {
                 use std::fmt::Write;
-                let text = var.value.get_or_insert_with(String::new);
+                let text = var.scalar_mut().get_or_insert_with(String::new);
                 text.clear();
                 write!(text, "{}", pos + 1).unwrap();
             }

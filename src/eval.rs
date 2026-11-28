@@ -215,7 +215,7 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
             c.select,
             &c.header,
             &c.name,
-            c.words.clone(),
+            c.words.as_deref(),
             &c.body,
             status,
         ),
@@ -305,7 +305,7 @@ fn run_for(
     select: bool,
     header: &crate::parser::Location,
     name: &str,
-    words: Option<Vec<crate::word::Word>>,
+    words: Option<&[crate::word::Word]>,
     body: &[Statement],
     status: u8,
 ) -> Flow {
@@ -314,14 +314,16 @@ fn run_for(
         return Flow::Continue(1);
     }
     let implicit_words = words.is_none();
+    let literals = words.filter(|w| !select && w.iter().all(|word| word.as_literal().is_some()));
     let items = match words {
+        Some(_) if literals.is_some() => Vec::new(),
         None => session.positional.as_slice().to_vec(),
         Some(words) => {
             let captured = std::cell::Cell::new(None);
             let mut env = crate::expansion::Expansion::new(session, status, &captured);
             let mut fields = Vec::new();
             for word in words {
-                if let Err(error) = env.append_fields(word, &mut fields) {
+                if let Err(error) = env.append_fields(word.clone(), &mut fields) {
                     error.report("");
                     return error.flow(env.session);
                 }
@@ -338,7 +340,12 @@ fn run_for(
         }
         return select::run(session, name, &items, body, status);
     }
-    let mut items = items.into_iter();
+    let mut items = items.iter().map(String::as_str).chain(
+        literals
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|word| word.as_literal()),
+    );
     repeat(session, body, status, |s, last| {
         let Some(value) = items.next() else {
             return Ok(None);
@@ -357,21 +364,21 @@ fn run_for(
                 }
             });
         }
-        if s.assign_existing_literal(name, &value) {
+        if s.assign_existing_literal(name, value) {
             return Ok(Some(last));
         }
         let error = if s.is_nameref(name) {
-            s.assign_for_reference(name, value).err()
+            s.assign_for_reference(name, value.to_owned()).err()
         } else if s.readonly(name) {
             Some(crate::session::READONLY)
         } else if s.integer(name) {
-            if let Err(error) = s.assign_target(name, &value) {
+            if let Err(error) = s.assign_target(name, value) {
                 diagnostic!("{name}: {error}");
                 return Err(Flow::Discard(1));
             }
             None
         } else {
-            s.assign(name, &value);
+            s.assign(name, value);
             None
         };
         if let Some(error) = error {
@@ -432,7 +439,7 @@ fn run_arithmetic_loop(
         && let Err(flow) = arithmetic(
             session,
             init,
-            &crate::arithmetic::Repeated::Other(init),
+            &crate::arithmetic::Repeated::Other(init, Default::default()),
             status,
         )
     {
@@ -576,7 +583,13 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             body,
         } => run_while(session, until, &condition, &body, status),
         Command::For(c) => run_for(
-            session, c.select, &c.header, &c.name, c.words, &c.body, status,
+            session,
+            c.select,
+            &c.header,
+            &c.name,
+            c.words.as_deref(),
+            &c.body,
+            status,
         ),
         Command::Test(expr) => crate::test_expression::evaluate(&expr, session, status),
         Command::Arithmetic(expr) => crate::arithmetic::command(&expr, session, status, false),
@@ -621,7 +634,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         Command::Case(c) => run_case(
             session,
             &c.header,
-            Cow::Owned(c.word),
+            Cow::Borrowed(&c.word),
             &c.arms,
             status,
             tail,

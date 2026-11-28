@@ -8,6 +8,20 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == runtime-review ]]; then
+  REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k runtime_review
+  bash tools/ci/runtime-review.sh "$current" "$bin/baseline" "$ref" "$out"
+  if ! "$ref" -c 'x=${ :; }' 2>/dev/null; then
+    fixture=$(mktemp -d)
+    download_bash 5.3 0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba "$fixture/bash.tar.gz"
+    tar -xzf "$fixture/bash.tar.gz" -C "$fixture"
+    (cd "$fixture/bash-5.3" && ./configure --without-bash-malloc --disable-nls && make -j"$(getconf _NPROCESSORS_ONLN)") > "$out/bash-build.txt" 2>&1
+    reference="$fixture/bash-5.3/bash"
+    REFERENCE_BASH="$reference" python3 tests/shell.py "$current" -q -k runtime_review_current_capture
+    python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$reference" --timing started --runs 15 --case runtime-current-echo --case current-shell-file-capture > "$out/current-substitution.txt"
+  fi
+  exit
+fi
 if [[ $SUITE == expansion-review ]]; then
   REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -v \
     -k readonly_helper -k compiled_parameter_patterns -k utf8_scalar_length \

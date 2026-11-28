@@ -176,7 +176,7 @@ impl Elements {
 
 impl Variable {
     pub(super) fn make_array(&mut self) -> &mut Elements {
-        let initial = self.value.take();
+        let initial = self.scalar_mut().take();
         self.array_assigned |= initial.is_some();
         Rc::make_mut(
             self.elements
@@ -627,7 +627,7 @@ impl Session {
         if let Some(variable) = self.variables.get_mut(target.as_ref()) {
             variable.declared = true;
             variable.array_assigned = true;
-            variable.value = None;
+            *variable.scalar_mut() = None;
             variable.elements = Some(Rc::new(Elements::Dense(words)));
         } else {
             self.store_elements(&target, Elements::Dense(words), false);
@@ -797,7 +797,7 @@ impl Session {
             return Ok(value);
         }
         let mut current = var.clone();
-        current.value = None;
+        *current.scalar_mut() = None;
         current.elements = Some(Rc::new(std::mem::replace(map, Elements::Dense(Vec::new()))));
         let previous = self.variables.insert(name.into(), current);
         let result = crate::arithmetic::run(expression, self);
@@ -859,7 +859,7 @@ impl Session {
         };
         let mut map = if append {
             var.elements.take().map_or_else(
-                || Elements::Dense(var.value.take().into_iter().collect()),
+                || Elements::Dense(var.scalar_mut().take().into_iter().collect()),
                 Rc::unwrap_or_clone,
             )
         } else {
@@ -923,7 +923,7 @@ impl Session {
             Ok(())
         })();
         var.elements = Some(Rc::new(map));
-        var.value = None;
+        *var.scalar_mut() = None;
         var.declared = true;
         var.array_assigned = true;
         result
@@ -935,7 +935,7 @@ impl Session {
             return;
         }
         variable.declared = true;
-        variable.value = None;
+        *variable.scalar_mut() = None;
         variable.array_assigned = true;
         variable.elements = Some(Rc::new(values));
         self.store_variable(name, variable, global);
@@ -1084,7 +1084,7 @@ impl Session {
             if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
                 array.remove(index);
             } else if index == 0 {
-                var.value = None;
+                *var.scalar_mut() = None;
                 var.declared = false;
             }
         } else if index == 0 && self.inherited_value(name).is_some() {

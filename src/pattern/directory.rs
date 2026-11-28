@@ -7,10 +7,11 @@ pub(super) fn visit_names(
     dir: &str,
     directories_only: bool,
     skip_dots: bool,
+    prefix: &[u8],
     mut visit: impl FnMut(&CStr, u8),
 ) {
     let Ok(path) = CString::new(dir) else { return };
-    let _ = read_names::<false>(&path, false, b"", &mut |name, kind| {
+    let _ = read_names::<false>(&path, false, prefix, &mut |name, kind| {
         let Some(name) = name else {
             return ControlFlow::Continue(());
         };

@@ -223,7 +223,7 @@ fn dollar_word(
         }
         Some('[') => {
             let length = super::modifier::index_end(rest)?;
-            let expression = rest[1..length - 1].into();
+            let expression = std::rc::Rc::new(rest[1..length - 1].to_owned().into());
             *chars = rest[length..].chars();
             word.part(Part::Arithmetic { expression, quoted });
             return Ok(());
@@ -233,7 +233,10 @@ fn dollar_word(
                 *chars = after.chars();
                 match arithmetic_source(chars) {
                     Ok(expression) => {
-                        word.part(Part::Arithmetic { expression, quoted });
+                        word.part(Part::Arithmetic {
+                            expression: std::rc::Rc::new(expression.into()),
+                            quoted,
+                        });
                         return Ok(());
                     }
                     Err(Error::ArithmeticClose) => {}
@@ -1338,6 +1341,13 @@ fn scan_word(
                 protected: false,
             })));
         }
+        // Keep the already scanned assignment prefix when the value contains
+        // quotes or expansions. A colon can introduce a subsequent tilde.
+        assignment = std::num::NonZeroUsize::new(plain);
+        word.literal(&start[..end]);
+        *chars = start[end..].chars();
+        after_colon = start.as_bytes()[end - 1] == b':';
+        started = true;
     }
     if plain > 0
         && start

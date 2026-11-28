@@ -111,7 +111,7 @@ impl Session {
                 .and_then(|_| self.dynamic_number(name));
             if let Some(var) = self.variables.get_mut(name) {
                 if let Some(number) = snapshot {
-                    var.value = Some(number.to_string());
+                    *var.scalar_mut() = Some(number.to_string());
                 }
                 var.exported = !remove;
                 var.declared = true;
@@ -297,7 +297,8 @@ impl Session {
                     }
                 }
             };
-            let base = array::subscript(name).map_or(name, |(base, _)| base);
+            let subscript = array::subscript(name);
+            let base = subscript.map_or(name, |(base, _)| base);
             if !functions_only
                 && (Self::builtin_readonly(base)
                     || self.variables.get(base).is_some_and(|v| v.readonly))
@@ -308,6 +309,7 @@ impl Session {
             }
             let resolve_function = functions_only
                 || !variables_only
+                    && (subscript.is_none() || self.readonly_functions.contains(name))
                     && self
                         .declared_variable(name, false)
                         .is_none_or(|v| !v.declared);
@@ -316,7 +318,7 @@ impl Session {
                 status = 1;
                 continue;
             }
-            if !functions_only && let Some((base, index)) = array::subscript(name) {
+            if !functions_only && let Some((base, index)) = subscript {
                 if matches!(index, "*" | "@") && self.stored_array(base) {
                     if self.shopt.compat <= 51 {
                         self.unset_variable(base);

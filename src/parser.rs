@@ -733,9 +733,19 @@ impl Reader {
             } else {
                 command
             };
-            // Nested lists often contain one statement. Its enum is large.
             if statements.is_empty() {
-                statements.reserve_exact(1);
+                // Size a multi-command body once. Do not allocate several large
+                // statements for the usual one-command condition or case arm.
+                let mut rest = self.tokens.iter();
+                let mut token = rest.next();
+                while matches!(token, Some(Token::End | Token::Newline)) {
+                    token = rest.next();
+                }
+                let more = token.is_some_and(|t| {
+                    !matches!(t, Token::RightParen | Token::EndArm(_))
+                        && !t.keyword().is_some_and(|s| stops.contains(&s))
+                });
+                statements.reserve_exact(if more { 3 } else { 1 });
             }
             statements.push(Statement {
                 location: self.location(start),
@@ -862,7 +872,7 @@ impl Reader {
             let Some(Token::Arithmetic(expr)) = self.tokens.pop_front() else {
                 unreachable!()
             };
-            return Ok(Some(Command::Arithmetic(expr.into())));
+            return Ok(Some(Command::Arithmetic(Box::new(expr.into()))));
         }
         if matches!(self.peek(), Some(Token::LeftParen)) {
             self.tokens.pop_front();
@@ -996,11 +1006,7 @@ impl Reader {
             self.newlines();
         }
         self.expect("esac")?;
-        Ok(Command::Case(Box::new(CaseClause {
-            header,
-            word,
-            arms: Rc::new(arms),
-        })))
+        Ok(Command::Case(Rc::new(CaseClause { header, word, arms })))
     }
 
     fn if_clause(&mut self) -> Result<Command, Error> {
@@ -1399,8 +1405,14 @@ impl Reader {
                         {
                             return Err(Error::Invalid("unexpected reserved word"));
                         }
-                        // Most simple commands have only the name and one operand.
-                        cmd.words.reserve_exact(2);
+                        // A bounded lookahead sizes the argument vector for short commands.
+                        let args = self
+                            .tokens
+                            .iter()
+                            .take(8)
+                            .take_while(|t| matches!(t, Token::Word(_)))
+                            .count();
+                        cmd.words.reserve_exact(1 + args);
                     } else if let Some(name) = assignment {
                         cmd.keyword_args.record(cmd.words.len(), name);
                         if declaration {

@@ -289,7 +289,7 @@ fn regex_match(
     let result = (|| {
         let ignore_case = session.shopt.nocasematch;
         let recent = &mut session.regex[usize::from(ignore_case)];
-        if let Some(compiled) = recent.iter().flatten().find(|r| {
+        if let Some(compiled) = recent.iter().rev().find(|r| {
             r.pattern == expression
                 && r.locale.as_ref().map(std::rc::Rc::as_ptr)
                     == locale.as_ref().map(std::rc::Rc::as_ptr)
@@ -298,8 +298,11 @@ fn regex_match(
         }
         let compiled = Compiled::new(expression.into_owned(), ignore_case, locale)?;
         let result = compiled.search(left);
-        recent.rotate_right(1);
-        recent[0] = Some(std::rc::Rc::new(compiled));
+        const CAPACITY: usize = 64;
+        if recent.len() == CAPACITY {
+            recent.remove(0);
+        }
+        recent.push(std::rc::Rc::new(compiled));
         result
     })()
     .map_err(|()| Flow::Continue(2))?;

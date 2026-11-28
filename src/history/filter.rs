@@ -192,6 +192,7 @@ impl<'a> Filter<'a> {
             }
             let base = self.end;
             let mut checked = 0usize;
+            let mut recent = ["", ""];
             while !rows.is_empty() {
                 if checked.is_multiple_of(256) && waiting() {
                     self.end = base + rows.len() as u64 + 1;
@@ -213,6 +214,21 @@ impl<'a> Filter<'a> {
                 let Some(field) = std::str::from_utf8(row).ok().and_then(command_field) else {
                     continue;
                 };
+                // Consecutive identical records are common after journal imports.
+                // Compare complete records, doubling verified spans within this block.
+                let mut span = row.len() + 1;
+                while let Some(left) = rows.len().checked_sub(span) {
+                    let right = rows.len();
+                    if block.get(right..right + span) != Some(&rows[left..]) {
+                        break;
+                    }
+                    rows = &rows[..left];
+                    span *= 2;
+                }
+                if recent.contains(&field) {
+                    continue;
+                }
+                recent = [field, recent[0]];
                 let decoded;
                 let line = if field.contains('\\') {
                     let Some(value) = decode(field) else { continue };

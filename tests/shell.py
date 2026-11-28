@@ -38,6 +38,41 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_runtime_review_cached_lengths_and_references(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare('''s=abc; out=${#s}; echo "$out"
+s=雪; out=${#s}; echo "$out"
+f() { local s="🐟🐟"; echo "${#s}"; }; f; echo "${#s}"
+printf -v s %s xy; echo "${#s}"; IFS= read -r s <<<z; echo "${#s}"
+target=first; declare -n ref=target chain=ref; copy=$chain; chain=second
+echo "$copy $target"; a=(first); declare -n indexed='a[0]'; indexed=next; echo "$indexed"
+''', 0, b"3\n1\n2\n1\n2\n1\nfirst second\nnext\n", minimum=5)
+
+    def test_runtime_review_braces_and_loop_snapshot(self):
+        self.compare('''printf '<%s> ' pre_{x,{a,b}_{1..2},z}_end; echo
+v=X; printf '<%s> ' {a,}${v} {,b} "q"{x,y}; echo
+a=(one two); for x in "${a[@]}"; do echo "$x"; a=(changed); done
+''', 0, b"<pre_x_end> <pre_a_1_end> <pre_a_2_end> <pre_b_1_end> <pre_b_2_end> <pre_z_end> \n<aX> <X> <b> <qx> <qy> \none\ntwo\n")
+
+    def test_runtime_review_arithmetic_fallback(self):
+        self.compare('''x=0; v=2; for i in 1 2 3; do ((x += (v*3+7)^(i>>1))); done; echo "$x"
+v='++calls'; calls=0; for i in 1 2; do n=$((v+1)); echo "$n $calls"; done
+a=0; v=$((0 && ++a)); v=$((1 ? 5 : ++a)); echo "$a $v"
+echo $((2**3**2))
+''', 0, b"37\n2 1\n3 2\n0 5\n512\n")
+
+    def test_runtime_review_current_capture_effects(self):
+        source = '''i=2; set -- "one two"; x=${ echo "v_$i" "$1"; }; echo "$x"
+x=${ echo "$((++i))"; }; echo "$x $i"
+x=${ printf -v changed %s yes; }; echo "<$x> $changed"
+x=${ printf 'abc%n' count; }; echo "$x $count"
+echo() { printf '[%s]' "$*"; }; x=${ echo hi; }; printf '%s' "$x"'''
+        expected = b"v_2 one two\n3 3\n<> yes\nabc 3\n[hi]"
+        for shell in ((TONARI,) if self.bash_before_53() else (TONARI, BASH)):
+            with self.subTest(shell=shell):
+                result = self.command(shell, source)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
+
     def test_readonly_helper_uses_callee_arguments_and_restores_locals(self):
         self.compare(r'''set -- outside
 v=parent; p=parent

@@ -50,6 +50,26 @@ def listing_loop(command, count):
 
 
 CASES = {
+    "runtime-current-echo": eval_loop('x=${ echo "v_$i"; }', 'echo "$x"', "v_199", count=200),
+    "runtime-brace-comma": eval_loop('set -- {a,b,c,d,e}_{1,2,3,4,5}_{x,y,z,w}', 'echo "$# ${100}"', "100 e_5_w", count=100),
+    "runtime-brace-range": eval_loop('set -- {1..5}_{1..5}_{1..4}', 'echo "$# ${100}"', "100 5_5_4", count=100),
+    "runtime-brace-nested": eval_loop('set -- pre_{a,b_{1,2,3},c_{x,y}}_suf', 'echo "$# $6"', "6 pre_c_y_suf", count=200),
+    **{f"runtime-regex-{n}": eval_loop('p=${patterns[i%n]}; [[ test == test && test =~ $p ]] || exit 1',
+            'echo "${BASH_REMATCH[0]}"', "test", f"n={n}; patterns=(); for ((j=0;j<n;++j)); do patterns+=(\"^(test|item$j)$\"); done", 4000)
+       for n in (4, 5, 20)},
+    "runtime-case-filter": eval_loop('x=${s^^[aeiou]}', 'echo "$x"', "hEllO_Utf8_AbcdE", "s=hello_utf8_abcde", 5000),
+    "runtime-self-append": eval_loop('s="${s}x"', 'echo "${#s}"', "10000", "s=", 10000),
+    "runtime-arithmetic-word": eval_loop('x=$((x+1))', 'echo "$x"', "10000", "x=0", 10000),
+    "runtime-for-words": eval_loop('for w in a b c d e f g h; do v=$w; done', 'echo "$v"', "h"),
+    "runtime-ref-read": eval_loop('x=$r', 'echo "$x"', "hello", "v=hello; declare -n r=v; x=", 10000),
+    "runtime-ref-write": eval_loop('r=hello', 'echo "$v"', "hello", "v=; declare -n r=v", 10000),
+    "runtime-unset-index": eval_loop('unset "a[$i]"', 'echo "${#a[@]}"', "0", "a=({0..4999})", 5000),
+    "runtime-unset-key": eval_loop('m[k$i]=v; unset "m[k$i]"', 'echo "${#m[@]}"', "0", "declare -A m", 5000),
+    "runtime-hash-path": eval_loop('hash -p /bin/ls ls', 'hash -t ls', "/bin/ls"),
+    "runtime-echo-options": listing_loop('echo -ne "one\\ttwo" three', 5000),
+    "runtime-file": eval_loop('x=$(<data)', 'echo "$x"', "contents", "echo contents >data", 500),
+    "runtime-ifs": eval_loop('set -- $v', 'echo "$# $4"', "4 d", "v=a:b,c/d; IFS=,:/", 5000),
+    "runtime-eval": eval_loop('eval "${code[i%6]}"', 'echo "$x"', "1", "code=('x=0' 'x=1' 'x=2' 'x=3' 'x=4' 'x=5')", 5000),
     "review-helper-case": eval_loop('x=$(f "$i")', 'echo "$x"', "v49",
         'f() { local v="$1"; case "$v" in v*) echo "$v";; *) echo "v$v";; esac; }', 50),
     "review-helper-if": eval_loop('x=$(f "/$i")', 'echo "$x"', "49",
@@ -755,7 +775,7 @@ def main():
             script = home / f"{case}.sh"
             script.write_text(source)
             participants = shells
-            if case == "current-shell-file-capture" and subprocess.run(
+            if case in ("current-shell-file-capture", "runtime-current-echo") and subprocess.run(
                 [args.bash.resolve(), "--noprofile", "--norc", "-c", 'x=${ :; }'],
                 env=env, capture_output=True,
             ).returncode:

@@ -85,7 +85,7 @@ impl Values {
 
 // Only ASCII blocks precede the first mixed block, so its start is a UTF-8
 // boundary. A non-ASCII character near the end never forces a second full scan.
-fn character_count(text: &str) -> usize {
+pub(crate) fn character_count(text: &str) -> usize {
     const BLOCK: usize = 1024;
     for (i, bytes) in text.as_bytes().chunks(BLOCK).enumerate() {
         if !bytes.is_ascii() {
@@ -97,6 +97,12 @@ fn character_count(text: &str) -> usize {
 }
 
 pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String>, Error> {
+    if let Some(key) = name.strip_prefix('#')
+        && !env.shadows(key)
+        && let Some(n) = env.session.stored_char_count(key)
+    {
+        return Ok(Some(itoa::Buffer::new().format(n).to_owned()));
+    }
     if let Some(text) = name
         .strip_prefix('#')
         .and_then(|key| env.borrowed_scalar(key))

@@ -155,7 +155,13 @@ impl<'a> Expansion<'a> {
             .rev()
             .find(|(k, _)| k == name)
             .map(|(_, value)| value.as_str())
-            .or_else(|| self.session.stored_scalar(name))
+            .or_else(|| {
+                if self.assignments.is_empty() {
+                    self.session.referenced_scalar(name)
+                } else {
+                    self.session.stored_scalar(name)
+                }
+            })
     }
 
     pub fn lookup(&self, name: &str) -> Option<String> {
@@ -386,6 +392,15 @@ impl<'a> Expansion<'a> {
             home.push('/');
             home.push_str(rest);
             return Ok(home);
+        }
+        if let Some((prefix, name)) = source.split_once('$')
+            && !prefix.starts_with('~')
+            && prefix
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
+            && let Some(value) = self.borrowed_scalar(name)
+        {
+            return Ok([prefix, value].concat());
         }
         if source.starts_with('~') || source.contains(['$', '`', '"', '\'', '\\']) {
             let word = crate::parser::with_subscript_aliases(self.session, source, || {

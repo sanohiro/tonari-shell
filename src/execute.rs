@@ -1042,6 +1042,34 @@ fn assign_existing_word(session: &mut Session, key: &str, word: &Word) -> bool {
     if let Some(value) = word.as_literal() {
         return session.assign_existing_literal(key, value);
     }
+    if let Word::Expanded(parts) = word {
+        use crate::word::Part;
+        let parts = match parts.as_slice() {
+            [Part::Text(empty), rest @ ..] if empty.is_empty() => rest,
+            other => other,
+        };
+        match parts {
+            [Part::Arithmetic { expression, .. }] => {
+                if let Some(Ok(n)) = expression.compiled(session, false) {
+                    return session.assign_existing_literal(key, itoa::Buffer::new().format(n));
+                }
+            }
+            [Part::Parameter { name, .. } | Part::BraceParameter(name)]
+                if name.starts_with('#') =>
+            {
+                if let Some(n) = session.stored_char_count(&name[1..]) {
+                    return session.assign_existing_literal(key, itoa::Buffer::new().format(n));
+                }
+            }
+            [
+                Part::Parameter { name, .. } | Part::BraceParameter(name),
+                Part::Text(suffix) | Part::Pattern(suffix),
+            ] if name == key && session.can_append_scalar(key) => {
+                return session.append_plain_scalar(key, suffix);
+            }
+            _ => {}
+        }
+    }
     word.stored_parameter(session)
         .map(str::to_owned)
         .is_some_and(|value| session.assign_existing_literal(key, &value))

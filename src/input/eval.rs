@@ -41,8 +41,8 @@ pub(crate) fn builtin(session: &mut Session, args: &[String], status: u8) -> Flo
 
 #[derive(Clone, Default)]
 pub(crate) struct EvalCache {
-    seen: [Option<Rc<str>>; 2],
-    parsed: [Option<Rc<Entry>>; 2],
+    seen: Vec<Rc<str>>,
+    parsed: Vec<Rc<Entry>>,
 }
 
 pub(super) struct Entry {
@@ -82,13 +82,21 @@ impl Program {
     }
 }
 
+fn remember<T>(entries: &mut Vec<T>, value: T) {
+    const CAPACITY: usize = 16;
+    if entries.len() == CAPACITY {
+        entries.remove(0);
+    }
+    entries.push(value);
+}
+
 pub(super) fn parse(
     session: &mut Session,
     source: &str,
     eof: bool,
     line: usize,
 ) -> Result<Program, parser::Error> {
-    // Keep two entries and promote only repeated source. A multiline function
+    // Keep a bounded working set and promote only repeated source. A multiline function
     // or generated conditional can exceed a page without being a large script.
     const MAX_CACHED_SOURCE: usize = 16 * 1024;
     if source.len() > MAX_CACHED_SOURCE {
@@ -104,7 +112,7 @@ pub(super) fn parse(
     }
     let extglob = session.shopt.glob.extglob;
     let comments = session.read_comments();
-    if let Some(entry) = session.eval_cache.parsed.iter().flatten().find(|entry| {
+    if let Some(entry) = session.eval_cache.parsed.iter().rev().find(|entry| {
         entry.line == line
             && entry.eof == eof
             && entry.extglob == extglob
@@ -120,8 +128,7 @@ pub(super) fn parse(
     if let Some(statement) = program.first() {
         let cache = &mut session.eval_cache;
         let text = statement.location.full_source();
-        if cache.seen.iter().flatten().any(|seen| &**seen == source) {
-            cache.parsed.rotate_right(1);
+        if cache.seen.iter().rev().any(|seen| &**seen == source) {
             let entry = Rc::new(Entry {
                 source: text.clone(),
                 program,
@@ -133,13 +140,12 @@ pub(super) fn parse(
                 legacy_time: session.posix && session.shopt.compat <= 41,
                 comments,
             });
-            cache.parsed[0] = Some(entry.clone());
+            remember(&mut cache.parsed, entry.clone());
             return Ok(Program::Cached(entry));
         } else {
             // Generated strings often change on every call. Keep the parser's
             // source allocation and only save an AST after the text recurs.
-            cache.seen.rotate_right(1);
-            cache.seen[0] = Some(text.clone());
+            remember(&mut cache.seen, text.clone());
         }
     }
     Ok(Program::Fresh(program))
