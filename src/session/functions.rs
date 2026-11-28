@@ -79,7 +79,7 @@ impl Session {
             Some(var) => var
                 .value
                 .as_deref()
-                .and_then(|v| crate::builtins::integer_in_range(&v))
+                .and_then(crate::builtins::integer_in_range)
                 .unwrap_or(0),
             None => *INHERITED.get_or_init(|| {
                 std::env::var("FUNCNEST")

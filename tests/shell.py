@@ -141,12 +141,13 @@ sleep .2; jobs -l; wait""")
         self.assertEqual(result.returncode, 1)
         self.assertIn(b"select: write error", result.stderr)
         for shell in self.shells_for(5):
-            for before, status in ((":", 0), ("false", 1)):
+            for producer, status in ((":; echo payload", 0), ("false; echo payload", 1),
+                                     ("f(){ false; echo payload; }; f", 1)):
                 reader, writer = os.pipe()
                 os.close(reader)
                 with os.fdopen(writer, "wb") as output:
                     result = subprocess.run([shell, "-c", "trap 'printf \"cleanup:%s\\n\" \"$?\" >&2' EXIT; "
-                                             + before + "; echo payload; echo extra >&2"], cwd=self.cwd,
+                                             + producer + "; echo extra >&2"], cwd=self.cwd,
                                             env=self.env, stdout=output, stderr=subprocess.PIPE, timeout=5)
                 self.assertEqual(result.returncode, -signal.SIGPIPE)
                 self.assertIn(f"cleanup:{status}\n".encode(), result.stderr)

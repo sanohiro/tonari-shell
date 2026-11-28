@@ -1092,7 +1092,7 @@ fn run_external(
                 let code = external::report_exec_error(
                     session,
                     std::path::Path::new(name),
-                    !lookup::path_unset(cmd, session),
+                    !lookup::path_unset(lookup::path(cmd, session), cmd, session),
                     libc::ENOENT,
                 );
                 return Ok(Flow::Continue(code));

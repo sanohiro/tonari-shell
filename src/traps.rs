@@ -975,10 +975,16 @@ pub(crate) fn exit_action(session: &mut Session, code: u8) -> u8 {
         return code;
     };
     session.traps.handling_exit = true;
+    // A function or source can unwind before finish_shell takes the signal.
+    // Let the whole EXIT action run in that scope, then re-deliver the signal.
+    let terminating = TERMINATING.swap(0, Relaxed);
     let _ = session.traps.watch_exit(false);
     let outcome = with_trapsig(session, 0, code, |session| {
         crate::eval_text(session, &exit.command, code)
     });
+    if terminating != 0 {
+        let _ = TERMINATING.compare_exchange(0, terminating, Relaxed, Relaxed);
+    }
     session.traps.handling_exit = false;
     if session.traps.entries.remove(&0).is_some() {
         let _ = session.traps.watch_exit(false);

@@ -151,7 +151,7 @@ impl External {
             (!arguments[0].contains('/'))
                 .then(|| {
                     let path = lookup::path(cmd, session);
-                    if lookup::path_unset(cmd, session) {
+                    if lookup::path_unset(path, cmd, session) {
                         // Bash executes the unqualified name directly after unset PATH.
                         searching_path = false;
                         return Ok(vec![program.clone()]);

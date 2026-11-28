@@ -50,8 +50,8 @@ pub(super) fn path<'a>(cmd: &'a PreparedCommand, session: &'a Session) -> &'a Os
     }
 }
 
-pub(super) fn path_unset(cmd: &PreparedCommand, session: &Session) -> bool {
-    path(cmd, session).is_empty()
+pub(super) fn path_unset(path: &OsStr, cmd: &PreparedCommand, session: &Session) -> bool {
+    path.is_empty()
         && !cmd.assignments.iter().any(|(key, _)| key == "PATH")
         && session.get("PATH").is_none()
 }
