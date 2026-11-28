@@ -84,6 +84,10 @@ CASES = {
                                        "a=({0..99})", 5000),
     "review-negative-index": eval_loop('x=${a[-1]}', 'echo "$x"', "99", "a=({0..99})", 10000),
     "review-length": eval_loop('x=${#s}', 'echo "$x"', "256", "printf -v s '%256s' x", 20000),
+    "glob-ignore-simple-class": eval_loop('a=(brackets/*.txt)', 'echo "${#a[@]}"', "800",
+                                         "GLOBIGNORE='brackets/file_0[56]*.txt'", 5),
+    "conditional-simple-folded-class": eval_loop('[[ $s == +([aBbC]) ]] || exit 1',
+        'echo "$i"', "10000", "shopt -s nocasematch; s=CbABcACBa", 10000),
     "review-length-ascii-wide": eval_loop('x=${#s}', 'echo "$x"', "65536",
                                         "printf -v s '%65536s' x", 250),
     "review-length-mixed-wide": eval_loop('x=${#s}', 'echo "$x"', "65537",
@@ -681,7 +685,7 @@ def main():
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
         if not args.case or "source-functions-repeat" in args.case:
             (home / "functions.sh").write_text(function_source())
-        if not args.case or "glob-bracket-list" in args.case:
+        if not args.case or {"glob-bracket-list", "glob-ignore-simple-class"}.intersection(args.case):
             directory = home / "brackets"
             directory.mkdir()
             for i in range(1000):

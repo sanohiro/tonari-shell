@@ -238,26 +238,46 @@ fn ascii_member(mask: u128, byte: u8) -> bool {
     byte.is_ascii() && mask & (1u128 << byte) != 0
 }
 
+fn parse_members(mut body: &[u8], utf8: bool) -> (bool, Vec<Member>) {
+    let negated = matches!(body.first(), Some(b'!' | b'^'));
+    body = &body[usize::from(negated)..];
+    let mut members = Vec::new();
+    while !body.is_empty() {
+        let (mut member, rest) = Member::read(body, utf8);
+        body = rest;
+        if let (Member::Literal(lo), [b'-', _, ..]) = (&member, rest)
+            && let (Member::Literal(hi), after) = Member::read(&rest[1..], utf8)
+        {
+            member = Member::Range(*lo, hi);
+            body = after;
+        }
+        members.push(member);
+    }
+    (negated, members)
+}
+
+fn ascii_list(body: &[u8], fold: bool) -> Option<u128> {
+    if body.is_empty() {
+        return None;
+    }
+    body.iter().try_fold(0, |mask, &byte| {
+        byte.is_ascii_alphanumeric().then(|| {
+            let member = if fold {
+                byte.to_ascii_lowercase()
+            } else {
+                byte
+            };
+            mask | (1u128 << member)
+        })
+    })
+}
+
 impl Token {
-    fn list(mut body: &[u8], utf8: bool) -> Self {
-        if !body.is_empty() && body.iter().all(u8::is_ascii_alphanumeric) {
-            let members = body.iter().fold(0, |mask, &b| mask | (1u128 << b));
-            return Self::AsciiList(members);
+    fn list(body: &[u8], utf8: bool) -> Self {
+        if let Some(mask) = ascii_list(body, false) {
+            return Self::AsciiList(mask);
         }
-        let negated = matches!(body.first(), Some(b'!' | b'^'));
-        body = &body[usize::from(negated)..];
-        let mut members = Vec::new();
-        while !body.is_empty() {
-            let (mut member, rest) = Member::read(body, utf8);
-            body = rest;
-            if let (Member::Literal(lo), [b'-', _, ..]) = (&member, rest)
-                && let (Member::Literal(hi), after) = Member::read(&rest[1..], utf8)
-            {
-                member = Member::Range(*lo, hi);
-                body = after;
-            }
-            members.push(member);
-        }
+        let (negated, members) = parse_members(body, utf8);
         Self::List { negated, members }
     }
 
@@ -276,23 +296,29 @@ impl Token {
 // members and range endpoints use case-insensitive comparison.
 #[derive(Debug)]
 pub(super) struct CharacterClass {
-    negated: bool,
-    members: Vec<Member>,
+    members: ClassMembers,
     fold: Option<super::CharacterLocale>,
+}
+
+#[derive(Debug)]
+enum ClassMembers {
+    Ascii(u128),
+    General { negated: bool, members: Vec<Member> },
 }
 
 impl CharacterClass {
     pub(super) fn new(pattern: &str, fold: Option<super::CharacterLocale>) -> Self {
-        let Token::List { negated, members } =
-            Token::list(&pattern.as_bytes()[1..pattern.len() - 1], true)
-        else {
-            unreachable!()
+        let body = &pattern.as_bytes()[1..pattern.len() - 1];
+        // Turkish I can fold outside ASCII even when every member is ASCII.
+        let members = if !matches!(fold, Some(super::CharacterLocale::Turkic))
+            && let Some(mask) = ascii_list(body, fold.is_some())
+        {
+            ClassMembers::Ascii(mask)
+        } else {
+            let (negated, members) = parse_members(body, true);
+            ClassMembers::General { negated, members }
         };
-        Self {
-            negated,
-            members,
-            fold,
-        }
+        Self { members, fold }
     }
 
     fn compare(&self, a: char, b: char) -> std::cmp::Ordering {
@@ -318,21 +344,30 @@ impl CharacterClass {
     }
 
     pub(super) fn accepts(&self, c: char) -> bool {
+        let (negated, members) = match &self.members {
+            ClassMembers::Ascii(mask) => {
+                let folded = self
+                    .fold
+                    .map_or(c, |locale| super::mapped_char(c, false, locale));
+                return folded.is_ascii() && ascii_member(*mask, folded as u8);
+            }
+            ClassMembers::General { negated, members } => (*negated, members),
+        };
         let scalar = |bytes: &[u8; 4]| std::str::from_utf8(bytes).ok()?.chars().next();
         let mut buffer = [0; 4];
         let original = packed(c.encode_utf8(&mut buffer).as_bytes());
         let Some(locale) = self.fold else {
-            return self.members.iter().any(|m| m.accepts(&original)) != self.negated;
+            return members.iter().any(|m| m.accepts(&original)) != negated;
         };
         let lower = |c| super::mapped_char(c, false, locale);
         let folded = lower(c);
-        self.members.iter().any(|m| match m {
+        members.iter().any(|m| match m {
             Member::Literal(bytes) => scalar(bytes).is_some_and(|v| lower(v) == folded),
             Member::Range(lo, hi) => scalar(lo).zip(scalar(hi)).is_some_and(|(lo, hi)| {
                 !self.compare(lower(lo), folded).is_gt() && !self.compare(folded, lower(hi)).is_gt()
             }),
             other => other.accepts(&original),
-        }) != self.negated
+        }) != negated
     }
 }
 

@@ -108,6 +108,15 @@ END
 echo "first=${a[0]}"
 ''', 0, b"<a>\n<b>\n0:ab\n0:a b:\n0:ab\nouter\ncallback:two\nfirst=one\n\n", minimum=4)
 
+    def test_simple_lists_in_path_filters_and_folded_extglob(self):
+        self.env["LC_ALL"] = "C"
+        self.compare("""mkdir -p tree; touch tree/a tree/b tree/c
+GLOBIGNORE='tree/[ab]'; printf '%s\n' tree/*
+shopt -s nocasematch
+[[ Abba == +([ab]) ]]; echo "$?"
+[[ cab == +([ab]) ]]; echo "$?"
+rm -r tree""", 0, b"tree/c\n0\n1\n")
+
     def test_static_conditional_rechecks_locale_after_first_use(self):
         locales = subprocess.check_output(["locale", "-a"], text=True).splitlines()
         utf8 = next((name for name in locales if name.lower().replace("-", "") in
