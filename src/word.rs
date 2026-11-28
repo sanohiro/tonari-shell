@@ -303,13 +303,8 @@ impl Word {
         };
         let _nesting = crate::parser::enter_expansion()
             .map_err(|error| crate::expansion::Error::discard(error.message()))?;
-        let literal = |text, quoted| {
-            if quoted {
-                Part::Text(text)
-            } else {
-                Part::Unquoted(text)
-            }
-        };
+        let literal = modifier::scalar_part;
+        let mixed = parts.len() > 1;
         for part in parts.iter_mut() {
             if let Part::PrefixNames { prefix, at, quoted } = part {
                 *part = Part::Elements {
@@ -406,6 +401,7 @@ impl Word {
                 }
             }
             if let Part::Parameter { name, quoted } = part
+                && (mixed || !*quoted)
                 && let Some((base, at, keys)) = array_elements_name(name)
                 && !env.shadows(base) {
                 let mut values = Vec::new();
@@ -666,15 +662,16 @@ impl Word {
         positional: &[String],
     ) -> Vec<String> {
         let mut words = Vec::new();
-        self.append_fields(lookup, positional, Some(&Default::default()), &mut words)
+        self.append_fields(lookup, positional, ||lookup("IFS").map(Into::into), Some(&Default::default()), &mut words)
             .unwrap();
         words
     }
 
-    pub fn append_fields(
+    pub fn append_fields<'s>(
         mut self,
         lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
+        get_ifs: impl FnOnce() -> Option<std::borrow::Cow<'s,str>>,
         globbing: Option<&crate::pattern::GlobOptions>,
         words: &mut Vec<String>,
     ) -> Result<(), crate::expansion::Error> {
@@ -695,7 +692,7 @@ impl Word {
             words.extend_from_slice(positional);
             return Ok(());
         }
-        let ifs = lookup("IFS");
+        let ifs = get_ifs();
         // A standalone, already-resolved expansion can write complete fields
         // directly when no field can be a pathname pattern. Keep small words
         // on the ordinary path and recognize only Bash's three IFS spaces.

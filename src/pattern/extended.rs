@@ -25,6 +25,7 @@ fn sequence<const PATHNAME: bool>(
     extended: bool,
 ) -> Option<Vec<Atom>> {
     let mut atoms = Vec::new();
+    let last_close = std::cell::OnceCell::new();
     while !source.is_empty() {
         let rest = *source;
         let bytes = rest.as_bytes();
@@ -54,6 +55,16 @@ fn sequence<const PATHNAME: bool>(
                 *source = "";
                 break;
             }
+            if !PATHNAME && matches!(bytes[0],b'*'|b'+'|b'@')
+                && let [only] = alternatives.as_mut_slice()
+                && let [Atom::Group(inner, _)] = only.as_slice()
+                && (bytes[0]==b'@' || matches!(*inner,b'*'|b'+')) {
+                let Atom::Group(inner,options)=only.pop().unwrap() else { unreachable!() };
+                let outer=bytes[0];
+                let kind=if outer==b'@' {inner} else if inner==b'*'||outer==b'*' {b'*'} else {b'+'};
+                atoms.push(Atom::Group(kind,options));
+                continue;
+            }
             if bytes[0] == b'@'
                 && alternatives
                     .iter()
@@ -76,6 +87,7 @@ fn sequence<const PATHNAME: bool>(
         }
         let class = &bytes[1..];
         if bytes[0] == b'['
+            && last_close.get_or_init(|| memchr::memrchr(b']',bytes).map(|i|bytes.len()-i)).is_some_and(|distance|distance <= class.len())
             && let Some(end) = bracket::class_end(class)
             && !(PATHNAME && class[..=end].contains(&b'/'))
         {
@@ -523,6 +535,15 @@ impl Pattern {
     }
 
     fn parse_mode<const PATHNAME: bool>(mut text: &str, extended: bool) -> Self {
+        if extended && text.starts_with("@(@(") {
+            let wrappers = text.as_bytes().chunks_exact(2).take_while(|s| *s == b"@(").count();
+            let closing = text.as_bytes().iter().rev().take_while(|&&b| b == b')').count();
+            if closing == wrappers && 3*wrappers <= text.len()
+                && !text[2*wrappers..text.len()-wrappers].contains(['(',')','\\']) {
+                // One outermost @ group suffices even when the inner text has alternatives.
+                text = &text[2*(wrappers-1)..text.len()-(wrappers-1)];
+            }
+        }
         let original = text;
         let atoms = sequence::<PATHNAME>(&mut text, 0, extended)
             .unwrap_or_else(|| vec![Atom::Text(original.into())]);

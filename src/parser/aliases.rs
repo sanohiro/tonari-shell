@@ -179,15 +179,25 @@ impl Reader {
     }
 
     fn replacement_aliases(&self, name: &str, mask_active: bool) -> Aliases {
-        let mut nested = self.aliases.clone();
-        if mask_active {
-            let table = std::rc::Rc::make_mut(nested.0.as_mut().unwrap());
+        if !mask_active { return self.aliases.clone(); }
+        let original=self.aliases.0.as_ref().expect("an alias was found");
+        let masked = || {
+            let mut table=original.as_ref().clone();
             table.remove(name);
-            for frame in &self.alias_frames {
-                table.remove(&frame.name);
+            for frame in &self.alias_frames { table.remove(&frame.name); }
+            Aliases(Some(std::rc::Rc::new(table)))
+        };
+        if !self.alias_frames.is_empty() { return masked(); }
+        type WeakTable=std::rc::Weak<std::collections::BTreeMap<String,String>>;
+        thread_local! { static LAST: RefCell<Option<(WeakTable,String,Aliases)>> =const {RefCell::new(None)}; }
+        LAST.with_borrow_mut(|cache| {
+            if let Some((table,key,replacement))=cache && table.as_ptr()==std::rc::Rc::as_ptr(original) && key==name {
+                return replacement.clone();
             }
-        }
-        nested
+            let replacement=masked();
+            *cache=Some((std::rc::Rc::downgrade(original),name.into(),replacement.clone()));
+            replacement
+        })
     }
 
     // A replacement ending in shell syntax can take bytes from the following

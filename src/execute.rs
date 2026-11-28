@@ -216,6 +216,23 @@ fn stage_expansion(word: &Word, session: &Session) -> bool {
     }
 }
 
+// Plain here-documents need only parameter lookup and concatenation. Anything
+// with escapes, operators or nested shell syntax stays on the Bash parser.
+fn plain_here_parts(mut text: &str, mut part: impl FnMut(&str, Option<&str>) -> bool) -> bool {
+    while let Some(i) = memchr::memchr3(b'$', b'\\', b'`', text.as_bytes()) {
+        if text.as_bytes()[i] != b'$' { return false; }
+        let tail = &text[i+1..];
+        let braced = tail.starts_with('{');
+        let name_and_rest = if braced { &tail[1..] } else { tail };
+        let len = name_and_rest.bytes().take_while(|&b| crate::word::is_name_char(b)).count();
+        let (name, rest) = name_and_rest.split_at(len);
+        if !crate::parser::is_identifier(name) || braced && !rest.starts_with('}') ||
+            !part(&text[..i], Some(name)) { return false; }
+        text = if braced { &rest[1..] } else { rest };
+    }
+    part(text, None)
+}
+
 fn redirection_observable(r: &Redirect<Word>, session: &Session) -> bool {
     if r.variable.is_some() {
         return true;
@@ -224,7 +241,7 @@ fn redirection_observable(r: &Redirect<Word>, session: &Session) -> bool {
         || matches!(r.target, Target::HereDoc { expand: true })
             && r.word
                 .as_literal()
-                .is_some_and(|text| text.contains(['$', '`']))
+                .is_some_and(|text| !plain_here_parts(text, |_, name| name.is_none_or(|name| !stage_parameter(name, session))))
 }
 
 // A parenthesized pipeline stage is already the subshell Bash exposes.
@@ -284,7 +301,8 @@ fn start_raw(
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, raw.compound.as_deref(), launch.background);
         coprocess::after_fork(session);
-        if let Some(command) = raw.compound.as_deref_mut()
+        if matches!(raw.compound.as_deref(), Some(crate::parser::Command::Subshell(_)))
+            && let Some(command) = raw.compound.as_mut().map(std::rc::Rc::make_mut)
             && let crate::parser::Command::Subshell(body) = command
         {
             *command = crate::parser::Command::Group(std::mem::take(body));
@@ -384,7 +402,7 @@ fn start(
         let (bytes, status) = plain.render(session);
         debug_assert!(bytes.len() <= 512);
         let result = std::fs::File::from(output.unwrap()).write_all(&bytes);
-        return Ok(Stage::Status(if result.is_err() { 1 } else { status }));
+        return Ok(Stage::Status(output_status(&cmd.words[0], result, status)));
     }
     if builtin.is_none()
         && launch.group.is_none()
@@ -461,9 +479,10 @@ fn start(
                     Stage::Child(pid)
                 });
             }
-            Err(_) if launch.group.is_some() => {}
-            Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {}
-            Err(e) => return spawn_failure(&cmd.words[0], e),
+            Err(e) if e.raw_os_error().is_some_and(|code| matches!(code, libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE)) => return Err(e),
+            // A child owns both ENOEXEC script fallback and execution errors.
+            // Recheck the path there to match a racing unlink or replacement.
+            Err(_) => {}
         }
     }
     fork_stage(
@@ -522,7 +541,7 @@ fn fork_stage(
         let code = if !apply(&setup, here_pipe_limit(builtin, cmd), session) {
             1
         } else if let Some(external) = external.as_ref() {
-            external.exec(None)
+            external.exec(session, false)
         } else {
             coprocess::after_fork(session);
             let flow = if scoped {
@@ -621,18 +640,6 @@ pub(super) fn capture_external(
     crate::subshell::read_output(std::fs::File::from(reader), pid)
 }
 
-fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
-    let code = error.raw_os_error().unwrap_or(libc::EIO);
-    if matches!(
-        code,
-        libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE
-    ) {
-        return Err(error);
-    }
-    diagnostic!("{name}: {error}");
-    Ok(Stage::Status(exec_status(code)))
-}
-
 pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
     loop {
         if let Some(code) =
@@ -714,6 +721,10 @@ pub fn run(
     run_pipeline(pipeline, last_status, replace, session, false)
 }
 
+pub(crate) fn job_command(source: &str) -> &str {
+    source.trim().trim_end_matches('&').trim_end()
+}
+
 fn job_label(
     pipeline: &[SimpleCommand<Word>],
     background: bool,
@@ -727,14 +738,7 @@ fn job_label(
     if pipeline.iter().any(|cmd| cmd.compound.is_some())
         && let Some(location) = &session.current_command
     {
-        return Some(
-            location
-                .text()
-                .trim()
-                .trim_end_matches('&')
-                .trim_end()
-                .to_owned(),
-        );
+        return Some(job_command(location.text()).to_owned());
     }
     if !background
         && let [cmd] = pipeline
@@ -920,7 +924,7 @@ fn run_external(
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT, session) {
                 executable.exec(
-                    (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
+                    session, cmd.assignments.is_empty() && cmd.redirects.is_empty(),
                 )
             } else {
                 1

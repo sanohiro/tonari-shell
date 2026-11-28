@@ -205,6 +205,8 @@ mod entry_pipe {
     }
 }
 
+static INHERITED_CHLD_IGNORED: AtomicBool = AtomicBool::new(false);
+
 pub fn enter_process() {
     #[cfg(not(tonari_inherit_sigpipe))]
     entry_pipe::restore();
@@ -213,6 +215,7 @@ pub fn enter_process() {
     reset_caught_signals(&[libc::SIGBUS, libc::SIGSEGV]);
     // An inherited SIG_IGN automatically discards child exit status on Linux.
     if disposition(libc::SIGCHLD).is_ok_and(|d| d.sa_sigaction == libc::SIG_IGN) {
+        INHERITED_CHLD_IGNORED.store(true, Relaxed);
         unsafe { libc::signal(libc::SIGCHLD, libc::SIG_DFL); }
     }
 }
@@ -532,6 +535,7 @@ impl Traps {
     }
 
     fn lists_as_ignored(&self, sig: i32) -> bool {
+        if sig == libc::SIGCHLD && INHERITED_CHLD_IGNORED.load(Relaxed) { return true; }
         let bit = signal_bit(sig);
         // Background commands ignore INT and QUIT internally. A signal already
         // ignored on entry is still visible, as is an explicit empty trap.

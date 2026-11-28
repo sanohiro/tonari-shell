@@ -3,16 +3,6 @@ use super::{Component, DirectoryError, MetadataExt, OsStrExt, PathBuf, Rc};
 use std::io::{self, Write};
 use std::path::Path;
 
-fn cwd_handle() -> Option<std::os::fd::OwnedFd> {
-    use std::os::fd::FromRawFd;
-    #[cfg(target_os = "linux")]
-    let access = libc::O_PATH;
-    #[cfg(not(target_os = "linux"))]
-    let access = libc::O_RDONLY;
-    let fd = unsafe { libc::open(c".".as_ptr(), access | libc::O_CLOEXEC | libc::O_DIRECTORY) };
-    (fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
-}
-
 pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
     with_physical_path(|path| Ok(path.to_owned()))
 }
@@ -264,6 +254,12 @@ impl Session {
     }
 
     pub fn directory_stack(&mut self, command: &str, args: &[String], out: &mut dyn Write) -> u8 {
+        #[derive(Clone, Copy, PartialEq)]
+        enum StackOp { List, Push, Pop }
+        let op = match command {
+            "dirs" => StackOp::List, "pushd" => StackOp::Push, "popd" => StackOp::Pop,
+            _ => unreachable!("directory stack builtin dispatch"),
+        };
         let (mut long, mut vertical, mut numbered, mut clear, mut no_cd) =
             (false, false, false, false, false);
         let mut args = args.iter().peekable();
@@ -274,12 +270,12 @@ impl Session {
                 break;
             }
             for flag in arg[1..].chars() {
-                match (command, flag) {
-                    ("dirs", 'l') => long = true,
-                    ("dirs", 'p') => vertical = true,
-                    ("dirs", 'v') => numbered = true,
-                    ("dirs", 'c') => clear = true,
-                    ("pushd" | "popd", 'n') => no_cd = true,
+                match (op, flag) {
+                    (StackOp::List, 'l') => long = true,
+                    (StackOp::List, 'p') => vertical = true,
+                    (StackOp::List, 'v') => numbered = true,
+                    (StackOp::List, 'c') => clear = true,
+                    (StackOp::Push | StackOp::Pop, 'n') => no_cd = true,
                     _ => {
                         diagnostic!("{command}: invalid option -{flag}");
                         return 2;
@@ -309,17 +305,19 @@ impl Session {
                 };
                 Some(i)
             }
-            Some(_) if command != "pushd" => {
-                diagnostic!("{command}: invalid directory stack index");
-                return if command == "popd" { 2 } else { 1 };
+            Some(text) if op != StackOp::Push => {
+                diagnostic!("{command}: {text}: invalid option");
+                let usage = if op == StackOp::Pop { "popd [-n] [+N | -N]" } else { "dirs [-clpv] [+N] [-N]" };
+                stderr_line!("{command}: usage: {usage}");
+                return 2;
             }
             _ => None,
         };
-        if command == "dirs" {
+        if op == StackOp::List {
             return self.show_stack(out, slot, long, vertical, numbered);
         }
         let result = (|| -> io::Result<()> {
-            if command == "popd" {
+            if op == StackOp::Pop {
                 let i = slot.unwrap_or(0);
                 if self.dir_stack.is_empty() {
                     return Err(io::Error::other("directory stack empty"));
@@ -380,7 +378,7 @@ impl Session {
             diagnostic!("{command}: {e}");
             return 1;
         }
-        if command == "pushd" && no_cd && (operand.is_none() || slot.is_some()) {
+        if op == StackOp::Push && no_cd && (operand.is_none() || slot.is_some()) {
             return 0;
         }
         self.show_stack(out, None, false, false, false)
@@ -624,9 +622,6 @@ impl Session {
             };
             // A renamed ancestor can invalidate the logical path while the
             // process still has a valid current directory for a relative chdir.
-            // Keep the old directory open only when a successful chdir still
-            // needs a physical name. A rename cannot invalidate this handle.
-            let rollback = if physical { crate::session::directories::cwd_handle() } else { None };
             let logical = match logical {
                 Some(path) => match std::env::set_current_dir(&path) {
                     Ok(()) => Some(path),
@@ -664,9 +659,14 @@ impl Session {
                 }) {
                     Ok(path) => path,
                     Err(e) => {
-                        if e.kind() == io::ErrorKind::InvalidData && rollback.as_ref()
-                            .is_some_and(|fd| unsafe { libc::fchdir(std::os::fd::AsRawFd::as_raw_fd(fd)) == 0 })
+                        // Physical names outside Tonari's text domain are rare.
+                        // Recover through the previous logical path on this branch
+                        // only. If an ancestor was also renamed, forget the stale
+                        // name and retain OLDPWD for explicit recovery.
+                        if e.kind() == io::ErrorKind::InvalidData && base.as_ref()
+                            .is_ok_and(|old| std::env::set_current_dir(old).is_ok())
                         {
+                            self.hashes.directory_changed();
                             return Err(DirectoryError::Other(e));
                         }
                         self.hashes.directory_changed();

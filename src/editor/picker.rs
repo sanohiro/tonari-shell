@@ -4,7 +4,8 @@ use super::{Keys, Screen};
 use crate::Session;
 use std::fmt::Write as _;
 use std::io::{self, Write as _};
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 fn page_rows(screen: &Screen) -> usize {
     const MAX_ROWS: usize = 8;
@@ -13,24 +14,23 @@ fn page_rows(screen: &Screen) -> usize {
 
 fn label(out: &mut String, text: &str, mut cells: usize) -> usize {
     let start = cells;
-    for c in text.chars() {
-        if c.is_control() {
-            let escaped = super::control_glyph(c);
-            if escaped.len() > cells {
-                break;
-            }
-            cells -= escaped.len();
-            out.extend(escaped);
-        } else {
-            let w = c.width().unwrap_or(0);
-            if w > cells {
-                break;
-            }
-            out.push(c);
-            cells -= w;
+    for cluster in text.graphemes(true) {
+        let w = label_width(cluster);
+        if w > cells {
+            break;
         }
+        cells -= w;
+        super::push_visible(out, cluster);
     }
     start - cells
+}
+
+fn label_width(cluster: &str) -> usize {
+    if cluster.starts_with(char::is_control) {
+        cluster.chars().count() * 2
+    } else {
+        cluster.width()
+    }
 }
 
 fn draw<'a>(
@@ -47,12 +47,8 @@ fn draw<'a>(
     let available = screen.width - prefix;
     let mut remaining = available;
     let mut start = query.len();
-    for (i, c) in query.char_indices().rev() {
-        let w = if c.is_control() {
-            super::control_glyph(c).len()
-        } else {
-            c.width().unwrap_or(0)
-        };
+    for (i, cluster) in query.grapheme_indices(true).rev() {
+        let w = label_width(cluster);
         if w > remaining {
             break;
         }
@@ -107,7 +103,7 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session, query: &mut String) -
         27 => {
             // Disambiguate a lone Escape from an arrow or bracketed paste.
             let timeout = session.bindings.timeout();
-            if keys.queued.is_empty() && !super::input::key_ready(session, timeout.min(50))? {
+            if keys.queued.is_empty() && !super::input::wait_for_key(session, timeout.min(50))? {
                 return Ok(Key::Cancel);
             }
             let Some(introducer) = keys.get()? else {
@@ -120,7 +116,7 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session, query: &mut String) -
             let mut params = [0u8; 3];
             let mut len = 0;
             loop {
-                if keys.queued.is_empty() && !super::input::key_ready(session, timeout)? {
+                if keys.queued.is_empty() && !super::input::wait_for_key(session, timeout)? {
                     return Ok(Key::Ignore);
                 }
                 let Some(b) = keys.get()? else {
@@ -173,9 +169,13 @@ pub(super) fn choose(
     let mut scanned = 0;
     let mut selected: usize = 0;
     let contains = |value: &str, needle: &str| {
-        if !session.bindings.ignore_case { return value.contains(needle); }
+        if !session.bindings.ignore_case {
+            return value.contains(needle);
+        }
         let locale = session.character_locale();
-        value.char_indices().any(|(at,_)| crate::pattern::folded_prefix(&value[at..], needle, locale).is_some())
+        value
+            .char_indices()
+            .any(|(at, _)| crate::pattern::folded_prefix(&value[at..], needle, locale).is_some())
     };
     let rows = page_rows(screen);
     loop {
@@ -192,7 +192,10 @@ pub(super) fn choose(
                 while scanned < choices.len() && hits.len() < wanted {
                     let index = scanned;
                     scanned += 1;
-                    if (!session.bindings.ignore_case && finder.find(choices[index].as_bytes()).is_some()) || (session.bindings.ignore_case && contains(&choices[index], &query)) {
+                    if (!session.bindings.ignore_case
+                        && finder.find(choices[index].as_bytes()).is_some())
+                        || (session.bindings.ignore_case && contains(&choices[index], &query))
+                    {
                         hits.push(index);
                     }
                 }

@@ -323,13 +323,19 @@ pub(crate) fn with_subscript_aliases<T>(
     // Names resolved by the earlier read take precedence over later aliases.
     let table = match (frozen, live) {
         (Some(first), Some(second)) if !Rc::ptr_eq(first, second) => {
-            let mut combined = second.as_ref().clone();
-            combined.extend(
-                first
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone())),
-            );
-            Rc::new(combined)
+            type Table = std::collections::BTreeMap<String,String>;
+            struct Entry { frozen: std::rc::Weak<Table>, live: std::rc::Weak<Table>, merged: Rc<Table> }
+            thread_local! { static LAST: std::cell::RefCell<Option<Entry>>=const {std::cell::RefCell::new(None)};}
+            LAST.with_borrow_mut(|cache| {
+                if let Some(entry)=cache && entry.frozen.as_ptr()==Rc::as_ptr(first) && entry.live.as_ptr()==Rc::as_ptr(second) {
+                    return entry.merged.clone();
+                }
+                let mut merged=second.as_ref().clone();
+                merged.extend(first.iter().map(|(key,value)|(key.clone(),value.clone())));
+                let merged=Rc::new(merged);
+                *cache=Some(Entry{frozen:Rc::downgrade(first),live:Rc::downgrade(second),merged:merged.clone()});
+                merged
+            })
         }
         _ => Rc::clone(table),
     };
@@ -556,6 +562,10 @@ fn scalar_assignment(name: String, mut word: Word) -> (String, Assignment<Word>)
     (name, Assignment::Scalar(word))
 }
 
+fn duplicate_stdout(line: usize) -> Redirect<Word> {
+    Redirect {line, variable: None, fd: 2, target: Target::Duplicate, word: Word::Literal("1".into())}
+}
+
 impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         let mut newlines = READER_NEWLINES.take();
@@ -632,6 +642,13 @@ impl Reader {
             end,
             line: self.first_line + line,
         }
+    }
+
+    fn previous_line(&self) -> usize {
+        let i=self.position().saturating_sub(1);
+        if self.alias_source.is_some() { return self.location(i).line; }
+        let start=self.spans.get(i).map_or(self.source.len(), |span| span.0);
+        self.first_line + self.newlines.partition_point(|&n| n<start)
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -850,13 +867,7 @@ impl Reader {
         let mut pipeline = vec![first];
         while self.has_pipe() {
             if matches!(self.tokens.pop_front(), Some(Token::PipeBoth)) {
-                pipeline.last_mut().unwrap().redirects.push(Redirect {
-                    line: self.location(self.position().saturating_sub(1)).line,
-                    variable: None,
-                    fd: 2,
-                    target: Target::Duplicate,
-                    word: Word::Literal("1".into()),
-                });
+                pipeline.last_mut().unwrap().redirects.push(duplicate_stdout(self.previous_line()));
             }
             loop {
                 self.newlines();
@@ -894,7 +905,7 @@ impl Reader {
 
     fn compound_stage(&mut self, compound: Command) -> Result<SimpleCommand<Word>, Error> {
         let mut stage = SimpleCommand {
-            compound: Some(Box::new(compound)),
+            compound: Some(std::rc::Rc::new(compound)),
             ..Default::default()
         };
         while self.has_redirect() {
@@ -1284,7 +1295,7 @@ impl Reader {
         token: Token,
         redirects: &mut Vec<Redirect<Word>>,
     ) -> Result<(), Error> {
-        let line = self.location(self.position().saturating_sub(1)).line;
+        let line = self.previous_line();
         if matches!(token, Token::Redirect(..) | Token::BothRedirect(_)) {
             self.alias_at(false, Some(&[]))?;
         }
@@ -1309,13 +1320,7 @@ impl Reader {
                     target,
                     word,
                 });
-                redirects.push(Redirect {
-                    line,
-                    variable: None,
-                    fd: 2,
-                    target: Target::Duplicate,
-                    word: Word::Literal("1".into()),
-                });
+                redirects.push(duplicate_stdout(line));
             }
             Token::Redirect(fd, target) => {
                 let Some(Token::Word(LexWord { word, .. })) = self.operand() else {

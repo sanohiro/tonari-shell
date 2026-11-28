@@ -5,10 +5,31 @@ use std::path::{Path, PathBuf};
 use crate::cli::Invocation;
 use crate::{Flow, Session, input};
 
+// A login shell spawned by a normal sudo/su login already has matching IDs.
+// When invoked with unequal IDs, drop them before reading shell-controlled
+// environment or files. Tonari does not provide a set-ID execution facility.
+pub(crate) fn settle_credentials(privileged: bool) -> io::Result<bool> {
+    unsafe {
+        let uid = libc::getuid();
+        let gid = libc::getgid();
+        if uid == libc::geteuid() && gid == libc::getegid() { return Ok(false); }
+        if privileged {
+            return Err(io::Error::other("retaining elevated effective credentials is unsupported"));
+        }
+        if libc::setregid(gid, gid) != 0 || libc::setreuid(uid, uid) != 0
+            || libc::geteuid() != uid || libc::getegid() != gid
+        {
+            return Err(io::Error::other("cannot drop elevated credentials"));
+        }
+    }
+    Ok(true)
+}
+
 #[derive(Default)]
 pub(crate) struct Environment {
     pub pwd: bool,
     ssh: bool,
+    skip_startup_files: bool,
     pub shell_level: i64,
     pub execution_string: bool,
     pub posix: bool,
@@ -19,9 +40,10 @@ pub(crate) struct Environment {
 }
 
 impl Environment {
-    pub fn read(session: &mut Session) -> Self {
+    pub fn read(session: &mut Session, changed_ids: bool) -> Self {
         use std::ffi::CStr;
-        let mut settings = Self::default();
+        let mut settings = Self { skip_startup_files: changed_ids, ..Self::default() };
+        let import = !session.privileged && !changed_ids;
         let mut lower_eof = None;
         let mut entry = crate::execute::inherited_env();
 
@@ -53,9 +75,9 @@ impl Environment {
                     b"IGNOREEOF" => settings.ignore_eof = Some(utf8().unwrap_or("").into()),
                     b"ignoreeof" => lower_eof = Some(utf8().unwrap_or("").into()),
                     b"BASH_COMPAT" => settings.compat = utf8().map(str::to_owned),
-                    b"SHELLOPTS" if !session.privileged => settings.shellopts = utf8().map(str::to_owned),
-                    b"BASHOPTS" if !session.privileged => settings.bashopts = utf8().map(str::to_owned),
-                    _ if key.starts_with(b"BASH_FUNC_") && !session.privileged => {
+                    b"SHELLOPTS" if import => settings.shellopts = utf8().map(str::to_owned),
+                    b"BASHOPTS" if import => settings.bashopts = utf8().map(str::to_owned),
+                    _ if key.starts_with(b"BASH_FUNC_") && import => {
                         session.import_function(bytes)
                     }
                     _ => {}
@@ -247,20 +269,12 @@ pub fn defer_interactive_exit(session: &mut Session) -> bool {
         )
 }
 
-// An unset HOME uses the account database. An explicitly empty HOME selects no
-// personal startup file and must never turn a dotfile into a relative path.
-pub(crate) fn startup_home(session: &Session) -> Option<PathBuf> {
-    session.get("HOME").or_else(crate::word::account_home)
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
-}
-
 pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {
     if !session.login || session.shell_pid() != std::process::id() || session.logout_started {
         return code;
     }
     session.logout_started = true;
-    let home = startup_home(session).map(|h| h.join(".bash_logout"));
+    let home = session.personal_home().map(|h| Path::new(h.as_ref()).join(".bash_logout"));
     let system = cfg!(target_os = "linux").then(|| PathBuf::from("/etc/bash.bash_logout"));
     for path in home.into_iter().chain(system) {
         if let Ok(file) = open_script(&path)
@@ -277,7 +291,7 @@ fn bashrc(session: &mut Session, invocation: &Invocation) -> Flow {
     if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/bash.bashrc")) {
         return exit;
     }
-    invocation.rcfile.clone().or_else(|| startup_home(session).map(|p| p.join(".bashrc")))
+    invocation.rcfile.clone().or_else(|| session.personal_home().map(|p| Path::new(p.as_ref()).join(".bashrc")))
         .and_then(|path| optional(session, &path)).unwrap_or(Flow::Continue(0))
 }
 
@@ -288,7 +302,7 @@ fn remote_stdin() -> bool {
 }
 
 pub fn initialize(session: &mut Session, invocation: &Invocation, env: &Environment) -> Flow {
-    if invocation.options.check {
+    if invocation.options.check || env.skip_startup_files {
         return Flow::Continue(0);
     }
     if !invocation.login && !invocation.norc && !invocation.as_sh && !session.privileged
@@ -301,7 +315,7 @@ pub fn initialize(session: &mut Session, invocation: &Invocation, env: &Environm
         if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/profile")) {
             return exit;
         }
-        if let Some(home) = startup_home(session) {
+        if let Some(home) = session.personal_home().map(|s| PathBuf::from(s.as_ref())) {
             let profiles: &[&str] = if invocation.as_sh {
                 &[".profile"]
             } else {

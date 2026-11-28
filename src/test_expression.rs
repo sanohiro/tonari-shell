@@ -326,7 +326,9 @@ fn regex_search(
             && r.locale.as_ref().map(std::rc::Rc::as_ptr)
                 == locale.as_ref().map(std::rc::Rc::as_ptr)
     }) {
-        index
+        // Repeated expressions should survive a stream of one-off regexes.
+        if index + 1 < recent.len() { recent[index..].rotate_left(1); }
+        recent.len() - 1
     } else {
         let compiled = Compiled::new(expression.into_owned(), ignore_case, locale)
             .map_err(|()| Flow::Continue(2))?;

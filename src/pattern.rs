@@ -113,6 +113,10 @@ pub(crate) fn unfinished_star_escape(text: &str) -> bool {
         .is_some_and(|prefix| prefix.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0)
 }
 
+pub(crate) fn trailing_escape(text: &str) -> bool {
+    text.ends_with('\\') && text.bytes().rev().take_while(|&b| b == b'\\').count() % 2 != 0
+}
+
 impl<T: AsRef<str>> Matcher<T> {
     pub(crate) fn new(pattern: T) -> Self {
         Self::compile(pattern, false)
@@ -134,6 +138,12 @@ impl<T: AsRef<str>> Matcher<T> {
         }
         if unfinished_star_escape(text) {
             return Self::Invalid;
+        }
+        if !pathname && trailing_escape(text) {
+            if !text[..text.len()-1].contains(['*','?','[','\\']) { return Self::Literal(pattern); }
+            let mut quoted = text.to_owned();
+            quoted.push('\\');
+            return CString::new(quoted).map_or(Self::Invalid, Self::Native);
         }
         if let Some(list) = text.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
             && !list.is_empty()

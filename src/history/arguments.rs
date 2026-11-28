@@ -37,7 +37,7 @@ fn successful_rows<'a>(bytes: &'a [u8], needle: &str) -> Vec<(&'a str, &'a str, 
     let mut positions = HashMap::new();
     for (i, row) in bytes.rsplit(|&b| b == b'\n').enumerate() {
         if i % 64 == 0 {
-            crate::editor::preview::poll();
+            crate::editor::preview::poll_typeahead();
         }
         let Ok(row) = std::str::from_utf8(row) else {
             continue;
@@ -100,7 +100,7 @@ pub(crate) fn candidates(
     let mut scores = HashMap::new();
     for (i, (raw_dir, raw_line, occurrences)) in groups.into_iter().enumerate() {
         if i % 64 == 0 {
-            crate::editor::preview::poll();
+            crate::editor::preview::poll_typeahead();
         }
         let Some(dir) = decode(raw_dir) else { continue };
         let dir = Path::new(&dir);

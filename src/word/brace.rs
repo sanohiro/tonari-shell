@@ -86,14 +86,9 @@ impl Range {
     }
 
     fn value(&self, index: u64) -> String {
-        let n = self.number(index);
-        if self.letters {
-            char::from(n as u8).to_string()
-        } else if self.width == 0 {
-            n.to_string()
-        } else {
-            format!("{n:0width$}", width = self.width)
-        }
+        let mut text = String::new();
+        self.append_value(index, &mut text);
+        text
     }
 }
 

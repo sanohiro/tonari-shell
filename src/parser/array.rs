@@ -92,24 +92,7 @@ impl Reader {
                         "unfinished array assignment",
                     )));
                 }
-                Some(unexpected) => {
-                    // Resume only after the matching closing parenthesis. A later
-                    // physical line is still array text until that delimiter.
-                    let mut depth = 1;
-                    for token in std::iter::once(&unexpected).chain(&self.tokens) {
-                        match token {
-                            Token::LeftParen | Token::ArrayStart => depth += 1,
-                            Token::RightParen => {
-                                depth -= 1;
-                                if depth == 0 {
-                                    return Err(Error::ArrayToken);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    return Err(Error::ArrayToken);
-                }
+                Some(_) => return Err(Error::ArrayToken),
             }
         }
     }

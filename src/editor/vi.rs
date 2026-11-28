@@ -147,7 +147,10 @@ impl State {
         }
         let range = start.min(end)..end.max(start);
         if !range.is_empty() {
-            session.editor_kill.entry(false).push_str(&text[range.clone()]);
+            session
+                .editor_kill
+                .entry(false)
+                .push_str(&text[range.clone()]);
             if operator != Some(ViYank) {
                 undo.record(text, range.clone(), 0, *cursor, false);
                 *cursor = range.start;

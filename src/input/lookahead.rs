@@ -36,7 +36,7 @@ pub(super) fn file_group(
     session: &Session,
     file: &File,
     meta: &std::fs::Metadata,
-) -> Option<Vec<parser::Statement>> {
+) -> Option<(Vec<parser::Statement>, usize)> {
     if !meta.is_file() || !(GROUP_MIN_BYTES as u64..=8 * 1024 * 1024).contains(&meta.len()) {
         return None;
     }
@@ -50,7 +50,8 @@ pub(super) fn file_group(
     file.read_exact_at(&mut bytes[prefix.len()..], prefix.len() as u64)
         .ok()?;
     // pread preserves the offset for the ordinary incremental fallback.
-    whole_group(session, std::str::from_utf8(&bytes).ok()?, 1)
+    let program = whole_group(session, std::str::from_utf8(&bytes).ok()?, 1)?;
+    Some((program, 1 + memchr::memchr_iter(b'\n', &bytes).count()))
 }
 
 // Adjacent function declarations can share one source buffer. Only commit

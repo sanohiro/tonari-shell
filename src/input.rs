@@ -34,7 +34,9 @@ pub(crate) fn read_spare(file: &File, output: &mut Vec<u8>, limit: usize) -> io:
 // still be available to a child which reads stdin (for example, "cat\n...").
 pub fn stdin_script(session: &mut Session, check: bool) -> Flow {
     match stdin_reader() {
-        Ok((reader, shared_offset)) => run(session, reader, shared_offset, true, None, 0, check),
+        Ok((reader, shared_offset)) => {
+            run(session, reader, shared_offset, true, None, (0, 1), check)
+        }
         Err(e) => error(e, 1),
     }
 }
@@ -112,7 +114,7 @@ pub fn file_script(
         }
     }
     if let Some(meta) = &metadata
-        && let Some(program) = file_group(session, &file, meta)
+        && let Some((program, next_line)) = file_group(session, &file, meta)
     {
         let mut file = file;
         let flow = if check {
@@ -125,11 +127,23 @@ pub fn file_script(
         };
         if let Flow::Continue(code) = flow
             && !session.onecmd
-            && file.metadata().is_ok_and(|current| current.len() > meta.len())
+            && file
+                .metadata()
+                .is_ok_and(|current| current.len() > meta.len())
         {
-            if let Err(e) = file.seek(io::SeekFrom::Start(meta.len())) { return error(e, 1); }
+            if let Err(e) = file.seek(io::SeekFrom::Start(meta.len())) {
+                return error(e, 1);
+            }
             return match PrivateFile::new(file) {
-                Ok(file) => run(session, BufReader::new(file), false, false, None, code, check),
+                Ok(file) => run(
+                    session,
+                    BufReader::new(file),
+                    false,
+                    false,
+                    None,
+                    (code, next_line),
+                    check,
+                ),
                 Err(e) => error(e, 1),
             };
         }
@@ -146,7 +160,7 @@ pub fn file_script(
             if reader.fill_buf().is_ok_and(executable_header) {
                 return error("cannot execute binary file", 126);
             }
-            run(session, reader, false, false, file_len, status, check)
+            run(session, reader, false, false, file_len, (status, 1), check)
         }
         Err(e) => error(e, 1),
     }
@@ -247,8 +261,14 @@ fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut St
 
 // After the parser identifies an open delimiter, ordinary physical lines
 // cannot finish it. Retry on syntax, NUL, heredocs and history expansion.
-pub(crate) fn still_open(reason: Option<parser::Incomplete>, text: &str, session: &Session) -> bool {
-    if session.reads_aliases() { return false; }
+pub(crate) fn still_open(
+    reason: Option<parser::Incomplete>,
+    text: &str,
+    session: &Session,
+) -> bool {
+    if session.reads_aliases() {
+        return false;
+    }
     let line = text.as_bytes();
     use parser::Incomplete::*;
     let plain = |b: &u8| !b.is_ascii() || b.is_ascii_alphanumeric() || b" _-+:./=,\t\n".contains(b);
@@ -256,9 +276,11 @@ pub(crate) fn still_open(reason: Option<parser::Incomplete>, text: &str, session
         Some(CompoundEnd(close)) => {
             // A complete, independent command with no outer terminator can only
             // extend the pending body. Never defer quotes, here-docs or syntax errors.
-            !text.contains(close) && !text.contains("<<")
-                && (parser::validate_tail(text, session, 1) ||
-                    close == "esac" && text.trim_end().ends_with(";;")
+            !text.contains(close)
+                && !text.contains("<<")
+                && (parser::validate_tail(text, session, 1)
+                    || close == "esac"
+                        && text.trim_end().ends_with(";;")
                         && parser::validate_tail(&format!("case x in\n{text}\nesac"), session, 1))
         }
         Some(SingleQuote) => memchr::memchr2(b'\'', 0, line).is_none(),
@@ -377,18 +399,20 @@ fn run(
     mut shared_offset: bool,
     from_stdin: bool,
     file_len: Option<u64>,
-    status: u8,
+    start: (u8, usize),
     check: bool,
 ) -> Flow {
     let mut assignment_value = String::new();
-    let mut base_line = 1;
+    let (status, mut base_line) = start;
     let mut input = Vec::new();
     let mut state = ScriptState::new(status);
+    if base_line > 1 {
+        state.record(status);
+    }
     loop {
         let line_start = input.len();
         let n = match reader.read_until(b'\n', &mut input) {
             Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return error(e, 1),
         };
         if session.verbose && n != 0 {
@@ -476,8 +500,10 @@ fn run(
             && session.jobs.is_empty()
             && let Some(command) = text.strip_suffix('\n')
             && (assign_buffered_scalar(session, command, &mut assignment_value)
-                || matches!(command.trim_ascii(), ":" | "true") && !session.reads_aliases()
-                    && !session.functions.contains_key(command.trim_ascii()) && !session.disabled_builtins.contains(command.trim_ascii()))
+                || matches!(command.trim_ascii(), ":" | "true")
+                    && !session.reads_aliases()
+                    && !session.functions.contains_key(command.trim_ascii())
+                    && !session.disabled_builtins.contains(command.trim_ascii()))
         {
             session.current_command = Some(parser::Location::label(command.into(), base_line));
             session.pipe_status.single(0);

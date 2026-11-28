@@ -186,7 +186,7 @@ fn as_number(word: &mut Word, env: &mut Expansion<'_>) -> Result<i64, Error> {
     env.arithmetic_value(&text)
 }
 
-fn scalar_part(text: String, quoted: bool) -> Part {
+pub(super) fn scalar_part(text: String, quoted: bool) -> Part {
     if quoted {
         Part::Text(text)
     } else {

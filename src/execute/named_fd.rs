@@ -190,7 +190,7 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
                 Ok((flow, commit))
             } else {
                 Ok((
-                    Flow::Continue(External::new(&cmd, session)?.exec(None)),
+                    Flow::Continue(External::new(&cmd, session)?.exec(session, false)),
                     false,
                 ))
             }

@@ -75,7 +75,7 @@ pub(super) fn substitute(
     expand_amp: bool,
 ) -> String {
     let pattern = compiled.text;
-    if crate::pattern::unfinished_star_escape(pattern) {
+    if crate::pattern::trailing_escape(pattern) {
         return text;
     }
     let fold = compiled.fold;

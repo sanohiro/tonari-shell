@@ -5,7 +5,7 @@ use crate::Flow;
 use std::io::{self, BufRead, Read};
 use std::os::fd::{AsRawFd, BorrowedFd};
 
-struct Options<'a> {
+pub(crate) struct Options<'a> {
     name: &'a str,
     fd: i32,
     origin: Option<u32>,
@@ -18,7 +18,7 @@ struct Options<'a> {
 }
 
 impl<'a> Options<'a> {
-    fn parse(args: &'a [String]) -> Result<Self, (u8, &'static str)> {
+    fn parse(args: &'a [String]) -> Result<Self, (u8, String)> {
         let mut result = Self {
             name: "MAPFILE",
             fd: 0,
@@ -39,26 +39,26 @@ impl<'a> Options<'a> {
                     continue;
                 }
                 if !"dOnsucC".contains(flag) {
-                    return Err((2, "invalid option"));
+                    return Err((2, format!("-{flag}: invalid option")));
                 }
                 let value = crate::builtins::flags::value(flags.as_str(), &mut args)
-                    .ok_or((2, "option requires an argument"))?;
+                    .ok_or_else(|| (2, format!("-{flag}: option requires an argument")))?;
                 match flag {
                     'd' => result.delimiter = super::read::Delimiter::first(value),
                     'O' => {
                         result.origin =
-                            Some(value.parse().map_err(|_| (1, "invalid array origin"))?)
+                            Some(value.parse().map_err(|_| (1, format!("{value}: invalid array origin")))?)
                     }
-                    'n' => result.limit = value.parse().map_err(|_| (1, "invalid line count"))?,
-                    's' => result.skip = value.parse().map_err(|_| (1, "invalid line count"))?,
-                    'u' => result.fd = value.parse().map_err(|_| (1, "invalid file descriptor"))?,
+                    'n' => result.limit = value.parse().map_err(|_| (1, format!("{value}: invalid line count")))?,
+                    's' => result.skip = value.parse().map_err(|_| (1, format!("{value}: invalid line count")))?,
+                    'u' => result.fd = value.parse().map_err(|_| (1, format!("{value}: invalid file descriptor")))?,
                     'C' => result.callback = Some(value),
                     'c' => {
                         result.quantum = value
                             .parse()
                             .ok()
                             .filter(|&n| n > 0)
-                            .ok_or((1, "invalid callback quantum"))?
+                            .ok_or_else(|| (1, format!("{value}: invalid callback quantum")))?
                     }
                     _ => unreachable!(),
                 }
@@ -68,8 +68,9 @@ impl<'a> Options<'a> {
         if let Some(name) = args.first() {
             result.name = name;
         }
-        if !is_identifier(result.name) {
-            return Err((1, "invalid array name"));
+        let name = result.name;
+        if !is_identifier(name) {
+            return Err((1, format!("{name}: not a valid identifier")));
         }
         Ok(result)
     }
@@ -195,29 +196,30 @@ fn records(
 }
 
 #[inline(never)]
-pub(super) fn memory_eligible(session: &Session, args: &[String]) -> bool {
-    Options::parse(args).is_ok_and(|opts| {
-        opts.fd == 0
-            && opts.limit == 0
-            && opts.callback.is_none()
-            && session.memory_array_target(opts.name)
-    })
+pub(super) fn prepare_memory<'a>(session: &Session, args: &'a [String], bytes: &'a [u8]) -> Option<super::MemoryInput<'a>> {
+    let opts = Options::parse(args).ok()?;
+    (opts.fd == 0 && opts.limit == 0 && opts.callback.is_none()
+        && session.memory_array_target(opts.name)).then_some(super::MemoryInput::Mapfile(opts, bytes))
 }
 
 pub(crate) fn run(
     session: &mut Session,
     command: &str,
     args: &[String],
-    mut last: u8,
+    last: u8,
     here: Option<(i32, &[u8])>,
 ) -> Flow {
-    let mut options = match Options::parse(args) {
+    let options = match Options::parse(args) {
         Ok(options) => options,
         Err((code, message)) => {
             diagnostic!("{command}: {message}");
             return Flow::Continue(code);
         }
     };
+    run_parsed(session, command, options, last, here)
+}
+
+pub(super) fn run_parsed(session: &mut Session, command: &str, options: Options<'_>, mut last: u8, here: Option<(i32, &[u8])>) -> Flow {
     let fd = options.fd;
     if crate::execute::fd::is_private(fd) || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
         diagnostic!("{command}: {fd}: invalid file descriptor");
@@ -233,7 +235,7 @@ pub(crate) fn run(
     let here = here
         .filter(|&(source, _)| source == fd && destination == options.name)
         .map(|(_, bytes)| bytes);
-    options.name = &destination;
+    let options = Options { name: &destination, ..options };
     let origin = i64::from(options.origin.unwrap_or(0));
     let integer = session.integer(options.name);
     let letter_case = session
@@ -300,6 +302,7 @@ pub(crate) fn run(
     }
     let mut skip = options.skip;
     let mut count = 0u64;
+    let mut callback_command = String::new();
     let mut bytes = Vec::new();
     while options.limit == 0 || count < u64::from(options.limit) {
         bytes.clear();
@@ -389,10 +392,12 @@ pub(crate) fn run(
         {
             // A callback can read the same descriptor or replace it.
             drop(input);
-            let callback_command = format!(
-                "{callback} {index} {}",
-                crate::word::quote::single_quote(line)
-            );
+            callback_command.clear();
+            callback_command.push_str(callback);
+            callback_command.push(' ');
+            callback_command.push_str(itoa::Buffer::new().format(index));
+            callback_command.push(' ');
+            crate::word::quote::push_single_quote(&mut callback_command, line);
             match crate::eval_text(session, &callback_command, last) {
                 Flow::Continue(code) => last = code,
                 flow => return flow,

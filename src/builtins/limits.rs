@@ -148,7 +148,7 @@ impl Limit {
                 .filter(|_| arg.bytes().all(|c| c.is_ascii_digit()))
                 .and_then(|n| n.checked_mul(self.unit))
                 .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, format!("{arg}: invalid limit"))
+                    io::Error::new(io::ErrorKind::InvalidInput, format!("{arg}: invalid number"))
                 })?,
         };
         let resource = self
@@ -237,7 +237,7 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
                 None => limit.report(out, &values, hard && !soft, label),
             });
             if let Err(error) = result {
-                diagnostic!("ulimit: {}: {error}", limit.name);
+                diagnostic!("ulimit: {}: {}", limit.name, crate::startup::error_message(&error));
                 return 1;
             }
         }

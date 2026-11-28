@@ -45,6 +45,7 @@ impl HereDocHint {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct Pending {
     index: usize,
     delimiter: String,
@@ -184,15 +185,57 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
     Ok((text, quoted))
 }
 
-pub(super) fn collect(
-    source_len: usize,
-    chars: &mut Chars<'_>,
-    tokens: &mut [Token],
-    pending: &mut Vec<Pending>,
-    final_input: bool,
-) -> Result<(), Error> {
-    for doc in pending.drain(..) {
-        let start = source_len - chars.as_str().len();
+// An early substitution closer can place a here-document body after its
+// surrounding word. Keep physical ranges only until the outer lexer returns.
+thread_local! {
+    static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static RANGES: std::cell::RefCell<Vec<(usize,usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static ANCESTORS: std::cell::RefCell<Vec<Pending>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+pub(super) struct Scan;
+impl Scan {
+    pub(super) fn enter() -> Self { SCANS.set(SCANS.get()+1); Self }
+}
+impl Drop for Scan {
+    fn drop(&mut self) {
+        let depth=SCANS.get()-1;
+        SCANS.set(depth);
+        if depth==0 { RANGES.with_borrow_mut(Vec::clear); }
+    }
+}
+
+pub(super) struct Ancestors(usize);
+pub(super) fn remember(earlier: &[Pending]) -> Ancestors {
+    ANCESTORS.with_borrow_mut(|v| {let start=v.len(); v.extend_from_slice(earlier); Ancestors(start)})
+}
+impl Drop for Ancestors {
+    fn drop(&mut self) { ANCESTORS.with_borrow_mut(|v|v.truncate(self.0)); }
+}
+
+pub(super) fn skip(chars: &mut Chars<'_>) {
+    RANGES.with_borrow(|ranges| while let Some(&(_,len))=ranges.iter().find(|&&(addr,n)| addr==chars.as_str().as_ptr().addr() && n<=chars.as_str().len()) {
+        *chars=chars.as_str()[len..].chars();
+    });
+}
+
+pub(super) fn after_closer(source: &str, after: &str, tokens: &mut [Token], pending: &mut Vec<Pending>) -> Result<(),Error> {
+    if pending.is_empty() {return Ok(());}
+    let tail=after.split_once('\n').map_or("", |(_,tail)|tail);
+    let mut cursor=tail.chars();
+    ANCESTORS.with_borrow(|earlier| -> Result<(),Error> {
+        for doc in earlier { skip(&mut cursor); body(&mut cursor,doc,false,false)?; }
+        Ok(())
+    })?;
+    skip(&mut cursor);
+    let start=cursor.as_str();
+    collect(source.len(),&mut cursor,tokens,pending,false)?;
+    let consumed=start.len()-cursor.as_str().len();
+    if consumed>0 { RANGES.with_borrow_mut(|ranges|ranges.push((start.as_ptr().addr(),consumed))); }
+    Ok(())
+}
+
+fn body(chars: &mut Chars<'_>, doc: &Pending, final_input: bool, capture: bool) -> Result<String,Error> {
         let mut body = String::new();
         let mut continued = String::new();
         let mut was_continued = false;
@@ -201,7 +244,7 @@ pub(super) fn collect(
             if remaining.is_empty() {
                 if !final_input {
                     return Err(Error::HereDoc(HereDocHint {
-                        delimiter: doc.delimiter,
+                        delimiter: doc.delimiter.clone(),
                         quoted: doc.quoted,
                         strip_tabs: doc.strip_tabs,
                         continued: was_continued,
@@ -240,12 +283,26 @@ pub(super) fn collect(
             if line == doc.delimiter {
                 break;
             }
-            body.push_str(line);
-            body.push('\n');
+            if capture { body.push_str(line); body.push('\n'); }
             continued.clear();
         }
-        tokens[doc.index] = Token::HereBody(body, (start, source_len - chars.as_str().len()));
+    Ok(body)
+}
+
+pub(super) fn collect(
+    source_len: usize,
+    chars: &mut Chars<'_>,
+    tokens: &mut [Token],
+    pending: &mut Vec<Pending>,
+    final_input: bool,
+) -> Result<(), Error> {
+    for doc in pending.drain(..) {
+        skip(chars);
+        let start = source_len - chars.as_str().len();
+        let text = body(chars,&doc,final_input,true)?;
+        tokens[doc.index]=Token::HereBody(text,(start,source_len-chars.as_str().len()));
     }
+    skip(chars);
     Ok(())
 }
 

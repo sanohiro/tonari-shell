@@ -136,9 +136,20 @@ fn substitute(value: &str, memory: &Memory, global: bool) -> io::Result<String> 
     Ok(result)
 }
 
-fn replace_event_words(value: &str, memory: &Memory, global: bool, by_word: bool, extglob: bool) -> io::Result<String> {
-    if !by_word { return substitute(value, memory, global); }
-    let (old, new) = memory.substitution.as_ref().ok_or_else(|| error("no previous substitution"))?;
+fn replace_event_words(
+    value: &str,
+    memory: &Memory,
+    global: bool,
+    by_word: bool,
+    extglob: bool,
+) -> io::Result<String> {
+    if !by_word {
+        return substitute(value, memory, global);
+    }
+    let (old, new) = memory
+        .substitution
+        .as_ref()
+        .ok_or_else(|| error("no previous substitution"))?;
     let mut result = String::new();
     let mut start = 0;
     for (a, b) in crate::parser::history_designator_spans(value, extglob) {
@@ -148,7 +159,9 @@ fn replace_event_words(value: &str, memory: &Memory, global: bool, by_word: bool
             start = a + at + old.len();
         }
     }
-    if start == 0 { return Err(error("substitution failed")); }
+    if start == 0 {
+        return Err(error("substitution failed"));
+    }
     result.push_str(&value[start..]);
     Ok(result)
 }
@@ -300,7 +313,9 @@ fn expand_event(
                 memory
                     .as_deref()
                     .ok_or_else(|| error("no previous substitution"))?,
-                global, by_word, extglob,
+                global,
+                by_word,
+                extglob,
             )?,
             _ => return Err(error("unsupported history modifier")),
         };
@@ -327,7 +342,8 @@ pub(crate) fn expand_line<'a>(
         return Ok(unchanged());
     };
     let history = session.history.as_deref();
-    if quote.is_none() && let Some(q) = quick
+    if quote.is_none()
+        && let Some(q) = quick
         && let Some(rest) = line.strip_prefix(q)
     {
         return quick_substitution(session, q, rest);
@@ -422,6 +438,7 @@ pub(crate) fn expand_line<'a>(
         }
         let hist = history.map_or(&[][..], |h| &h.lines[..]);
         let prev = || hist.last().map(String::as_str);
+        let event_start = input;
         let value = if input.starts_with(['^', '$', '*', '%']) {
             prev()
         } else if input.starts_with(event) {
@@ -511,7 +528,12 @@ pub(crate) fn expand_line<'a>(
                 .map(String::as_str)
         };
         let value = expand_event(
-            value.ok_or_else(|| error("event not found"))?,
+            value.ok_or_else(|| {
+                error(&format!(
+                    "{event}{}: event not found",
+                    &event_start[..event_start.len() - input.len()]
+                ))
+            })?,
             &mut input,
             &mut session.history_expansion,
             session.shopt.glob.extglob,

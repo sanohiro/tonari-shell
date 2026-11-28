@@ -1506,7 +1506,9 @@ fn scan_word(
                 }
                 word.push(c);
             }
-            '~' if braces != 0 || chars.as_str().starts_with('{') => {
+            '~' if braces != 0 || !started && chars.as_str().find(|c: char| c == '{' || c == '/' || separator(c))
+                .is_some_and(|i| chars.as_str()[i..].starts_with('{') && valid_tilde_user(&chars.as_str()[..i])) => {
+                pattern_context = true;
                 let tilde = if chars.as_str().starts_with('+') {
                     chars.next();
                     "~+"
@@ -1589,9 +1591,11 @@ fn scan(
     brace_substitution: bool,
     mut resume_aliases: Option<(usize, crate::alias::Aliases)>,
 ) -> Result<Lexed<'_>, Error> {
+    let _here_scan=here_doc::Scan::enter();
     let mut chars = source.chars();
     let mut parentheses = 0usize;
     let mut saw_case = false;
+    let mut brace_groups = 0usize;
     let mut alias_opens_group = false;
     let sub_aliases = if substitution && super::POSIX.get() {
         super::aliases::current()
@@ -1643,18 +1647,19 @@ fn scan(
             chars = rest.chars();
             continue;
         }
-        if brace_substitution
-            && c == '}'
-            && command_position(&tokens)
-            && Reader::new(tokens.clone(), spans.clone(), &source[..offset])
-                .list(&[])
-                .is_ok()
-        {
-            if !pending_docs.is_empty() {
-                return Err(Error::Invalid("here-document must finish before command substitution closes"));
+        if brace_substitution && c == '}' && command_position(&tokens) {
+            if brace_groups > 0 && chars.as_str()[1..].chars().next().is_none_or(separator) {
+                brace_groups -= 1;
+            } else if Reader::new(tokens.clone(), spans.clone(), &source[..offset]).list(&[]).is_ok() {
+                chars.next();
+                here_doc::after_closer(source, chars.as_str(), &mut tokens, &mut pending_docs)?;
+                return Ok((tokens, spans, chars.as_str()));
             }
+        }
+        if c == '-' && matches!(tokens.last(), Some(Token::Redirect(_, Target::Duplicate | Target::OutputWord))) {
             chars.next();
-            return Ok((tokens, spans, chars.as_str()));
+            tokens.push(Token::Word(LexWord { word: Word::Literal("-".to_owned()), protected: false, assignment: None }));
+            continue;
         }
         let pattern = pattern_next.take();
         if pattern == Some(false)
@@ -1705,9 +1710,7 @@ fn scan(
                         ))
                     );
                 if !inner_closer {
-                    if !pending_docs.is_empty() {
-                        return Err(Error::Invalid("here-document must finish before command substitution closes"));
-                    }
+                    here_doc::after_closer(source, chars.as_str(), &mut tokens, &mut pending_docs)?;
                     return Ok((tokens, spans, chars.as_str()));
                 }
             }
@@ -1719,6 +1722,7 @@ fn scan(
                 continue;
             }
             let token = if c == '\n' {
+                here_doc::skip(&mut chars);
                 if !pending_docs.is_empty() {
                     here_doc::collect(source.len(), &mut chars, &mut tokens, &mut pending_docs, final_input)?;
                 }
@@ -1759,15 +1763,17 @@ fn scan(
                 continue;
             }
         }
-        let Some(token) = scan_word(
+        let ancestors = (!pending_docs.is_empty()).then(|| here_doc::remember(&pending_docs));
+        let token = scan_word(
             &mut chars,
             c,
             &tokens,
             array_level == Some(parentheses),
             final_input,
             extended,
-        )?
-        else {
+        )?;
+        drop(ancestors);
+        let Some(token) = token else {
             continue;
         };
         let Token::Word(LexWord {
@@ -1776,6 +1782,10 @@ fn scan(
             assignment,
         }) = token
         else {
+            if brace_substitution && matches!(token,Token::Reserved("{"))
+                && command_position(&tokens) && !chars.as_str().trim_start_matches([' ','\t']).starts_with([')','|']) {
+                brace_groups += 1;
+            }
             saw_case |= substitution && matches!(token, Token::Reserved("case"));
             tokens.push(token);
             continue;

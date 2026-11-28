@@ -163,10 +163,7 @@ builtin_registry! { args, last_status;
     "printf" => Builtin::Printf,
     "pwd" => Builtin::Directory,
     "read" => Builtin::Read,
-    "return" => Builtin::Return(match status_operands(args).first() {
-            None => Some(last_status),
-            Some(s) => s.trim().parse::<i64>().ok().map(|n| n as u8),
-        }),
+    "return" => Builtin::Return(status_value(status_operands(args), last_status)),
     "set" => Builtin::Set,
     "shift" => Builtin::Shift,
     "source" => Builtin::Source,
@@ -208,15 +205,13 @@ fn status_operands(args: &[String]) -> &[String] {
     }
 }
 
+fn status_value(args: &[String], previous: u8) -> Option<u8> {
+    args.first().map_or(Some(previous), |arg| arg.trim().parse::<i64>().ok().map(|n| n as u8))
+}
+
 fn exit_builtin(args: &[String], last_status: u8) -> Builtin {
     let args = status_operands(args);
-    let status = match args.first() {
-        None => last_status,
-        Some(s) => match s.trim().parse::<i64>() {
-            Ok(n) => n as u8,
-            Err(_) => return Builtin::InvalidExit,
-        },
-    };
+    let Some(status) = status_value(args, last_status) else { return Builtin::InvalidExit; };
     if args.len() > 1 {
         Builtin::ExtraExitArgs
     } else {
@@ -252,12 +247,7 @@ pub(super) fn eval_builtin(
             write_error(b"logout", b": not login shell: use `exit'");
             Flow::Continue(1)
         }
-        Builtin::Compound => match *cmd.compound.take().unwrap() {
-            crate::parser::Command::Subshell(body) if in_stage_child => {
-                crate::execute_program(session, body, last_status, true)
-            }
-            command => crate::eval::command(session, command, last_status, false),
-        },
+        Builtin::Compound => crate::eval::compound(session, cmd.compound.take().unwrap(), last_status, in_stage_child),
         Builtin::Exec => exec_builtin(cmd, session, args),
         Builtin::Function => crate::eval::call_with_bindings(
             session,
@@ -368,7 +358,7 @@ pub(super) fn eval_builtin(
         Builtin::Export => {
             if args
                 .iter()
-                .take_while(|s| s.len() > 1 && s.starts_with('-') && *s != "--")
+                .take_while(|s| crate::builtins::flags::cluster(s))
                 .any(|s| s.contains(['a', 'A']))
             {
                 session.declare(
@@ -510,7 +500,7 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
         arg0 = Some(format!("-{}", arg0.as_ref().unwrap_or(program)));
     }
     let status = match External::for_words(cmd, session, args, arg0, clear) {
-        Ok(external) => external.exec(None),
+        Ok(external) => external.exec(session, false),
         Err(error) => {
             diagnostic!("exec: {error}");
             126
@@ -531,7 +521,7 @@ fn apply_array_declarations(cmd: &PreparedCommand, status: u8, session: &mut Ses
         .words
         .iter()
         .skip(1)
-        .take_while(|a| a.starts_with('-') && *a != "--")
+        .take_while(|a| crate::builtins::flags::cluster(a))
         .any(|a| a.contains('g'));
     for d in &cmd.array_declarations {
         if let Err(e) = session.assign_array(&d.name, d.append, &d.items, global) {
@@ -712,6 +702,13 @@ fn silent_redirect(
     Ok(Flow::Continue(code))
 }
 
+pub(super) fn output_status(name: &str, result: io::Result<()>, status: u8) -> u8 {
+    if let Err(error) = result {
+        diagnostic!("{name}: write error: {error}");
+        1
+    } else { status }
+}
+
 pub(super) fn run_builtin(
     builtin: Builtin,
     cmd: &mut PreparedCommand,
@@ -768,13 +765,16 @@ pub(super) fn run_builtin(
         && !session.traps.observes_commands()
         && (cmd.assignments.is_empty()
             || matches!(cmd.assignments.as_slice(), [(key, _)] if key == "IFS" && !session.is_nameref(key) && !session.integer(key)))
-        && session.memory_input(matches!(builtin, Builtin::Read), &cmd.words[1..], bytes)
+        && let Some(input) = session.memory_input(matches!(builtin, Builtin::Read), &cmd.words[1..], bytes)
         && let Ok((reader, writer)) = io::pipe()
         && reader.as_raw_fd() > 2
         && writer.as_raw_fd() > 2
     {
         drop((reader, writer));
-        return Ok(eval_builtin(builtin, cmd, session, last_status, false));
+        let bindings = session.bind(&cmd.assignments);
+        let result = input.run(session, &cmd.words[0], last_status);
+        session.restore(bindings);
+        return Ok(result);
     }
     if !final_command
         && let [Action::Open(1, path, flags)] = actions
@@ -806,14 +806,12 @@ pub(super) fn run_builtin(
             if path.len() < line.len() {
                 line[..path.len()].copy_from_slice(path);
                 line[path.len()] = b'\n';
-                return Ok(Flow::Continue(u8::from(
-                    file.write_all(&line[..=path.len()]).is_err(),
-                )));
+                return Ok(Flow::Continue(output_status("pwd", file.write_all(&line[..=path.len()]), 0)));
             }
         }
         let (data, status) = output.render(session);
         let result = file.write_all(&data);
-        return Ok(Flow::Continue(if result.is_err() { 1 } else { status }));
+        return Ok(Flow::Continue(output_status(&cmd.words[0], result, status)));
     }
     if cmd.assignments.is_empty()
         && let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions)

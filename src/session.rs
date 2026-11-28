@@ -399,6 +399,20 @@ impl From<io::Error> for DirectoryError {
     }
 }
 
+pub(crate) enum MemoryInput<'a> {
+    Read(read::Options<'a>, &'a str, u8),
+    Mapfile(mapfile::Options<'a>, &'a [u8]),
+}
+
+impl MemoryInput<'_> {
+    pub(crate) fn run(self, session: &mut Session, name: &str, last: u8) -> crate::Flow {
+        match self {
+            Self::Read(opts, line, status) => read::assign_fields(session, &opts, line, &[], status),
+            Self::Mapfile(opts, bytes) => mapfile::run_parsed(session, name, opts, last, Some((0, bytes))),
+        }
+    }
+}
+
 impl Session {
     /// Fork a copy that can run shell code. Reset inherited traps and waitable
     /// process substitutions only in the child. The caller configures job control
@@ -431,6 +445,14 @@ impl Session {
         } else {
             crate::pattern::case_chars(text, upper, true, None, self.character_locale())
         }
+    }
+
+    /// A personal configuration path must never become relative through an
+    /// explicitly empty HOME. An unset HOME uses the account directory.
+    pub(crate) fn personal_home(&self) -> Option<Cow<'_, str>> {
+        self.scalar_setting("HOME")
+            .or_else(|| crate::word::account_home().map(Cow::Owned))
+            .filter(|h| !h.is_empty())
     }
 
     pub(crate) fn locale_category(&self, category: &str) -> Option<Cow<'_, str>> {
@@ -579,12 +601,8 @@ impl Session {
             })
     }
 
-    pub(crate) fn memory_input(&self, read: bool, args: &[String], bytes: &[u8]) -> bool {
-        if read {
-            read::memory_eligible(self, args, bytes)
-        } else {
-            mapfile::memory_eligible(self, args)
-        }
+    pub(crate) fn memory_input<'a>(&self, read: bool, args: &'a [String], bytes: &'a [u8]) -> Option<MemoryInput<'a>> {
+        if read { read::prepare_memory(self, args, bytes) } else { mapfile::prepare_memory(self, args, bytes) }
     }
 
     pub fn read(&mut self, args: &[String], here: Option<(i32, &[u8])>, status: u8) -> crate::Flow {

@@ -556,6 +556,7 @@ impl<'a> Expansion<'a> {
         word.append_fields(
             &|name| self.lookup(name),
             self.session.positional.as_slice(),
+            || self.borrowed_scalar("IFS").map(Into::into).or_else(||self.lookup("IFS").map(Into::into)),
             glob.then_some(&self.session.shopt.glob),
             fields,
         )

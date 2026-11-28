@@ -397,13 +397,14 @@ impl BracketPattern {
         }
         let utf8 = Self::utf8_locale();
         let mut tokens = Vec::new();
+        let last_close = memchr::memrchr(b']', source).map(|i| source.len() - i);
         while !source.is_empty() {
             let (c, rest) = unit(source, utf8);
             source = rest;
             tokens.push(match c {
                 b"*" => Token::Star,
                 b"?" => Token::Any,
-                b"[" => match class_end(rest) {
+                b"[" => match last_close.filter(|&distance| distance <= rest.len()).and_then(|_|class_end(rest)) {
                     Some(end) => {
                         source = &rest[end + 1..];
                         Token::list(&rest[..end], utf8)

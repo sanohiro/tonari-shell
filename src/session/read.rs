@@ -33,7 +33,7 @@ impl<'a> Delimiter<'a> {
     }
 }
 
-struct Options<'a> {
+pub(crate) struct Options<'a> {
     raw: bool,
     silent: bool,
     edit: Option<bool>,
@@ -48,7 +48,7 @@ struct Options<'a> {
     array: Option<&'a str>,
 }
 
-fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
+fn options(args: &[String]) -> Result<Options<'_>, (u8, String)> {
     let mut opts = Options {
         raw: false,
         silent: false,
@@ -80,33 +80,33 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
                 continue;
             }
             if !matches!(flag, 'a' | 'd' | 'u' | 'n' | 'N' | 'p' | 't' | 'i') {
-                return Err((2, "unsupported option"));
+                return Err((2, format!("-{flag}: invalid option")));
             }
             let value = crate::builtins::flags::value(flags.as_str(), &mut args)
-                .ok_or((2, "option requires an argument"))?;
+                .ok_or_else(|| (2, format!("-{flag}: option requires an argument")))?;
             match flag {
                 'a' => {
                     if !is_identifier(value) {
-                        return Err((1, "invalid array name"));
+                        return Err((1, format!("{value}: not a valid identifier")));
                     }
                     opts.array = Some(value);
                 }
                 'd' => opts.delimiter = Delimiter::first(value),
                 'n' | 'N' => {
                     opts.max_chars =
-                        Some(crate::builtins::integer_operand(value).and_then(|v| i32::try_from(v).ok()).filter(|v| *v >= 0).ok_or((1, "invalid character count"))? as usize);
+                        Some(crate::builtins::integer_operand(value).and_then(|v| i32::try_from(v).ok()).filter(|v| *v >= 0).ok_or_else(|| (1, format!("{value}: invalid number")))? as usize);
                     opts.exact = flag == 'N';
                 }
                 'u' => {
-                    opts.fd = value.parse().map_err(|_| (1, "invalid file descriptor"))?;
+                    opts.fd = value.parse().map_err(|_| (1, format!("{value}: invalid file descriptor")))?;
                     if opts.fd < 0 {
-                        return Err((1, "invalid file descriptor"));
+                        return Err((1, format!("{value}: invalid file descriptor")));
                     }
                 }
                 'i' => opts.initial = Some(value),
                 'p' => opts.prompt = Some(value),
                 't' => {
-                    opts.timeout = Some(timeout(value).ok_or((1, "invalid timeout"))?);
+                    opts.timeout = Some(timeout(value).ok_or_else(|| (1, format!("{value}: invalid timeout specification")))?);
                 }
                 _ => unreachable!(),
             }
@@ -286,10 +286,11 @@ impl Drop for EchoGuard {
     }
 }
 
-pub(super) fn memory_eligible(session: &Session, args: &[String], bytes: &[u8]) -> bool {
-    options(args).is_ok_and(|opts| {
-        opts.fd == 0 && opts.max_chars != Some(0) && memory_record(session, &opts, bytes).is_some()
-    })
+pub(super) fn prepare_memory<'a>(session: &Session, args: &'a [String], bytes: &'a [u8]) -> Option<super::MemoryInput<'a>> {
+    let opts = options(args).ok()?;
+    if opts.fd != 0 || opts.max_chars == Some(0) { return None; }
+    let (line, status) = memory_record(session, &opts, bytes)?;
+    Some(super::MemoryInput::Read(opts, line, status))
 }
 
 fn memory_record<'a>(
@@ -438,7 +439,9 @@ pub(super) fn run(
     let mut input = Input::new(opts.fd);
     // Even an escaped delimiter can only postpone the end of a record. Read
     // in chunks through the first possible delimiter and leave the rest
-    // of the pipe available to subsequent consumers.
+    // of the pipe available to subsequent consumers. An indexed destination
+    // can run another read while expanding its subscript; only plain names
+    // allow us to reuse this caller-supplied byte boundary.
     let mut known_prefix = here
         .filter(|(fd, _)| {
             *fd == opts.fd
@@ -605,7 +608,7 @@ pub(super) fn run(
     flow
 }
 
-fn assign_fields(
+pub(super) fn assign_fields(
     session: &mut Session,
     opts: &Options<'_>,
     line: &str,

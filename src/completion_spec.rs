@@ -542,12 +542,20 @@ impl Spec {
                 CompAction::Signal => words.extend(complete::signal_names(prefix)),
                 CompAction::Hostname => words.extend(complete::host_names(prefix, session)),
                 CompAction::Command => words.extend(complete::command_names(prefix, session)),
-                CompAction::Directory | CompAction::File => words.extend(complete::file_names(
-                    prefix,
-                    action == CompAction::Directory,
-                    false,
-                    session,
-                )),
+                CompAction::Directory | CompAction::File => {
+                    let files = complete::generated_files(
+                        prefix,
+                        action == CompAction::Directory,
+                        false,
+                        true,
+                        session,
+                    );
+                    if context.is_none() || self.options.contains(CompOption::Nosort) {
+                        words.extend(crate::pattern::sorted_names(files));
+                    } else {
+                        words.extend(files);
+                    }
+                }
                 CompAction::Enabled | CompAction::Disabled | CompAction::Helptopic => {
                     words.extend(
                         execute::builtin_names()
@@ -906,7 +914,7 @@ fn apply(
         }
         let Some(spec) = registry.get_mut(&key) else {
             let name = builtin.name();
-            diagnostic!("{name}: no completion specification for {}", key.argument());
+            diagnostic!("{name}: {}: no completion specification", key.argument());
             status = 1;
             continue;
         };
@@ -1151,7 +1159,10 @@ fn generate_for_tab(
         words.sort_unstable();
         words.dedup();
     }
-    if filenames && !session.bindings.unmarked_dirs && (list || words.len() == 1 || words.iter().any(|w| w.contains('/'))) {
+    if filenames
+        && !session.bindings.unmarked_dirs
+        && (list || words.len() == 1 || words.iter().any(|w| w.contains('/')))
+    {
         for word in &mut words {
             let directory = word
                 .strip_prefix("~/")

@@ -52,27 +52,32 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
         }
         return status;
     }
-    let sig = match args.first().map(String::as_str) {
-        Some("-s" | "-n") if args.len() >= 2 => {
-            let sig = number(&args[1]);
+    let choice = match args.first().map(String::as_str) {
+        Some(flag @ ("-s" | "-n")) => {
+            let Some(signal) = args.get(1) else {
+                diagnostic!("kill: {flag}: option requires an argument");
+                return 1;
+            };
             args = &args[2..];
-            sig
+            Some(signal.as_str())
         }
-        Some(s) if s.len() > 2 && (s.starts_with("-n") || s.starts_with("-s")) => {
-            let signal = number(&s[2..]);
+        Some(flag) if flag.len() > 2 && (flag.starts_with("-n") || flag.starts_with("-s")) => {
             args = &args[1..];
-            signal
+            Some(&flag[2..])
         }
-        Some(s) if s.starts_with('-') && s != "--" => {
+        Some(flag) if flag.starts_with('-') && flag != "--" => {
             args = &args[1..];
-            number(&s[1..])
+            Some(&flag[1..])
         }
-        _ => Some(libc::SIGTERM),
+        _ => None,
     };
-    let Some(sig) = sig else {
-        diagnostic!("kill: invalid signal");
-        return 1;
-    };
+    let sig = if let Some(name) = choice {
+        let Some(sig) = number(name) else {
+            diagnostic!("kill: {name}: invalid signal specification");
+            return 1;
+        };
+        sig
+    } else { libc::SIGTERM };
     if args.first().is_some_and(|s| s == "--") {
         args = &args[1..];
     }
@@ -83,26 +88,30 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
     let mut status = 0;
     for spec in args {
         let send = |pid| unsafe { libc::kill(pid, sig) == 0 };
-        let ok = if spec.starts_with('%') {
+        if spec.starts_with('%') {
             let markers = marked_jobs(jobs.all_jobs());
-            list_position(jobs, spec, markers).and_then(|i| jobs.all_jobs().nth(i)).is_some_and(|job| {
-                if let Some(group) = job.group {
-                    send(-group)
-                } else {
-                    let mut delivered = false;
-                    for p in &job.children {
-                        if p.pid > 0 && !matches!(p.state, State::Done(_)) {
-                            delivered |= send(p.pid);
-                        }
+            let Some(job) = list_position(jobs, spec, markers).and_then(|i| jobs.all_jobs().nth(i)) else {
+                diagnostic!("kill: {spec}: no such job");
+                status = 1;
+                continue;
+            };
+            let mut sent = false;
+            if let Some(group) = job.group { sent = send(-group); }
+            else {
+                for process in &job.children {
+                    if process.pid > 0 && !matches!(process.state, State::Done(_)) {
+                        sent |= send(process.pid);
                     }
-                    delivered
                 }
-            })
+            }
+            if !sent { diagnostic!("kill: {spec}: could not signal target"); status = 1; }
+        } else if let Ok(pid) = spec.parse::<pid_t>() {
+            if !send(pid) {
+                diagnostic!("kill: ({pid}) - {}", io::Error::last_os_error());
+                status = 1;
+            }
         } else {
-            spec.parse::<pid_t>().is_ok_and(send)
-        };
-        if !ok {
-            diagnostic!("kill: {spec}: could not signal target");
+            diagnostic!("kill: `{spec}': not a pid or valid job spec");
             status = 1;
         }
     }

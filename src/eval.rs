@@ -145,15 +145,20 @@ pub(crate) fn borrowed_program(
     )
 }
 
-fn condition_program(session: &mut Session, condition: &[Statement], status: u8) -> Flow {
-    session.tested_depth += 1;
-    let result = borrowed_program(session, condition, status, false);
-    session.tested_depth -= 1;
-    result
-}
-
 pub(crate) fn command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
     dispatch(session, Cow::Owned(command), status, tail)
+}
+
+pub(crate) fn compound(
+    session: &mut Session, command: std::rc::Rc<Command>, status: u8, stage: bool,
+) -> Flow {
+    if stage && let Command::Subshell(body) = command.as_ref() {
+        return borrowed_program(session, body, status, true);
+    }
+    match std::rc::Rc::try_unwrap(command) {
+        Ok(owned) => dispatch(session, Cow::Owned(owned), status, false),
+        Err(shared) => dispatch(session, Cow::Borrowed(shared.as_ref()), status, false),
+    }
 }
 
 fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: bool) -> Flow {
@@ -184,6 +189,12 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
         Cow::Borrowed(Command::Pipeline(stages)) if stages.len() == 1 => {
             execute::run_single(Cow::Borrowed(&stages[0]), status, tail, session)
                 .unwrap_or_else(execution_error)
+        }
+        Cow::Borrowed(Command::Timed { posix, command }) => {
+            let timer = timing::Timer::start();
+            let flow = dispatch(session, Cow::Borrowed(command), status, false);
+            timer.report(session, *posix);
+            flow
         }
         Cow::Borrowed(Command::Subshell(body)) => {
             crate::subshell::launch_borrowed(session, body, status)
@@ -299,8 +310,12 @@ fn run_while(
     body: &[Statement],
     status: u8,
 ) -> Flow {
+    let mut cache = LoopProgram::default();
     repeat(session, body, status, |s, last| {
-        match condition_program(s, condition, last) {
+        s.tested_depth += 1;
+        let flow = cache.run(s, condition, last);
+        s.tested_depth -= 1;
+        match flow {
             Flow::Continue(code) => Ok(((code == 0) != until).then_some(code)),
             other => Err(other),
         }
@@ -707,6 +722,25 @@ pub(crate) fn expand_case(
     })
 }
 
+#[derive(Default)]
+struct LoopProgram {
+    visits: u8,
+    commands: Vec<Option<Box<execute::PreparedCommand>>>,
+}
+
+impl LoopProgram {
+    fn run(&mut self, session: &mut Session, statements: &[Statement], status: u8) -> Flow {
+        if self.visits == 2 {
+            // Shell lookup stays live. Only immutable argument strings are reused.
+            self.commands = statements.iter()
+                .map(|stmt| execute::PreparedCommand::literal_builtin(stmt, session))
+                .collect();
+        }
+        self.visits = self.visits.saturating_add(1);
+        run_statements(session, statements.iter().map(Cow::Borrowed), status, false, &mut self.commands)
+    }
+}
+
 fn repeat(
     session: &mut Session,
     body: &[Statement],
@@ -715,8 +749,7 @@ fn repeat(
 ) -> Flow {
     session.loop_depth += 1;
     let mut result = 0;
-    let mut iterations = 0u8;
-    let mut literals = Vec::new();
+    let mut cache = LoopProgram::default();
     let flow = loop {
         if session.noexec {
             break Flow::Continue(0);
@@ -726,23 +759,7 @@ fn repeat(
         }
         let step = match next(session, last) {
             Ok(None) => break Flow::Continue(result),
-            Ok(Some(status)) => {
-                if iterations == 2 {
-                    // Shell lookup stays live. Only immutable argument strings are reused.
-                    literals = body
-                        .iter()
-                        .map(|stmt| execute::PreparedCommand::literal_builtin(stmt, session))
-                        .collect();
-                }
-                iterations = iterations.saturating_add(1);
-                run_statements(
-                    session,
-                    body.iter().map(Cow::Borrowed),
-                    status,
-                    false,
-                    &mut literals,
-                )
-            }
+            Ok(Some(status)) => cache.run(session, body, status),
             Err(Flow::Continue(code)) => break Flow::Continue(code),
             Err(flow) => flow,
         };

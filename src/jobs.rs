@@ -67,19 +67,23 @@ impl Launch {
             // before its first instruction, including a read in an initializer.
             // Consume Darwin's synthetic stopped event before sending SIGCONT.
             // WSTOPPED leaves a real exit available to the normal job waiter.
-            let mut info = std::mem::MaybeUninit::uninit();
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
             loop {
                 let result = unsafe {
-                    libc::waitid(
-                        libc::P_PID,
-                        pid as _,
-                        info.as_mut_ptr(),
-                        libc::WSTOPPED | libc::WNOHANG,
-                    )
+                    libc::waitid(libc::P_PID, pid as _, &mut info, libc::WSTOPPED | libc::WNOHANG)
                 };
-                if result == 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                if result == 0 && info.si_pid == 0 {
+                    // The scheduler has not posted the synthetic stop yet. An
+                    // intervening exit must remain waitable by the job owner.
+                    if unsafe { libc::waitid(libc::P_PID, pid as _, &mut info,
+                        libc::WEXITED | libc::WSTOPPED | libc::WNOWAIT) } == 0 {
+                        if info.si_code == libc::CLD_STOPPED { continue; }
+                        return;
+                    }
+                } else if result == 0 {
                     break;
                 }
+                if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted { break; }
             }
             give_terminal(fd, self.group.filter(|&g| g != 0).unwrap_or(pid));
             unsafe { libc::kill(pid, libc::SIGCONT) };

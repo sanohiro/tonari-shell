@@ -258,6 +258,7 @@ pub(crate) struct Bindings {
     bracketed_paste: Option<bool>,
     timeout: Option<i32>,
     initialized: bool,
+    other_settings: Option<Rc<BTreeMap<String, String>>>,
 }
 impl Bindings {
     pub(super) fn paste(&self) -> bool {
@@ -280,7 +281,9 @@ impl Bindings {
             .is_some_and(|keys| keys.starts_with(byte))
     }
     pub(super) fn explicit(&self, seq: &[u8]) -> bool {
-        self.keys[self.map as usize].as_ref().is_some_and(|table| table.sequences.contains_key(seq))
+        self.keys[self.map as usize]
+            .as_ref()
+            .is_some_and(|table| table.sequences.contains_key(seq))
     }
     pub(super) fn lookup(&self, seq: &[u8]) -> (Option<Binding>, bool) {
         let (mut exact, mut longer) = (None, false);
@@ -460,22 +463,108 @@ fn encode(seq: &[u8], meta: bool) -> String {
 }
 
 fn named_key(name: &str) -> Result<Vec<u8>, String> {
-    let mut name = name.to_ascii_lowercase();
+    let mut name = name;
     let mut control = false;
     let mut meta = false;
     while let Some((prefix, rest)) = name.split_once('-') {
-        match prefix { "control" | "ctrl" | "c" => control = true,
-            "meta" | "m" => meta = true, _ => break }
-        name = rest.to_owned();
+        match prefix.to_ascii_lowercase().as_str() {
+            "control" | "ctrl" | "c" => control = true,
+            "meta" | "m" => meta = true,
+            _ => break,
+        }
+        name = rest;
     }
-    let byte = match name.as_str() {
-        "tab" => b'\t', "space" | "spc" => b' ', "newline" | "lfd" => b'\n',
-        "return" | "ret" => b'\r', "escape" | "esc" => 27,
-        "rubout" | "del" => 127, "backspace" => 8,
-        _ if name.len() == 1 => name.as_bytes()[0], _ => return Err(format!("unknown key name: {name}")),
+    let byte = match name.to_ascii_lowercase().as_str() {
+        "tab" => b'\t',
+        "space" | "spc" => b' ',
+        "newline" | "lfd" => b'\n',
+        "return" | "ret" => b'\r',
+        "escape" | "esc" => 27,
+        "rubout" | "del" => 127,
+        "backspace" => 8,
+        _ if name.len() == 1 => name.as_bytes()[0],
+        _ => return Err(format!("unknown key name: {name}")),
     };
-    let byte = if control { if byte == b'?' { 127 } else { byte & 31 } } else { byte };
+    let byte = if control {
+        if byte == b'?' { 127 } else { byte & 31 }
+    } else {
+        byte
+    };
     Ok(if meta { vec![27, byte] } else { vec![byte] })
+}
+
+// Preserve explicitly configured GNU Readline presentation options so inputrc
+// files round-trip even where Tonari uses its own terminal renderer.
+fn readline_setting(name: &str) -> bool {
+    matches!(
+        name,
+        "bind-tty-special-chars"
+            | "byte-oriented"
+            | "colored-completion-prefix"
+            | "colored-stats"
+            | "convert-meta"
+            | "echo-control-characters"
+            | "enable-active-region"
+            | "enable-keypad"
+            | "enable-meta-key"
+            | "expand-tilde"
+            | "force-meta-prefix"
+            | "history-preserve-point"
+            | "horizontal-scroll-mode"
+            | "input-meta"
+            | "mark-modified-lines"
+            | "mark-symlinked-directories"
+            | "menu-complete-display-prefix"
+            | "meta-flag"
+            | "output-meta"
+            | "page-completions"
+            | "prefer-visible-bell"
+            | "print-completions-horizontally"
+            | "revert-all-at-newline"
+            | "search-ignore-case"
+            | "show-all-if-ambiguous"
+            | "show-all-if-unmodified"
+            | "show-mode-in-prompt"
+            | "skip-completed-text"
+            | "visible-stats"
+            | "bell-style"
+            | "completion-display-width"
+            | "completion-prefix-display-length"
+            | "completion-query-items"
+            | "emacs-mode-string"
+            | "history-size"
+            | "vi-cmd-mode-string"
+            | "vi-ins-mode-string"
+            | "isearch-terminators"
+    )
+}
+
+// Inputrc and bind -v expose the same booleans, including the two with
+// inverted internal storage. Keep parsing and listing in the same table.
+macro_rules! boolean_settings {
+    ($($name:literal => $field:ident, $inverted:literal);+ $(;)?) => {
+        impl Bindings {
+            fn set_boolean(&mut self, name: &str, value: bool) -> bool {
+                match name {
+                    $($name => self.$field = value ^ $inverted,)+
+                    _ => return false,
+                }
+                true
+            }
+
+            fn booleans(&self) -> impl Iterator<Item = (&'static str, bool)> {
+                [$(($name, self.$field ^ $inverted)),+].into_iter()
+            }
+        }
+    }
+}
+boolean_settings! {
+    "completion-ignore-case" => ignore_case, false;
+    "completion-map-case" => map_case, false;
+    "match-hidden-files" => hide_dotfiles, true;
+    "mark-directories" => unmarked_dirs, true;
+    "disable-completion" => disable_completion, false;
+    "blink-matching-paren" => blink_matching_paren, false;
 }
 
 fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), String> {
@@ -485,12 +574,10 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
         let (name, value) = set.split_once(char::is_whitespace).unwrap_or((set, ""));
         let value = value.trim();
         let on = || value.is_empty() || value == "1" || value.eq_ignore_ascii_case("on");
+        if bindings.set_boolean(name, on()) {
+            return Ok(());
+        }
         match name {
-            "blink-matching-paren" => bindings.blink_matching_paren = on(),
-            "completion-ignore-case" => bindings.ignore_case = on(),
-            "completion-map-case" => bindings.map_case = on(),
-            "match-hidden-files" => bindings.hide_dotfiles = !on(),
-            "mark-directories" => bindings.unmarked_dirs = !on(),
             "comment-begin" => {
                 bindings.comment_begin = Some(if let Some(end) = quoted_end(value) {
                     value[1..end].into()
@@ -498,7 +585,6 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
                     value.into()
                 })
             }
-            "disable-completion" => bindings.disable_completion = on(),
             "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()),
             "keyseq-timeout" => {
                 bindings.timeout = Some(value.parse::<i32>().unwrap_or(0).max(0));
@@ -512,6 +598,10 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
                     Keymap::Emacs
                 };
             }
+            _ if readline_setting(name) => {
+                Rc::make_mut(bindings.other_settings.get_or_insert_with(Default::default))
+                    .insert(name.into(), value.into());
+            }
             _ => {
                 diagnostic!("bind: {name}: unknown readline variable or value");
             }
@@ -519,19 +609,30 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
         return Ok(());
     }
     let (key, value) = if let Some(end) = quoted_end(spec) {
-        (decode(&spec[..=end])?, spec[end + 1..].trim_start().strip_prefix(':').ok_or("expected ':'")?)
+        (
+            decode(&spec[..=end])?,
+            spec[end + 1..]
+                .trim_start()
+                .strip_prefix(':')
+                .ok_or("expected ':'")?,
+        )
     } else {
         let (name, value) = spec.split_once(':').ok_or("expected ':'")?;
         (named_key(name.trim())?, value)
     };
-    if key.is_empty() { return Err("empty key sequence".into()); }
+    if key.is_empty() {
+        return Err("empty key sequence".into());
+    }
     let value = value.trim_start();
     let binding = if shell {
-        Binding::Shell(if let Some(end) = quoted_end(value) {
-            value[1..end].replace("\\\"", "\"").replace("\\\\", "\\")
-        } else {
-            value.to_owned()
-        }.into())
+        Binding::Shell(
+            if let Some(end) = quoted_end(value) {
+                value[1..end].replace("\\\"", "\"").replace("\\\\", "\\")
+            } else {
+                value.to_owned()
+            }
+            .into(),
+        )
     } else if value.starts_with('"') {
         Binding::Macro(decode(value)?.into())
     } else {
@@ -573,7 +674,10 @@ fn load_file(session: &mut Session, path: &Path, depth: usize) -> Result<(), Str
             let result = if let Some(name) = line.strip_prefix("$include ") {
                 let name = name.trim();
                 let file = if let Some(s) = name.strip_prefix("~/") {
-                    PathBuf::from(session.get("HOME").unwrap_or_default()).join(s)
+                    let Some(home) = session.personal_home() else {
+                        continue;
+                    };
+                    Path::new(home.as_ref()).join(s)
                 } else {
                     path.parent().unwrap_or(Path::new(".")).join(name)
                 };
@@ -603,8 +707,8 @@ pub(super) fn reload(session: &mut Session) {
         .map(PathBuf::from)
         .or_else(|| {
             session
-                .get("HOME")
-                .map(|p| PathBuf::from(p).join(".inputrc"))
+                .personal_home()
+                .map(|p| Path::new(p.as_ref()).join(".inputrc"))
                 .filter(|p| p.is_file())
         })
         .unwrap_or_else(|| PathBuf::from("/etc/inputrc"));
@@ -790,36 +894,37 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
             "-v" | "-V" => {
                 let yes = |on| if on { "on" } else { "off" };
                 let b = &session.bindings;
-                for (name, value) in [
-                    ("completion-ignore-case", yes(b.ignore_case).into()),
-                    ("completion-map-case", yes(b.map_case).into()),
-                    ("match-hidden-files", yes(!b.hide_dotfiles).into()),
-                    ("mark-directories", yes(!b.unmarked_dirs).into()),
-                    (
-                        "comment-begin",
-                        b.comment_begin.as_deref().unwrap_or("#").into(),
-                    ),
-                    ("disable-completion", yes(b.disable_completion).to_owned()),
-                    (
-                        "editing-mode",
-                        if session.vi { "vi" } else { "emacs" }.into(),
-                    ),
-                    (
-                        "enable-bracketed-paste",
-                        yes(b.bracketed_paste.unwrap_or(session.interactive)).into(),
-                    ),
-                    (
-                        "keymap",
-                        match b.map {
-                            Keymap::Emacs => "emacs",
-                            Keymap::Insert => "vi-insert",
-                            Keymap::Command => "vi-command",
-                        }
-                        .into(),
-                    ),
-                    ("blink-matching-paren", yes(b.blink_matching_paren).into()),
-                    ("keyseq-timeout", b.timeout().to_string()),
-                ] {
+                for (name, value) in
+                    b.booleans()
+                        .map(|(name, value)| (name, yes(value).to_owned()))
+                        .chain([
+                            (
+                                "comment-begin",
+                                b.comment_begin.as_deref().unwrap_or("#").into(),
+                            ),
+                            (
+                                "editing-mode",
+                                if session.vi { "vi" } else { "emacs" }.into(),
+                            ),
+                            (
+                                "enable-bracketed-paste",
+                                yes(b.bracketed_paste.unwrap_or(session.interactive)).into(),
+                            ),
+                            (
+                                "keymap",
+                                match b.map {
+                                    Keymap::Emacs => "emacs",
+                                    Keymap::Insert => "vi-insert",
+                                    Keymap::Command => "vi-command",
+                                }
+                                .into(),
+                            ),
+                            ("keyseq-timeout", b.timeout().to_string()),
+                        ])
+                        .chain(b.other_settings.iter().flat_map(|settings| {
+                            settings.iter().map(|(n, v)| (n.as_str(), v.clone()))
+                        }))
+                {
                     if arg == "-V" {
                         writeln!(out, "{name} is set to \u{60}{value}'")
                     } else {

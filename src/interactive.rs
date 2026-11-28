@@ -17,8 +17,10 @@ pub(super) fn terminal_read(buf: &mut [u8], raw: bool, terminal: bool) -> io::Re
         let mut blocked = std::mem::zeroed();
         libc::sigfillset(&mut blocked);
         let original = traps::SignalMask::block(&blocked)?;
-        if INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || traps::input_interrupted()
-            || raw && editor::RESIZED.load(std::sync::atomic::Ordering::Relaxed) {
+        if INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+            || traps::input_interrupted()
+            || raw && editor::RESIZED.load(std::sync::atomic::Ordering::Relaxed)
+        {
             return Err(io::ErrorKind::Interrupted.into());
         }
         let mut read_set = std::mem::zeroed();
@@ -45,6 +47,11 @@ pub(super) fn terminal_read(buf: &mut [u8], raw: bool, terminal: bool) -> io::Re
         // VMIN=0 makes the editor read nonblocking after pselect without modifying
         // the open file description shared with external foreground programs.
         if raw || !terminal {
+            // Another reader may consume a pipe between pselect and read.
+            // Keep a blocking nonterminal read interruptible by the shell's traps.
+            if !terminal {
+                drop(original);
+            }
             let n = libc::read(0, buf.as_mut_ptr().cast(), buf.len());
             if n < 0 {
                 return Err(io::Error::last_os_error());
@@ -137,7 +144,11 @@ pub(super) fn interactive_loop(
     let mut paste_offset = 0;
     let mut paste_recorded = false;
     loop {
-        if source.is_empty() { incomplete = None; history_quote = None; here_doc = None; }
+        if source.is_empty() {
+            incomplete = None;
+            history_quote = None;
+            here_doc = None;
+        }
         let start = source.len();
         interrupted();
         if let Flow::Exit(code) = traps::dispatch(session, status) {
@@ -149,8 +160,16 @@ pub(super) fn interactive_loop(
             session.jobs.report_changes(session.posix);
         }
         let queued = paste_offset < paste.len();
-        if !queued && source.is_empty() { paste.clear(); paste_offset = 0; paste_recorded = false; }
-        let terminal_size = if queued { None } else { session.refresh_terminal_size() };
+        if !queued && source.is_empty() {
+            paste.clear();
+            paste_offset = 0;
+            paste_recorded = false;
+        }
+        let terminal_size = if queued {
+            None
+        } else {
+            session.refresh_terminal_size()
+        };
         if source.is_empty() && !queued {
             for hook in session.array_values("PROMPT_COMMAND") {
                 if !hook.is_empty()
@@ -161,7 +180,11 @@ pub(super) fn interactive_loop(
             }
         }
         let line_editing = editing && (session.emacs || session.vi);
-        let prompt = if queued { String::new() } else { prompt::render(session, !source.is_empty(), status, line_editing) };
+        let prompt = if queued {
+            String::new()
+        } else {
+            prompt::render(session, !source.is_empty(), status, line_editing)
+        };
         let timeout = session
             .get("TMOUT")
             .and_then(|s| s.parse::<u64>().ok())
@@ -189,7 +212,9 @@ pub(super) fn interactive_loop(
                     continue;
                 }
                 Ok(editor::Input::Line(line)) => {
-                    if let Some(i) = memchr::memchr(b'\n', line.as_bytes()) && i + 1 < line.len() {
+                    if let Some(i) = memchr::memchr(b'\n', line.as_bytes())
+                        && i + 1 < line.len()
+                    {
                         source.extend_from_slice(&line.as_bytes()[..=i]);
                         paste = line;
                         paste_offset = i + 1;
@@ -256,7 +281,9 @@ pub(super) fn interactive_loop(
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
                 stderr_line!();
-                if session.traps.read_pending() { continue; }
+                if session.traps.read_pending() {
+                    continue;
+                }
                 source.clear();
                 if traps::pending().is_none() {
                     status = 130;
@@ -292,7 +319,9 @@ pub(super) fn interactive_loop(
         let line = std::str::from_utf8(&source[start..]);
         if more && let Ok(line) = line {
             if let Some(hint) = &mut here_doc {
-                if !hint.may_finish(line) { continue; }
+                if !hint.may_finish(line) {
+                    continue;
+                }
                 here_doc = None;
             } else if session.histexpand {
                 match history::expand::expand_line(session, line, history_quote) {
@@ -303,16 +332,18 @@ pub(super) fn interactive_loop(
                         source.clear();
                         continue;
                     }
-                    Ok(event) => if let std::borrow::Cow::Owned(expanded) = event.text {
-                        if session.shopt.histverify && line_editing {
-                            editable_history = expanded.trim_end_matches('\n').to_owned();
+                    Ok(event) => {
+                        if let std::borrow::Cow::Owned(expanded) = event.text {
+                            if session.shopt.histverify && line_editing {
+                                editable_history = expanded.trim_end_matches('\n').to_owned();
+                                source.truncate(start);
+                                continue;
+                            }
+                            stderr_text!("{}", expanded);
                             source.truncate(start);
-                            continue;
+                            source.extend_from_slice(expanded.as_bytes());
                         }
-                        stderr_text!("{}", expanded);
-                        source.truncate(start);
-                        source.extend_from_slice(expanded.as_bytes());
-                    },
+                    }
                     Err(error) => {
                         diagnostic!("{error}");
                         if session.shopt.histreedit && line_editing {
@@ -325,10 +356,13 @@ pub(super) fn interactive_loop(
                 }
             }
         }
-        if more && incomplete.is_some()
+        if more
+            && incomplete.is_some()
             && let Ok(line) = std::str::from_utf8(&source[start..])
             && input::still_open(incomplete, line, session)
-        { continue; }
+        {
+            continue;
+        }
         let text = std::str::from_utf8(&source);
         match text {
             Ok(text) => match parser::session_source(text, !more, session) {
@@ -339,11 +373,15 @@ pub(super) fn interactive_loop(
                     }
                     session.command_number += 1;
                     let record = if paste_offset != 0 {
-                        if paste_recorded { false } else {
+                        if paste_recorded {
+                            false
+                        } else {
                             paste_recorded = true;
                             session.begin_history_line(&paste)
                         }
-                    } else { session.begin_history_line(text) };
+                    } else {
+                        session.begin_history_line(text)
+                    };
                     let cwd = if record { session.get("PWD") } else { None };
                     let flow = if session.noexec {
                         Flow::Continue(0)
@@ -369,8 +407,8 @@ pub(super) fn interactive_loop(
                         parser::Error::HereDoc(hint) => here_doc = Some(hint),
                         _ => {}
                     }
-                    continue
-                },
+                    continue;
+                }
                 Err(e) => {
                     diagnostic!("{}", e.message());
                     status = 2;

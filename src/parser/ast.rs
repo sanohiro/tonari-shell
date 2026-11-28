@@ -68,7 +68,7 @@ impl KeywordArgs {
 #[derive(Debug, Clone)]
 pub struct SimpleCommand<W = String> {
     pub location: Option<Box<Location>>,
-    pub compound: Option<Box<Command>>,
+    pub compound: Option<std::rc::Rc<Command>>,
     pub words: Vec<W>,
     pub redirects: Vec<Redirect<W>>,
     pub assignments: Vec<(String, Assignment<W>)>,

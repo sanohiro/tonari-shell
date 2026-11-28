@@ -81,7 +81,6 @@ impl Environment {
 }
 
 pub(super) struct External {
-    pub(super) diagnostic: Option<String>,
     pub(super) program: CString,
     _arg0: Option<CString>,
     // Fully built before taking any pointers, then immutable through spawn/exec.
@@ -144,7 +143,6 @@ impl External {
         Ok(Self {
             argument_bytes,
             argv,
-            diagnostic: session.diagnostic_prefix(|| session.line()),
             program,
             _arg0: arg0,
             search_paths,
@@ -210,7 +208,7 @@ impl External {
         .unwrap_or(libc::ENOEXEC)
     }
 
-    pub(super) fn exec(&self, session: Option<&Session>) -> u8 {
+    pub(super) fn exec(&self, session: &Session, fallback_in_session: bool) -> u8 {
         let program = &self.program;
         if program.as_bytes().is_empty() {
             write_error(b"", b": command not found");
@@ -232,7 +230,7 @@ impl External {
             match errno() {
                 libc::ENOENT | libc::ENOTDIR => continue,
                 libc::ENOEXEC => {
-                    error = self.script_fallback(path, session);
+                    error = self.script_fallback(path, fallback_in_session.then_some(session));
                     break;
                 }
                 libc::EACCES => error = libc::EACCES,
@@ -243,16 +241,17 @@ impl External {
             }
         }
         let status = exec_status(error);
-        write_diagnostic(
-            self.diagnostic.as_deref().unwrap_or("tonari: ").as_bytes(),
-            program.as_bytes(),
-            if status == 127 {
-                b": command not found"
-            } else {
-                b": cannot execute"
-            },
-            b"",
-        );
+        let path = std::path::Path::new(std::ffi::OsStr::from_bytes(program.as_bytes()));
+        let reason: &[u8] = match error {
+            libc::ENOENT | libc::ENOTDIR if !program.as_bytes().contains(&b'/') => b": command not found",
+            libc::ENOENT | libc::ENOTDIR => b": No such file or directory",
+            libc::EISDIR => b": Is a directory",
+            libc::EACCES if path.is_dir() => b": Is a directory",
+            libc::EACCES | libc::EPERM => b": Permission denied",
+            _ => b": cannot execute",
+        };
+        let prefix = session.diagnostic_prefix(|| session.line());
+        write_diagnostic(prefix.as_deref().unwrap_or("tonari: ").as_bytes(), program.as_bytes(), reason, b"");
         status
     }
 }

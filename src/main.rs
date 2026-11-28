@@ -129,7 +129,7 @@ fn wait_for_job_notice(
     jobs: &mut jobs::Jobs,
     mut display: impl FnMut(&mut jobs::Jobs) -> io::Result<()>,
 ) -> io::Result<()> {
-    if !jobs.awaiting_notification() || editor::ready(0, 0) {
+    if !jobs.awaiting_notification() || editor::poll_readable(0, 0) {
         return Ok(());
     }
     let mask = traps::WaitMask::for_children(0)?;
@@ -171,7 +171,12 @@ fn update_stack_budget(soft: libc::rlim_t) {
     // deeper parser and signal frames clear of the guard page.
     let limit = (soft as usize).min(8 * 1024 * 1024);
     let reserve = (limit / 4).min(256 * 1024);
-    STACK_BUDGET.store((limit / 2).saturating_sub(reserve).max(1), std::sync::atomic::Ordering::Relaxed);
+    let mut budget = (limit / 2).saturating_sub(reserve).max(1);
+    if limit <= 512 * 1024 && MAIN_STACK_ORIGIN.get() != 0 {
+        let usable = MAIN_STACK_ORIGIN.get().saturating_sub(thread_stack_floor());
+        budget = budget.min(usable.max(1));
+    }
+    STACK_BUDGET.store(budget, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[cold]
@@ -184,23 +189,52 @@ fn initial_stack_budget() -> usize {
     STACK_BUDGET.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-fn stack_budget_exceeded() -> bool {
-    let Some(origin) = MAIN_STACK_ORIGIN.get() else {
-        return !cfg!(test);
-    };
-    let marker = 0u8;
-    let budget = STACK_BUDGET.load(std::sync::atomic::Ordering::Relaxed);
-    let budget = if budget == 0 { initial_stack_budget() } else { budget };
-    origin.abs_diff(std::ptr::from_ref(&marker).addr()) >= budget
+thread_local! {
+    // Interpreter entry (including ENOEXEC reentry) is on the main thread.
+    // Test harnesses and optional workers can enter it on a smaller stack.
+    static MAIN_STACK_ORIGIN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static WORKER_STACK_FLOOR: std::cell::OnceCell<usize> = const { std::cell::OnceCell::new() };
 }
 
-// Script fallback can reenter invoke() in a child at an arbitrary call depth.
-static MAIN_STACK_ORIGIN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+#[cold]
+fn thread_stack_floor() -> usize {
+    #[cfg(target_os = "macos")]
+    let (low, size) = unsafe {
+        let thread = libc::pthread_self();
+        let size = libc::pthread_get_stacksize_np(thread);
+        (libc::pthread_get_stackaddr_np(thread).addr().saturating_sub(size), size)
+    };
+    #[cfg(target_os = "linux")]
+    let (low, size) = unsafe {
+        let mut attr = std::mem::MaybeUninit::uninit();
+        if libc::pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 { return usize::MAX; }
+        let mut attr = attr.assume_init();
+        let mut low = std::ptr::null_mut();
+        let mut size = 0;
+        let result = libc::pthread_attr_getstack(&attr, &mut low, &mut size);
+        libc::pthread_attr_destroy(&mut attr);
+        if result != 0 { return usize::MAX; }
+        (low.addr(), size)
+    };
+    low.saturating_add((size / 2).min(256 * 1024))
+}
+
+fn stack_budget_exceeded() -> bool {
+    let marker = 0u8;
+    let here = std::ptr::from_ref(&marker).addr();
+    let origin = MAIN_STACK_ORIGIN.get();
+    if origin == 0 {
+        return WORKER_STACK_FLOOR.with(|floor| here <= *floor.get_or_init(thread_stack_floor));
+    }
+    let budget = STACK_BUDGET.load(std::sync::atomic::Ordering::Relaxed);
+    let budget = if budget == 0 { initial_stack_budget() } else { budget };
+    origin.saturating_sub(here) >= budget
+}
 
 fn main() -> ExitCode {
     traps::enter_process();
     let marker = 0u8;
-    MAIN_STACK_ORIGIN.get_or_init(|| std::ptr::from_ref(&marker).addr());
+    MAIN_STACK_ORIGIN.set(std::ptr::from_ref(&marker).addr());
     invoke(std::env::args_os()).into()
 }
 
@@ -230,20 +264,9 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
     code
 }
 
-fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 {
+fn apply_invocation_options(session: &mut Session, invocation: &mut cli::Invocation, env: &startup::Environment) -> Result<(), u8> {
     use cli::Input;
-    session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
-    session.privileged = invocation.options.privileged;
-    if unsafe { libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid() } {
-        diagnostic!("running with unequal real and effective credentials is unsupported");
-        return 126;
-    }
-    let env = startup::Environment::read(session);
-    if session.privileged {
-        session.unset_variable("CDPATH");
-        session.unset_variable("GLOBIGNORE");
-    }
-    session.initialize_shell_level(&env);
+    session.initialize_shell_level(env);
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
     session.allexport = invocation.options.allexport;
@@ -286,7 +309,7 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
         && let Err(e) = session.traps.init_hangup()
     {
         diagnostic!("SIGHUP: {e}");
-        return 1;
+        return Err(1);
     }
     session.jobs.monitor = invocation.options.monitor.unwrap_or(session.interactive);
     if session.jobs.monitor {
@@ -313,7 +336,7 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
         session.apply_posix_mode(env.posix);
     }
     session.shopt.progcomp_alias = session.interactive;
-    session.inherit_options(&env);
+    session.inherit_options(env);
     for (enable, name) in std::mem::take(&mut invocation.options.shopts) {
         let options = match name {
             Some(name) => vec![if enable { "-s" } else { "-u" }.into(), name],
@@ -321,12 +344,13 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
             None => vec!["-p".into()],
         };
         if session.shopt(&options) != 0 {
-            return 2;
+            return Err(2);
         }
     }
-    if invocation.pretty {
-        return input::print_script(session, invocation.input);
-    }
+    Ok(())
+}
+
+fn initialize_interactive_defaults(session: &mut Session) {
     if session.interactive {
         if session.get("PS1").is_none() {
             session.assign("PS1", "tonari$ ");
@@ -335,16 +359,36 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
             session.assign("PS2", "> ");
         }
         if session.get("HISTFILE").is_none()
-            && let Some(home) = startup::startup_home(session)
+            && let Some(home) = session.personal_home()
         {
             let file = if session.posix {
                 ".sh_history"
             } else {
                 ".bash_history"
             };
-            session.assign("HISTFILE", &home.join(file).to_string_lossy());
+            session.assign("HISTFILE", &std::path::Path::new(home.as_ref()).join(file).to_string_lossy());
         }
     }
+}
+
+fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 {
+    use cli::Input;
+    session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
+    session.privileged = invocation.options.privileged;
+    let changed_ids = match startup::settle_credentials(session.privileged) {
+        Ok(changed) => changed,
+        Err(e) => { diagnostic!("{e}"); return 126; }
+    };
+    let env = startup::Environment::read(session, changed_ids);
+    if session.privileged || changed_ids {
+        session.unset_variable("CDPATH");
+        session.unset_variable("GLOBIGNORE");
+    }
+    if let Err(code) = apply_invocation_options(session, &mut invocation, &env) { return code; }
+    if invocation.pretty {
+        return input::print_script(session, invocation.input);
+    }
+    initialize_interactive_defaults(session);
     if session.interactive && traps::listen_for_interrupts().is_err() {
         return 1;
     }

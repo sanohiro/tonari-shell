@@ -13,7 +13,7 @@ pub(crate) struct PreparedCommand {
     pub(super) named_redirects: Vec<Redirect<Word>>,
     pub(super) resolved: Option<PathBuf>,
     pub(super) array_declarations: Vec<ArrayDeclaration>,
-    pub(super) compound: Option<Box<crate::parser::Command>>,
+    pub(super) compound: Option<std::rc::Rc<crate::parser::Command>>,
     pub(super) search: lookup::Search,
     pub(super) default_path: bool,
     pub(super) words: Vec<String>,
@@ -417,7 +417,7 @@ pub(super) fn prepare_expanded(
                     && words
                         .iter()
                         .skip(1)
-                        .take_while(|arg| arg.starts_with('-') && *arg != "--")
+                        .take_while(|arg| crate::builtins::flags::cluster(arg))
                         .any(|arg| arg.contains('A'));
                 let items =
                     exp.array_items(parts, declared_assoc || exp.session.is_associative(&key))?;
@@ -526,7 +526,7 @@ pub(super) fn prepare_expanded(
                     Some(
                         exp.session
                             .relative_index(base, n)
-                            .map_err(crate::expansion::Error::discard)?,
+                            .map_err(|_| crate::expansion::Error::discard(format!("{key}: bad array subscript")))?,
                     )
                 } else {
                     None
@@ -672,9 +672,22 @@ pub(super) fn prepare_redirects(
         let word = match (r.target, r.word) {
             (Target::HereDoc { expand: true }, Word::Literal(body)) => {
                 if body.contains(['$', '`', '\\']) {
-                    exp.scalar(
-                        crate::parser::here_word(exp.session, &body).map_err(|e| e.message())?,
-                    )?
+                    let mut expanded = String::with_capacity(body.len());
+                    let plain = super::plain_here_parts(&body, |literal, name| {
+                        expanded.push_str(literal);
+                        if let Some(name) = name {
+                            if super::stage_parameter(name, exp.session) { return false; }
+                            if let Some(value) = exp.borrowed_scalar(name) {
+                                expanded.push_str(value);
+                            } else if let Some(value) = exp.lookup(name) {
+                                expanded.push_str(&value);
+                            } else if exp.session.nounset { return false; }
+                        }
+                        true
+                    });
+                    if plain { expanded } else {
+                        exp.scalar(crate::parser::here_word(exp.session, &body).map_err(|e| e.message())?)?
+                    }
                 } else {
                     body
                 }

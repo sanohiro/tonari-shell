@@ -12,6 +12,7 @@ use tonari_time_locales::numeric::{self, Numeric};
 struct Variables<'a> {
     shell: &'a mut Session,
     capture: bool,
+    has_target: bool,
     private: Option<Box<Session>>,
 }
 
@@ -100,13 +101,15 @@ pub(crate) fn run(
     let mut variables = Variables {
         shell: session,
         capture: capture.is_some(),
+        has_target: target.is_some(),
         private: None,
     };
     let mut args = Arguments {
         values,
         status: 0,
         locale: None,
-        byte_char_codes: variables.read().ascii_quoting(),
+        byte_char_codes: values.iter().any(|s| matches!(s.as_bytes().first(), Some(b'\'' | b'"')))
+            && variables.read().ascii_quoting(),
     };
     let mut output = Vec::new();
     if matches!(format.as_str(), "%s\\n" | "%s\n") {
@@ -131,6 +134,9 @@ pub(crate) fn run(
             diagnostic!("printf: expected UTF-8 variable value");
             return 1;
         };
+        if variables.capture && variables.read().capture_local(name) {
+            return args.status;
+        }
         if let Err(e) = variables.write().assign_builtin_target(name, value) {
             diagnostic!("printf: {e}");
             return 1;
@@ -346,7 +352,7 @@ impl Spec {
             wide |= len == b'l';
             *input = rest;
         }
-        let (conversion, rest) = input.split_first().ok_or("missing format character")?;
+        let (conversion, rest) = input.split_first().ok_or("`%': missing format character")?;
         *input = rest;
         Ok((
             Self {
@@ -661,7 +667,7 @@ fn render(
     args: &mut Arguments<'_>,
     out: &mut Vec<u8>,
     variables: &mut Variables,
-) -> Result<bool, &'static str> {
+) -> Result<bool, std::borrow::Cow<'static, str>> {
     let start = out.len();
     while let Some((&byte, rest)) = input.split_first() {
         input = rest;
@@ -753,13 +759,14 @@ fn render(
                         let name = args.next();
                         if !name.is_empty() {
                             if !is_identifier(name) {
-                                return Err("invalid identifier for %n");
+                                return Err("invalid identifier for %n".into());
                             }
                             if variables.read().readonly(name) {
                                 diagnostic!("printf: {name}: readonly variable");
                                 args.status = 1;
-                            } else {
-                                variables.write().assign(name, &(out.len() - start).to_string());
+                            } else if !(variables.capture && !variables.has_target && input.is_empty()
+                                && args.values.is_empty() && variables.read().capture_local(name)) {
+                                variables.write().assign(name, itoa::Buffer::new().format(out.len() - start));
                             }
                         }
                     }
@@ -784,7 +791,7 @@ fn render(
                             spec.numeric(k, ".", args, out)?;
                         }
                     }
-                    _ => return Err("unsupported conversion"),
+                    _ => return Err(format!("`{}': invalid format character", char::from(conversion)).into()),
                 }
             }
             _ => {

@@ -2,6 +2,7 @@
 import argparse
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -58,6 +59,22 @@ def main():
         contents = seed.read_bytes()
         assert contents.startswith(original) and b": annotation\n" in contents
 
+        # A program appended after a bulk-parsed group has the correct LINENO.
+        growing = home / "growing.sh"
+        initial = "{\n" + "# long physical line\n" * 1800 + "printf 'echo $LINENO\\n' >> \"$0\"\n}\n"
+        for executable in (bash, tonari):
+            growing.write_text(initial)
+            result = subprocess.check_output([executable, growing], cwd=home)
+            assert result == f"{initial.count(chr(10)) + 1}\n".encode(), result
+
+        bindir = home / "bin"
+        bindir.mkdir()
+        for name in ("test-command-a", "test-command-b"):
+            file = bindir / name
+            file.touch(mode=0o755)
+        output = run(tonari, home, "PATH=./bin; compgen -c >/dev/null; compgen -c")
+        assert all(name in output.splitlines() for name in (b"test-command-a", b"test-command-b"))
+
         (home / "rc").write_text("PS1='tonari$ '\nunset HISTFILE\n")
         with terminal(tonari, home, "/usr/bin:/bin", home / "rc", prompt=PROMPT) as fd:
             def enter(keys):
@@ -75,8 +92,19 @@ def main():
             assert (home / "unicode-result").read_bytes() == b"A"
             enter(b"\x1b[200~alias xx='echo accepted'\nxx >alias-result\x1b[201~")
             assert (home / "alias-result").read_text() == "accepted\n"
-            enter(b"v=one two three\x17\x17\x19\x01\x0b")
-            enter(b"trap ': >trapped' USR1")
+            enter(b"v='one two three\x17\x17\x19'")
+            enter(b'printf %s "$v" >kill-result')
+            assert (home / "kill-result").read_bytes() == b"one two three"
+
+            enter(b"trap ': >trapped' USR1; echo $$ >shell-pid")
+            os.write(fd, b"v='before")
+            read_until(fd, b"before")
+            os.kill(int((home / "shell-pid").read_text()), signal.SIGUSR1)
+            read_until(fd, b"\x1b[?2004h")
+            assert (home / "trapped").is_file()
+            enter(b"after'")
+            enter(b'printf %s "$v" >handler-result')
+            assert (home / "handler-result").read_bytes() == b"beforeafter"
         print("History and interactive review witnesses passed")
 
 

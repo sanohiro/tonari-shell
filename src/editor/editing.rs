@@ -148,7 +148,9 @@ impl EditorState {
             }
             _ => (0, cursor),
         };
-        if lo == hi { return cursor; }
+        if lo == hi {
+            return cursor;
+        }
         let killed = ring.entry(self.killing);
         if action != Action::Copy {
             self.undo.record(text, lo..hi, 0, cursor, false);
@@ -158,9 +160,14 @@ impl EditorState {
             text.clear();
             cursor = 0;
         } else if lo != hi {
-            if !self.killing { killed.clear(); }
-            if self.killing && lo < cursor { killed.insert_str(0, &text[lo..hi]); }
-            else { killed.push_str(&text[lo..hi]); }
+            if !self.killing {
+                killed.clear();
+            }
+            if self.killing && lo < cursor {
+                killed.insert_str(0, &text[lo..hi]);
+            } else {
+                killed.push_str(&text[lo..hi]);
+            }
             if action != Action::Copy {
                 text.replace_range(lo..hi, "");
                 cursor = lo;

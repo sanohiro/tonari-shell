@@ -17,6 +17,7 @@ if [[ $SUITE == correctness-review ]]; then
   "$reference" --version > "$out/bash-version.txt"
   python3 tests/review_builtins.py "$current" "$reference" --previous "$bin/baseline" --runs 11 > "$out/builtins.tsv"
   python3 tests/review_language.py "$current" "$reference" > "$out/language.txt"
+  python3 tests/review_language.py "$current" "$reference" --benchmark --before "$bin/baseline" > "$out/language-times.tsv"
   python3 tests/review_runtime.py "$current" "$reference" > "$out/runtime.txt"
   python3 tests/review_interactive.py "$current" "$reference" > "$out/interactive.txt"
   exit
