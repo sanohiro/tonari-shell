@@ -803,7 +803,7 @@ fn wait_child(pid: libc::pid_t, signaled: impl FnOnce(i32)) -> io::Result<u8> {
     }
 }
 
-fn wait_foreground(pid: libc::pid_t, session: &mut Session) -> io::Result<u8> {
+fn wait_foreground(pid: libc::pid_t, session: &Session) -> io::Result<u8> {
     wait_child(pid, |signal| {
         let command = session
             .current_command

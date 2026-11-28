@@ -1053,6 +1053,9 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
                         # This syntax error never attempted a command lookup.
                         wanted = (127, b"") if options == ("--posix",) and not pipe and shell == shells[0] else expected
                         assert (p.returncode, p.stdout) == wanted and p.stderr and not (root / "untouched").exists(), (shell, options, pipe, p)
+            for code in ('{ a=(x ; y); }', 'if true; then\n a=(x ; y); fi'):
+                for shell in shells[:2]:
+                    assert run(shell, code + '\nprintf "status=%s" "$?"')[0] == (0, b"status=1", True)
             for pipe in (True, False):
                 p = subprocess.run([shells[1], *(("-s",) if pipe else ("-c", broken))], input=broken.encode() if pipe else None, cwd=root, env=env, capture_output=True)
                 assert p.returncode == 2 and p.stderr and not (root / "ran").exists()

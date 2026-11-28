@@ -414,7 +414,7 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
 pub(super) fn marked_jobs<'a>(jobs: impl Iterator<Item = &'a Job>) -> (Option<u32>, Option<u32>) {
     let mut current = None;
     let mut previous = None;
-    for job in jobs {
+    for job in jobs.filter(|job| !job.foreground_notice) {
         let rank = Some((job.stopped_at, job.id));
         if rank > current {
             previous = current;
@@ -546,6 +546,14 @@ pub(super) fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, out: &mut d
         if mode == 'p' {
             if writeln!(out, "{pid}").is_err() {
                 return 1;
+            }
+            if args.is_empty() && job.foreground_notice {
+                if out.flush().is_err() {
+                    return 1;
+                }
+                let state = job.display_state(posix);
+                stderr_line!("{state:<26} {}", job.name);
+                job.listed = true;
             }
             continue;
         }
@@ -732,6 +740,8 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
             if job.stopped() {
                 jobs.table.insert(i, job);
                 jobs.report_stopped(i);
+            } else if job.foreground_notice {
+                jobs.table.insert(i, job);
             }
             r.unwrap_or(1)
         }

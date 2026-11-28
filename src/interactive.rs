@@ -154,7 +154,6 @@ pub(super) fn interactive_loop(
             return Ok(code);
         }
         session.jobs.poll();
-        session.jobs.report_foreground_notices();
         if session.jobs.monitor {
             session.jobs.report_changes(session.posix);
         }
@@ -171,10 +170,13 @@ pub(super) fn interactive_loop(
         };
         if source.is_empty() && !queued {
             for hook in session.array_values("PROMPT_COMMAND") {
-                if !hook.is_empty()
-                    && let Flow::Exit(code) = eval_text(session, &hook, status)
-                {
-                    return Ok(code);
+                if !hook.is_empty() {
+                    session.jobs.running_prompt_hook = true;
+                    let flow = eval_text(session, &hook, status);
+                    session.jobs.running_prompt_hook = false;
+                    if let Flow::Exit(code) = flow {
+                        return Ok(code);
+                    }
                 }
             }
         }

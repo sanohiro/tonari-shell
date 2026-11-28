@@ -91,6 +91,8 @@ false; echo skip; echo "status=$?"
     # Bash 5.3 retains background statuses for repeated wait -n and accepts a
     # process substitution PID. Bash 5.2 differs in these two cases.
     wait_results = {
+        # Ubuntu 5.2.21 also drops the most recent background status after a bare wait.
+        "completed last job after bare wait": (b"127\n5\n", b"127\n127\n"),
         "wait -n saved process": (b"7:1\n7\n7\n", b"7:1\n127\n7\n"),
         "wait -n process substitution": (b"7:1\n7\n", b"127:0\n7\n"),
     }

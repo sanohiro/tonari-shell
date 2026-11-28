@@ -327,7 +327,7 @@ pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize)
             return false;
         };
         let mut reader = Reader::new(tokens, spans, source);
-        reader.read_list(&[], true).is_ok() && reader.invalid_array_status.is_none()
+        reader.read_list(&[], true).is_ok() && reader.invalid_array_end.is_none()
     })
 }
 
@@ -597,7 +597,7 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
 
 struct Reader {
     here_extents: Vec<(usize, usize)>,
-    invalid_array_status: Option<u8>,
+    invalid_array_end: Option<usize>,
     depth: usize,
     first_line: usize,
     source: Rc<str>,
@@ -665,7 +665,7 @@ impl Reader {
             first_line: source_line(source),
             line_index: std::cell::Cell::new(0),
             here_extents: Vec::new(),
-            invalid_array_status: None,
+            invalid_array_end: None,
             depth: 0,
             spans,
             alias_source: None,
@@ -801,9 +801,16 @@ impl Reader {
     fn list(&mut self, stops: &[&str]) -> Result<Vec<Statement>, Error> {
         let statements = self.nested(|r| r.read_list(stops, false))?;
         if self.depth == 0
-            && let Some(status) = self.invalid_array_status
+            && let Some(end) = self.invalid_array_end
         {
-            Err(Error::ArrayToken(status))
+            // A closing fi, brace or parenthesis on a later physical line
+            // gives a compound syntax error. Same-line recovery returns 1.
+            let multiline = statements
+                .iter()
+                .find(|s| s.location.start < end && end <= s.location.end)
+                .and_then(|s| s.location.source.get(end..s.location.end))
+                .is_some_and(|rest| rest.as_bytes().contains(&b'\n'));
+            Err(Error::ArrayToken(if multiline { 2 } else { 1 }))
         } else {
             Ok(statements)
         }

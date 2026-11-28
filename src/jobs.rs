@@ -261,6 +261,7 @@ struct Process {
 #[derive(Clone)]
 struct Job {
     id: u32,
+    foreground_notice: bool,
     stopped_at: u64,
     group: Option<pid_t>,
     children: Vec<Process>,
@@ -478,7 +479,7 @@ pub struct Jobs {
     pub monitor: bool,
     pub notify: bool,
     pub(crate) posix_interactive: bool,
-    pending_foreground: String,
+    pub(crate) running_prompt_hook: bool,
     exit_warning: Option<usize>,
     pub(crate) foreground_interrupted: bool,
     pub(crate) quiet: bool,
@@ -617,7 +618,7 @@ impl Jobs {
             crate::traps::reset_caught_signals(&[libc::SIGTSTP]);
         }
         self.tty = None;
-        self.pending_foreground.clear();
+        self.running_prompt_hook = false;
         self.posix_interactive = false;
         self.foreground_interrupted = false;
         self.monitor = false;
@@ -675,6 +676,7 @@ impl Jobs {
             .collect();
         let mut job = Job {
             id: 0,
+            foreground_notice: false,
             stopped_at: 0,
             group: launch.group.filter(|g| *g != 0),
             children,
@@ -726,6 +728,8 @@ impl Jobs {
             if job.stopped() {
                 self.store(job);
                 self.report_stopped(self.table.len() - 1);
+            } else if job.foreground_notice {
+                self.store(job);
             }
             Ok((code, None))
         }
@@ -755,30 +759,25 @@ impl Jobs {
             self.foreground_interrupted = true;
         }
         if let Some(sig) = job.children.last().and_then(|c| c.signal) {
-            self.report_signal(sig, &job.name);
-        }
-    }
-
-    pub(crate) fn report_signal(&mut self, signal: i32, command: &str) {
-        if !self.quiet
-            && !matches!(signal, libc::SIGINT | libc::SIGPIPE)
-            && let Some(reason) = signal_description(signal)
-        {
-            if self.posix_interactive && self.monitor && !self.notify {
-                use std::fmt::Write as _;
-                let _ = writeln!(self.pending_foreground, "{reason:<26} {command}");
+            if self.posix_interactive
+                && self.monitor
+                && !self.notify
+                && !self.running_prompt_hook
+                && !matches!(sig, libc::SIGINT | libc::SIGPIPE)
+            {
+                job.foreground_notice = true;
             } else {
-                stderr_line!("{reason:<26} {command}");
+                self.report_signal(sig, &job.name);
             }
         }
     }
 
-    pub(crate) fn report_foreground_notices(&mut self) {
-        if !self.pending_foreground.is_empty() {
-            let _ = io::stderr()
-                .lock()
-                .write_all(self.pending_foreground.as_bytes());
-            self.pending_foreground.clear();
+    pub(crate) fn report_signal(&self, signal: i32, command: &str) {
+        if !self.quiet
+            && !matches!(signal, libc::SIGINT | libc::SIGPIPE)
+            && let Some(reason) = signal_description(signal)
+        {
+            stderr_line!("{reason:<26} {command}");
         }
     }
 
@@ -787,7 +786,9 @@ impl Jobs {
             let job = &self.table[i];
             if job.listed && !job.active() && !job.stopped() {
                 let done = self.table.remove(i);
-                self.remember(&done);
+                if !done.foreground_notice {
+                    self.remember(&done);
+                }
             }
         }
     }
@@ -954,12 +955,17 @@ impl Jobs {
         let markers = marked_jobs(self.table.iter());
         for job in &mut self.table {
             if !job.active() && !job.listed {
-                let _ = job_line(
-                    &mut io::stderr().lock(),
-                    job,
-                    job_marker(job.id, markers),
-                    &job.display_state(posix),
-                );
+                let state = job.display_state(posix);
+                if job.foreground_notice {
+                    stderr_line!("{state:<26} {}", job.name);
+                } else {
+                    let _ = job_line(
+                        &mut io::stderr().lock(),
+                        job,
+                        job_marker(job.id, markers),
+                        &state,
+                    );
+                }
                 job.listed = true;
             }
         }
