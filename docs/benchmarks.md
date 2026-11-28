@@ -1,5 +1,7 @@
 # Startup and execution / 起動と実行性能
 
+Native measurements for the whole-shell review of `1754509` cover startup, editing, parsing, expansion and process control. 入力の裾の遅延と Bash との比較は全体監査にまとめた。 [Whole-shell review / 全体監査](whole-shell-audit.md)
+
 ## Copying an existing scalar / 既存スカラーへの代入
 
 A plain assignment from another stored variable took an owned snapshot and then copied it again into the destination. The plain assignment now moves the snapshot. Literal and append operations still reuse the destination buffer. On a native Apple M1, UTF-8 text of 16,384 ASCII bytes assigned 1,024 / 2,048 / 4,096 times took 9.574 / 11.272 / 11.957 ms before and 8.619 / 9.641 / 11.027 ms after. GNU Bash 5.3.20 took 68.480 / 122.061 / 217.433 ms. Each sample launched a release shell in an isolated directory and verified the length. Nine interleaved timings followed three warmups per executable. Other processes were active. The absolute gains on short inputs were small.

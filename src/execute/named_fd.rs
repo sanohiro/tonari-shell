@@ -14,15 +14,15 @@ impl Scope {
     fn redirect(
         &mut self,
         session: &mut Session,
-        mut raw: Redirect<Word>,
+        raw: Redirect<Word>,
         status: u8,
         captured: &Cell<Option<u8>>,
     ) -> io::Result<bool> {
-        let variable = raw.variable.take();
         let mut exp = Expansion::new(session, status, captured);
         let expanded = prepare_redirects([raw], &mut exp).map_err(io::Error::other)?;
-        for (i, mut r) in expanded.into_iter().enumerate() {
-            let name = variable.as_deref().filter(|_| i == 0);
+        for mut r in expanded {
+            let variable = r.variable.take();
+            let name = variable.as_deref();
             let close = r.target == Target::Duplicate && r.word == "-";
             if let Some(name) = name {
                 if close {
@@ -90,6 +90,10 @@ impl Scope {
                 }
             }
             let action = action(&r);
+            if action.same_fd() {
+                session.stdin_redirected |= r.fd == 0;
+                continue;
+            }
             let actions = std::slice::from_ref(&action);
             protect_fds(actions)?;
             if (name.is_none() || close) && !self.restore.iter().any(|(n, _)| *n == r.fd) {
@@ -99,10 +103,7 @@ impl Scope {
             if apply_protected(actions, libc::PIPE_BUF, session).is_err() {
                 return Ok(false);
             }
-            match action {
-                Action::Dup(from, to) if from == to => {}
-                _ => self.changed.push(r.fd),
-            }
+            self.changed.push(r.fd);
             session.stdin_redirected |= r.fd == 0;
         }
         Ok(true)

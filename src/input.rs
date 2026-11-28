@@ -309,7 +309,20 @@ pub(crate) fn still_open(
                         && parser::validate_tail(&format!("case x in\n{text}\nesac"), session, 1))
         }
         Some(SingleQuote) => memchr::memchr2(b'\'', 0, line).is_none(),
-        Some(DoubleQuote) => !line.iter().any(|b| b"\"\0$`\\".contains(b)),
+        Some(DoubleQuote) => {
+            // Simple parameters cannot close a quote. For nested expansions,
+            // check this physical line before reparsing the growing prefix.
+            let mut bytes = line.iter();
+            while let Some(&byte) = bytes.next() {
+                if matches!(byte, b'"' | 0 | b'`' | b'\\') {
+                    return false;
+                }
+                if byte == b'$' && matches!(bytes.as_slice().first(), Some(b'(' | b'{' | b'[')) {
+                    return parser::double_quote_line(text, session);
+                }
+            }
+            true
+        }
         Some(Message("line continuation")) => line
             .strip_suffix(b"\\\n")
             .is_some_and(|s| s.iter().all(plain)),
@@ -541,7 +554,11 @@ fn run(
             input.clear();
             continue;
         }
-        let buffered = line_start == 0 && n != 0 && !shared_offset && !session.verbose;
+        let buffered = line_start == 0
+            && n != 0
+            && !reader.buffer().is_empty()
+            && !session.verbose
+            && (!shared_offset || !session.reads_aliases());
         let mut result = parse_prefix(session, text, buffered, |s| {
             parser::session_source_at(text, n == 0, s, base_line)
         });
@@ -569,12 +586,7 @@ fn run(
                 return error(e, 1);
             }
             let parse = |size| {
-                let rest = std::str::from_utf8(&reader.buffer()[..size])
-                    .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
-                let mut unit = String::with_capacity(text.len() + size);
-                unit.push_str(text);
-                unit.push_str(rest);
-                parser::session_source_at(&unit, false, session, base_line)
+                lookahead::parse_buffered(text, &reader.buffer()[..size], session, base_line)
             };
             let batch = if !from_stdin
                 && !session.onecmd
@@ -596,6 +608,20 @@ fn run(
                     session.command_number += extra_commands;
                 }
                 reader.consume(consumed);
+                base_line += lines;
+                result = Ok(program);
+            } else if shared_offset
+                && line_start == 0
+                && matches!(
+                    result,
+                    Err(parser::Error::Incomplete(parser::Incomplete::CompoundEnd(
+                        _
+                    )))
+                )
+                && !session.reads_aliases()
+                && let Some((program, lines)) =
+                    lookahead::shared_compound(&mut reader, text, session, base_line)
+            {
                 base_line += lines;
                 result = Ok(program);
             }
@@ -660,6 +686,9 @@ pub fn text(
     if !session.verbose
         && let Some(program) = whole_group(session, source, first_line)
     {
+        if tail && session.command_string {
+            session.command_string_at_end = true;
+        }
         return if check {
             Flow::Continue(0)
         } else {
@@ -805,6 +834,9 @@ pub fn text(
                 let remember = tail
                     && (!session.interactive || session.command_history_expansion)
                     && session.begin_history_line(text);
+                if tail && session.command_string {
+                    session.command_string_at_end = last;
+                }
                 let flow = program.run(session, state.status, tail && last);
                 session.command_number += usize::from(tail && !session.interactive);
                 if remember {

@@ -433,9 +433,15 @@ fn apply_invocation_options(
         diagnostic!("SIGHUP: {e}");
         return Err(1);
     }
-    session.jobs.monitor = invocation.options.monitor.unwrap_or(session.interactive);
-    if session.jobs.monitor {
-        session.jobs.init(session.interactive);
+    if session.interactive {
+        session.jobs.monitor = session.jobs.init(true);
+        if !session.jobs.monitor {
+            diagnostic!("no job control in this shell");
+        }
+    } else if invocation.options.monitor == Some(true) {
+        // Scripts can explicitly request process groups without owning a tty.
+        session.jobs.monitor = true;
+        session.jobs.init(false);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
     if !invocation.pretty
@@ -448,14 +454,11 @@ fn apply_invocation_options(
     }
     session.command_history_expansion = invocation.options.histexpand == Some(true);
     session.stdin_script = matches!(invocation.input, Input::Stdin);
-    if let Some(enabled) = invocation
-        .options
-        .posix
-        .filter(|&enabled| enabled != env.posix)
-    {
-        session.set_posix(enabled);
+    let inherited_posix = env.posix || env.posix_pedantic;
+    if invocation.options.posix.unwrap_or(inherited_posix) && !env.posix {
+        session.set_posix(true);
     } else {
-        session.apply_posix_mode(env.posix);
+        session.apply_posix_mode(inherited_posix);
     }
     session.shopt.progcomp_alias = session.interactive;
     for (enable, name) in std::mem::take(&mut invocation.options.shopts) {
@@ -516,7 +519,7 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
             return 126;
         }
     };
-    let env = startup::Environment::read(session, changed_ids);
+    let env = startup::Environment::read(session, changed_ids, &invocation);
     if session.privileged || changed_ids {
         session.unset_variable("CDPATH");
         session.unset_variable("GLOBIGNORE");

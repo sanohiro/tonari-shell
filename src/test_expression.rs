@@ -111,18 +111,24 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             }
             Binary(w, op @ ("<" | ">" | "=" | "==" | "!="), right)
                 if (!session.shopt.nocasematch || matches!(*op, "<" | ">"))
-                    && let Some(right) = right.as_literal()
                     && let Some(v) = w.stored_parameter(session) =>
             {
-                if matches!(*op, "<" | ">") {
-                    let order = pattern::text_order(v, right, session);
-                    return Ok(if *op == "<" {
-                        order.is_lt()
-                    } else {
-                        order.is_gt()
-                    });
+                if let Some(right) = right.as_literal() {
+                    if matches!(*op, "<" | ">") {
+                        let order = pattern::text_order(v, right, session);
+                        return Ok(if *op == "<" {
+                            order.is_lt()
+                        } else {
+                            order.is_gt()
+                        });
+                    }
+                    return builtins::binary(v, op, right).map_err(error);
                 }
-                return builtins::binary(v, op, right).map_err(error);
+                if matches!(*op, "=" | "==" | "!=")
+                    && let Some(right) = right.stored_quoted_parameter(session)
+                {
+                    return Ok((v == right) != (*op == "!="));
+                }
             }
             _ => {}
         }
@@ -204,12 +210,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                 "=" | "==" | "!=" => {
                     if !session.xtrace
                         && !session.shopt.nocasematch
-                        && let crate::word::Word::Expanded(parts) = right
-                        && matches!(
-                            parts.as_slice(),
-                            [crate::word::Part::Parameter { quoted: true, .. }]
-                        )
-                        && let Some(value) = right.stored_parameter(session)
+                        && let Some(value) = right.stored_quoted_parameter(session)
                     {
                         return Ok((left == value) != (op == "!="));
                     }
@@ -551,6 +552,7 @@ pub struct Compiled {
     pattern: String,
     regex: Result<Box<libc::regex_t>, String>,
     captures: usize,
+    suffix_len: usize,
 }
 
 impl Compiled {
@@ -588,14 +590,21 @@ impl Compiled {
                     }
                 }),
                 captures: 0,
+                suffix_len: 0,
             });
         }
         let captures = capture_count(&pattern) + 1;
+        let suffix_len = if ignore_case {
+            0
+        } else {
+            required_suffix(&pattern)
+        };
         Ok(Self {
             pattern,
             locale,
             regex: Ok(unsafe { regex.assume_init() }),
             captures,
+            suffix_len,
         })
     }
 
@@ -606,6 +615,17 @@ impl Compiled {
                 self.pattern
             );
         })?;
+        if self.suffix_len != 0 {
+            let end = self.pattern.len() - 1;
+            if !text.ends_with(&self.pattern[end - self.suffix_len..end]) {
+                // Keep the native C-string input contract even on early misses.
+                return if memchr::memchr(0, text.as_bytes()).is_some() {
+                    Err(())
+                } else {
+                    Ok(None)
+                };
+            }
+        }
         let mut small_text = [0u8; 256];
         let allocated;
         let encoded = if text.len() < small_text.len() {
@@ -650,6 +670,25 @@ impl Compiled {
             _ => Err(()),
         }
     }
+}
+
+// These EREs contain only concatenation, single-atom quantifiers and anchors.
+// Every valid match must end with the final run of literal ASCII characters.
+// More expressive syntax and case folding continue through the POSIX engine.
+fn required_suffix(pattern: &str) -> usize {
+    let Some(body) = pattern.strip_suffix('$') else {
+        return 0;
+    };
+    if !body
+        .bytes()
+        .all(|c| c.is_ascii_alphanumeric() || b"_. /-^$+?*".contains(&c))
+    {
+        return 0;
+    }
+    body.bytes()
+        .rev()
+        .take_while(u8::is_ascii_alphanumeric)
+        .count()
 }
 
 impl Drop for Compiled {

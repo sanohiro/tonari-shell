@@ -118,7 +118,9 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
     }
     if let Some(key) = name.strip_prefix('#')
         && !env.shadows(key)
-        && let Some(n) = env.session.stored_char_count(key)
+        && let Some(n) = env
+            .session
+            .stored_char_count(key, !env.has_pending_assignments())
     {
         return Ok(Some(itoa::Buffer::new().format(n).to_owned()));
     }

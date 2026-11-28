@@ -72,7 +72,8 @@ impl ReverseSearch {
         match action {
             Action::Search => self.index += 1,
             Action::Rubout => {
-                self.query.pop();
+                self.query
+                    .truncate(super::previous(&self.query, self.query.len()));
                 self.index = 0;
             }
             Action::Insert => {

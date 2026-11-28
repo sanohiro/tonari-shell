@@ -541,7 +541,7 @@ fn run_arithmetic_loop(
     })
 }
 
-fn fixed_case(pattern: &CasePattern, value: &str, session: &Session) -> Option<bool> {
+fn borrowed_case(pattern: &CasePattern, value: &str, session: &Session) -> Option<bool> {
     Some(match pattern {
         CasePattern::Fixed(matcher) if session.shopt.nocasematch => {
             matcher.insensitive(value, false, session)
@@ -550,7 +550,20 @@ fn fixed_case(pattern: &CasePattern, value: &str, session: &Session) -> Option<b
         CasePattern::Extended(source, matcher) => {
             matcher.matches(value, source, session.shopt.glob.extglob, session)
         }
-        CasePattern::Dynamic(_) => return None,
+        CasePattern::Dynamic(word) => {
+            let pattern = word.stored_parameter(session)?;
+            // A stored string without pattern syntax means the same thing
+            // quoted and unquoted. Recheck the live binding on each visit.
+            if pattern.contains(['*', '?', '[', '\\', '(', '\0']) {
+                return None;
+            }
+            if session.shopt.nocasematch {
+                crate::pattern::folded_prefix(value, pattern, session.character_locale())
+                    == Some(value.len())
+            } else {
+                value == pattern
+            }
+        }
     })
 }
 
@@ -580,7 +593,7 @@ fn run_case(
         let selected = (|| {
             for (patterns, body, end) in arms {
                 for pattern in patterns {
-                    if fixed_case(pattern, value, session)? {
+                    if borrowed_case(pattern, value, session)? {
                         return (*end == crate::parser::CaseEnd::Stop).then_some(Some(body));
                     }
                 }
@@ -609,19 +622,21 @@ fn run_case(
         let mut matched = fall_through;
         if !matched {
             for pattern in patterns {
-                matched = match pattern {
-                    CasePattern::Dynamic(word) => {
-                        match expand_case(session, word.clone(), last, true) {
-                            Ok(glob) => crate::pattern::extended::session_match(
-                                &value,
-                                &glob,
-                                session.shopt.glob.extglob,
-                                session,
-                            ),
-                            Err(f) => return f,
-                        }
+                matched = if let Some(hit) = borrowed_case(pattern, &value, session) {
+                    hit
+                } else {
+                    let CasePattern::Dynamic(word) = pattern else {
+                        unreachable!()
+                    };
+                    match expand_case(session, word.clone(), last, true) {
+                        Ok(glob) => crate::pattern::extended::session_match(
+                            &value,
+                            &glob,
+                            session.shopt.glob.extglob,
+                            session,
+                        ),
+                        Err(f) => return f,
                     }
-                    fixed => fixed_case(fixed, &value, session).unwrap(),
                 };
                 if matched {
                     break;

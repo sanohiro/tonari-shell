@@ -200,6 +200,19 @@ impl Word {
         }
     }
 
+    pub(crate) fn stored_quoted_parameter<'s>(
+        &self,
+        session: &'s crate::Session,
+    ) -> Option<&'s str> {
+        if let Self::Expanded(parts) = self
+            && matches!(parts.as_slice(), [Part::Parameter { quoted: true, .. }])
+        {
+            self.stored_parameter(session)
+        } else {
+            None
+        }
+    }
+
     fn fixed_parts(&self) -> bool {
         matches!(self, Self::Literal(_))
             || matches!(self, Self::Expanded(parts) if parts.iter().all(|p| matches!(p, Part::Text(_) | Part::Unquoted(_) | Part::Pattern(_))))

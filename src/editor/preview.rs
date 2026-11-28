@@ -210,7 +210,12 @@ impl Preview {
         let mut erased = false;
         let mut edited = false;
         let mut text = String::new();
-        for n in 0..Keys::BURST_BYTES {
+        let limit = if self.replay.is_empty() {
+            Keys::FIRST_FRAME_BYTES
+        } else {
+            Keys::BURST_BYTES
+        };
+        for n in 0..limit {
             let mut byte = 0u8;
             if unsafe { libc::read(0, (&mut byte as *mut u8).cast(), 1) } != 1 {
                 // VMIN=0. A hung-up terminal stays readable.

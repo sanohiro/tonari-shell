@@ -58,6 +58,7 @@ fn entropy() -> Option<u32> {
 impl Session {
     pub(crate) fn enter_subshell(&mut self) {
         self.subshell_depth += 1;
+        self.substitution_shell = false;
         if self.shopt.compat > 44 {
             self.parent_loop_in_subshell |= self.loop_depth != 0;
             self.loop_depth = 0;

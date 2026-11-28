@@ -78,7 +78,7 @@ if [[ $SUITE == release-diagnostics ]]; then
   cp "$(RUSTFLAGS='-Zunstable-options -Cpanic=immediate-abort' tools/build-release.sh)" "$RUNNER_TEMP/bin/immediate"
 fi
 case "$SUITE" in
-  second-review|review-findings|correctness-review|shell-scaling|array-evaluation|\
+  whole-*|second-review|review-findings|correctness-review|shell-scaling|array-evaluation|\
   shell-paths|runtime-review|expansion-review|capture-parser|function-tables|\
   core-engine|compound-listings|listings-expansion|priority-review|startup-review|\
   audit-hot-paths|source-review|spec-hot|external-yash-*|external-review-*|\

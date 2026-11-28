@@ -38,6 +38,12 @@ Listings such as `command -v`, `jobs`, `help`, `kill -l`, `caller`, `dirs`, `pus
 
 ## Required glob suffixes and global array elements / glob の末尾とグローバル配列
 
+<a id="numeric-filename-values"></a>
+
+With `GLOBSORT=numeric`, Tonari orders `90000000000000000000` before `100000000000000000000`. With `-numeric`, the larger number comes first. GNU Bash 5.3.20 converts both names with `strtoimax` and treats them as equal on overflow. On the macOS comparison filesystem it returned the same relative order in both directions. Tonari compares all significant digits and uses filename collation for equal values such as `008` and `8`, as the Bash manual specifies. [GNU Bash variable reference](https://www.gnu.org/software/bash/manual/html_node/Bash-Variables.html#index-GLOBSORT) · [Forward and reverse sort checks](../tools/ci/whole-language.py)
+
+`GLOBSORT=numeric` では、整数型に収まらない数字だけのファイル名も全桁の数値で並べる。数値が等しい場合はファイル名順で決まり、`-numeric` ではその順序も反転する。GNU Bash 5.3.20 は変換時に上限を超えた値を同じ値として扱う。
+
 On GNU Bash 5.3.20, `s=aaa; [[ $s == !(z)*!(z)*y ]]` succeeds. The final literal `y` is required, so Tonari returns 1. Reaching the end of the subject at a nullable group still requires matching the remaining pattern. The same rule applies when the suffix requires one character, or when the negative group itself excludes empty input. Regression tests exercise conditional matching, replacement and trimming.
 
 Inside a function with a local associative array `m`, GNU Bash 5.2.21 and 5.3.20 write `declare -g 'm[k]=new'` into the local array in the comparison fixture. Tonari writes the global binding selected by `-g`. The test inspects both the local value before return and the global value afterward. [Shell comparisons](../tests/shell.py)
@@ -510,3 +516,7 @@ The comparison exits nonzero if a name disappears, a matching observation or tim
 Tonari bounds name-reference chains at 32 lookup steps. At the limit it reports a proven cycle separately from a depth limit on a finite chain. Both cases leave the referenced binding unchanged.
 
 名前参照は最大 32 段で探索を打ち切る。循環を確認できた場合と、有限の長い参照で上限に達した場合で診断を分け、どちらも参照先を変更しない。
+
+When an interactive `exec ./missing-program 2>"$other_pty"` fails, the shell still owns its original controlling terminal. Tonari keeps job control active, so `shopt -qo monitor` returns 0. GNU Bash 5.3.20 disables it in this case. The regression uses two private pseudo-terminals and also checks the foreground group after the shell exits. [Terminal ownership regression](../tests/shell.py)
+
+対話中の `exec` が失敗し、そのコマンドの標準エラーを別の端末に向けていた場合でも、実際の制御端末は元のままである。Tonari はジョブ制御を維持する。GNU Bash 5.3.20 ではこの条件で無効になる。

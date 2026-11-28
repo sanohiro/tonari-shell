@@ -69,6 +69,9 @@ impl KeywordArgs {
 #[derive(Debug, Clone)]
 pub struct SimpleCommand<W = String> {
     pub location: Option<Box<Location>>,
+    // A lone external can directly replace its explicit subshell or coprocess
+    // even when the command has redirections of its own.
+    pub direct_exec: bool,
     pub compound: Option<std::rc::Rc<Command>>,
     pub words: Vec<W>,
     pub redirects: Vec<Redirect<W>>,
@@ -80,6 +83,7 @@ impl<W> Default for SimpleCommand<W> {
     fn default() -> Self {
         Self {
             location: None,
+            direct_exec: false,
             compound: None,
             words: Vec::new(),
             redirects: Vec::new(),

@@ -1,5 +1,7 @@
 # Engineering notes / 開発知見
 
+The whole-shell review documents the physical stdin boundary, the verified terminal-frame observer, and the cost of repeated UTF-8 scans. 標準入力の境界と端末表示の検証方法を全体監査に記録した。 [Whole-shell review / 全体監査](whole-shell-audit.md)
+
 ## Foreground signal notices at the prompt / フォアグラウンドのシグナル通知
 
 In an interactive POSIX shell with monitor mode enabled and asynchronous notices disabled, GNU Bash 5.3.20 reports a foreground command's terminating signal immediately before the next prompt. Subsequent commands on the same input line can print first. Tonari retains each completed foreground job until a listing, an explicit wait or the next prompt consumes its status. A pre-prompt hook reports signals from its own commands while the hook runs. With asynchronous notifications enabled or POSIX mode disabled, the notice appears immediately. The PTY check uses a byte marker between the signal and prompt to verify each ordering.

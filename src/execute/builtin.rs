@@ -261,13 +261,34 @@ pub(super) fn eval_builtin(
             in_stage_child,
         ),
         Builtin::Exec => exec_builtin(cmd, session, args),
-        Builtin::Function => crate::eval::call_with_bindings(
-            session,
-            std::mem::take(&mut cmd.words),
-            last_status,
-            false,
-            &mut bindings,
-        ),
+        Builtin::Function => {
+            // Bash only marks a final simple command in an asynchronous
+            // function. A -c reader must have consumed its last input line.
+            let replace = cmd.environment == external::ChildEnvironment::AsyncCommand
+                && !session.evaluating
+                && session.source_depth == 0
+                && (!session.command_string || session.command_string_at_end)
+                && session
+                    .functions
+                    .get(&cmd.words[0])
+                    .is_some_and(|function| {
+                        let body = function.definition.body.statements();
+                        (body.len() > 1 || session.command_string)
+                            && body.last().is_some_and(|s| {
+                                !s.negated
+                                    && s.single_stage().is_some_and(|stage| {
+                                        stage.compound.is_none() && stage.redirects.is_empty()
+                                    })
+                            })
+                    });
+            crate::eval::call_with_bindings(
+                session,
+                std::mem::take(&mut cmd.words),
+                last_status,
+                replace,
+                &mut bindings,
+            )
+        }
         Builtin::Trap => Flow::Continue(session.traps.builtin(
             args,
             session.interactive,
@@ -493,7 +514,7 @@ pub(super) fn eval_builtin(
 }
 
 #[inline(never)]
-fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -> Flow {
+fn exec_builtin(cmd: &PreparedCommand, session: &mut Session, mut args: &[String]) -> Flow {
     let mut clear = false;
     let mut login = false;
     let mut arg0 = None;
@@ -532,7 +553,14 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
         external::ChildEnvironment::ReplaceShell
     };
     let status = match External::for_words(cmd, session, args, arg0, environment) {
-        Ok(external) => external.exec(session, false),
+        Ok(external) => {
+            let released = session.jobs.restore_initial_group();
+            let status = external.exec(session, false);
+            if released {
+                session.jobs.resume_after_failed_exec();
+            }
+            status
+        }
         Err(error) => {
             diagnostic!("exec: {error}");
             126
@@ -601,13 +629,18 @@ impl<'a> PlainOutput<'a> {
                     return None;
                 }
                 let mut rest = format.as_bytes();
-                while let Some(i) = memchr::memchr(b'%', rest) {
-                    if !matches!(rest.get(i + 1), Some(b'%' | b's'))
-                        || i > 0 && rest[i - 1] == b'\\'
-                    {
-                        return None;
-                    }
-                    rest = &rest[i + 2..];
+                while let Some(i) = memchr::memchr2(b'%', b'\\', rest) {
+                    rest = match &rest[i..] {
+                        [b'%', b'%' | b's', tail @ ..] => tail,
+                        [b'\\', b'x' | b'u' | b'U', tail @ ..]
+                            if tail.first().is_none_or(|b| !b.is_ascii_hexdigit()) =>
+                        {
+                            return None;
+                        }
+                        [b'\\', _, tail @ ..] => tail,
+                        [b'\\'] => break,
+                        _ => return None,
+                    };
                 }
                 Some(Self::Printf(words))
             }
@@ -766,7 +799,7 @@ pub(super) fn run_builtin(
     // Keep the normal function scope and let each statement recheck active traps.
     if final_command
         && matches!(builtin, Builtin::Function)
-        && session.subshell_depth > 0
+        && session.substitution_shell
         && cmd.redirects.is_empty()
         && cmd.assignments.is_empty()
         && session.substitutions.scope() == 0
@@ -837,6 +870,31 @@ fn run_redirected_builtin(
         return Ok(result);
     }
     if !final_command
+        && let [Action::Dup(src, 1)] = actions
+        && *src != 1
+        && let Some(output) = PlainOutput::new(builtin, cmd, 512)
+        && let Ok(reservation) = fd::duplicate_except(*src, 0, |_| false)
+        && (reservation.as_raw_fd() >= 1 || {
+            let mut limit = std::mem::MaybeUninit::uninit();
+            unsafe {
+                libc::getrlimit(libc::RLIMIT_NOFILE, limit.as_mut_ptr()) == 0
+                    && limit.assume_init().rlim_cur > 1
+            }
+        })
+    {
+        // GNU can reserve a vacant standard descriptor at the file limit.
+        // Release it before rendering so diagnostics still see the caller's
+        // stderr. Neither byte-only builtin can close the validated source.
+        drop(reservation);
+        use std::io::Write;
+        let (data, status) = output.render(session);
+        return Ok(Flow::Continue(output_status(
+            &cmd.words[0],
+            crate::builtins::OutputFd(*src).write_all(&data),
+            status,
+        )));
+    }
+    if !final_command
         && let [Action::Open(1, path, flags)] = actions
         && let Some(output) = PlainOutput::for_redirect(builtin, cmd)
     {
@@ -886,6 +944,9 @@ fn run_redirected_builtin(
     let mut extra = Vec::new();
     if !final_command || can_install_trap(builtin, cmd) || session.traps.catches(0) {
         for action in actions {
+            if action.same_fd() {
+                continue;
+            }
             let fd = action.destination();
             if let Some(slot) = saved.get_mut(fd as usize) {
                 if matches!(slot, SavedFd::Unchanged) {

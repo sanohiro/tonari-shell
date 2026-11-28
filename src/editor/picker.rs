@@ -97,7 +97,7 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session, query: &mut String) -
         16 => Key::Up,
         7 => Key::Cancel,
         8 | 127 => {
-            query.pop();
+            query.truncate(super::previous(query, query.len()));
             Key::Changed
         }
         27 => {
@@ -173,11 +173,30 @@ pub(super) fn choose(
 ) -> io::Result<Option<usize>> {
     let mut hits = Vec::new();
     let mut scanned = 0;
+    let mut accepting = false;
+    let locale = session.character_locale();
     let contains = |value: &str, needle: &str| {
         if !session.bindings.ignore_case {
             return value.contains(needle);
         }
-        let locale = session.character_locale();
+        if !matches!(locale, crate::session::CharacterLocale::Turkic)
+            && !needle.is_empty()
+            && needle.is_ascii()
+            && value.is_ascii()
+        {
+            let first = needle.as_bytes()[0];
+            let value = value.as_bytes();
+            return memchr::memchr2_iter(
+                first.to_ascii_lowercase(),
+                first.to_ascii_uppercase(),
+                value,
+            )
+            .any(|i| {
+                value[i..]
+                    .get(..needle.len())
+                    .is_some_and(|part| part.eq_ignore_ascii_case(needle.as_bytes()))
+            });
+        }
         value
             .char_indices()
             .any(|(at, _)| crate::pattern::folded_prefix(&value[at..], needle, locale).is_some())
@@ -195,6 +214,17 @@ pub(super) fn choose(
             } else {
                 let finder = memchr::memmem::Finder::new(query.as_bytes());
                 while scanned < choices.len() && hits.len() < wanted {
+                    if scanned.is_multiple_of(128) {
+                        if crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+                            || crate::traps::input_interrupted()
+                            || super::RESIZED.load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            return Err(io::ErrorKind::Interrupted.into());
+                        }
+                        if !accepting && keys.input_pending() {
+                            break;
+                        }
+                    }
                     let index = scanned;
                     scanned += 1;
                     if (!session.bindings.ignore_case
@@ -206,7 +236,14 @@ pub(super) fn choose(
                 }
             }
         }
-        *selected = (*selected).min(hits.len().saturating_sub(1));
+        if scanned == choices.len() {
+            *selected = (*selected).min(hits.len().saturating_sub(1));
+        }
+        if std::mem::take(&mut accepting)
+            && let Some(&index) = hits.get(*selected)
+        {
+            return Ok(Some(index));
+        }
         let offset = *selected / rows * rows;
         let page = hits
             .iter()
@@ -219,7 +256,11 @@ pub(super) fn choose(
             page,
             *selected - offset,
             query,
-            "(no matches)",
+            if scanned == choices.len() {
+                "(no matches)"
+            } else {
+                "(searching)"
+            },
         );
         io::stderr().write_all(screen.output.as_bytes())?;
         let Some(first) = keys.get()? else {
@@ -233,6 +274,7 @@ pub(super) fn choose(
                 if let Some(&index) = hits.get(*selected) {
                     return Ok(Some(index));
                 }
+                accepting = scanned < choices.len();
                 continue;
             }
             Key::Down => {

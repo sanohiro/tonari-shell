@@ -114,6 +114,23 @@ impl Variable {
         &mut self.value
     }
 
+    fn append_scalar(&mut self, suffix: &str, allexport: bool) -> bool {
+        let Some(value) = self.value.as_mut() else {
+            return false;
+        };
+        value.push_str(suffix);
+        let cached = self.char_count.get();
+        if cached != 0 {
+            let length = u32::try_from(crate::word::character_count(suffix))
+                .ok()
+                .and_then(|length| cached.checked_add(length));
+            self.char_count.set(length.unwrap_or(0));
+        }
+        self.declared = true;
+        self.exported |= allexport;
+        true
+    }
+
     fn inherited(&self, name: &str) -> bool {
         *self
             .inherited
@@ -333,6 +350,7 @@ pub struct Session {
     // flag. A newly forked compound command establishes its own context.
     pub(crate) parenthesized_subshell: bool,
     pub(crate) pipeline_subshell: bool,
+    pub(crate) substitution_shell: bool,
     pub histexpand: bool,
     pub emacs: bool,
     pub vi: bool,
@@ -346,6 +364,7 @@ pub struct Session {
     pub(crate) trace_depth: u32,
     pub(crate) signal_line: Option<usize>,
     pub command_string: bool,
+    pub(crate) command_string_at_end: bool,
     pub(crate) execution_string: Option<Rc<String>>,
     pub(crate) source_set_args: bool,
     pub command_history_expansion: bool,
@@ -849,8 +868,8 @@ impl Session {
             None => {
                 // In-process script reentry changes only PATH and directory/level
                 // variables. These inherited settings stay constant.
-                static INHERITED: [std::sync::OnceLock<Option<String>>; 6] =
-                    [const { std::sync::OnceLock::new() }; 6];
+                static INHERITED: [std::sync::OnceLock<Option<String>>; 7] =
+                    [const { std::sync::OnceLock::new() }; 7];
                 let slot = match name {
                     "HISTSIZE" => Some(0),
                     "HISTCONTROL" => Some(1),
@@ -858,6 +877,7 @@ impl Session {
                     "histchars" => Some(3),
                     "HOME" => Some(4),
                     "PROMPT_DIRTRIM" => Some(5),
+                    "TMOUT" => Some(6),
                     "IFS" => return Some(Cow::Borrowed(crate::word::DEFAULT_IFS)),
                     _ => None,
                 };
@@ -1193,13 +1213,7 @@ impl Session {
         if var.elements.is_some() || var.nameref || var.letter_case.is_some() || var.dynamic {
             return false;
         }
-        let Some(value) = var.scalar_mut() else {
-            return false;
-        };
-        value.push_str(suffix);
-        var.declared = true;
-        var.exported |= self.allexport;
-        true
+        var.append_scalar(suffix, self.allexport)
     }
 
     fn apply_variable_effects(&mut self, name: &str, value: &str) {
@@ -1354,6 +1368,9 @@ impl Session {
             return false;
         }
         let integer = var.integer;
+        if append && !integer {
+            return var.append_scalar(&value, self.allexport);
+        }
         let Some(current) = var.scalar_mut().as_mut() else {
             return false;
         };
@@ -1370,8 +1387,6 @@ impl Session {
                 rhs
             };
             itoa::Buffer::new().format(result).clone_into(current);
-        } else if append {
-            current.push_str(&value);
         } else {
             match value {
                 Cow::Borrowed(s) => s.clone_into(current),
@@ -1449,7 +1464,12 @@ impl Session {
         }
     }
 
-    pub(crate) fn stored_char_count(&self, name: &str) -> Option<usize> {
+    pub(crate) fn stored_char_count(&self, name: &str, follow_refs: bool) -> Option<usize> {
+        let name = if follow_refs && self.is_nameref(name) {
+            self.scalar_reference_target(name)?
+        } else {
+            name
+        };
         if !is_identifier(name)
             || matches!(
                 name,

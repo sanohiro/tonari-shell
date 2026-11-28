@@ -57,6 +57,11 @@ thread_local! {
 pub(crate) struct PrivateFile(Rc<FileSlot>);
 
 impl PrivateFile {
+    pub(crate) fn read_at(&self, buffer: &mut [u8], offset: u64) -> io::Result<usize> {
+        use std::os::unix::fs::FileExt;
+        self.0.borrow().as_ref().unwrap().read_at(buffer, offset)
+    }
+
     pub(crate) fn metadata(&self) -> io::Result<std::fs::Metadata> {
         self.0.borrow().as_ref().unwrap().metadata()
     }

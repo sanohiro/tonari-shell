@@ -138,6 +138,7 @@ struct Screen {
     height: usize,
     column: usize,
     had_hint: bool,
+    windowed: bool,
     view: viewport::Viewport,
     prompt: PromptFrame,
 }
@@ -202,6 +203,7 @@ impl Screen {
             prompt: Default::default(),
             column: 0,
             had_hint: false,
+            windowed: false,
             width: if columns < 4 {
                 79
             } else {
@@ -215,6 +217,7 @@ impl Screen {
         screen.row = self.row;
         screen.column = self.column;
         screen.tail = self.tail;
+        screen.windowed = self.windowed;
         screen
     }
 
@@ -308,7 +311,6 @@ impl Screen {
         {
             return self.window_frame(prompt, text, cursor, suggestion);
         }
-        self.view.invalidate();
         let out = &mut self.output;
         begin_redraw(out, self.row);
         let mut pos = self.prompt.draw(prompt, self.width, out);
@@ -320,6 +322,11 @@ impl Screen {
             draw_text(suggestion, self.width, out, &mut pos);
             out.push_str("\x1b[0m");
         }
+        if pos.row >= self.height {
+            return self.window_frame(prompt, text, cursor, suggestion);
+        }
+        self.view.invalidate();
+        self.windowed = false;
         if pos.row != caret.row || pos.col != caret.col {
             if pos.row > caret.row {
                 let _ =
@@ -651,6 +658,7 @@ impl EditorState {
             self.appended = None;
             self.erased = None;
         } else if moving
+            && !screen.windowed
             && !screen.had_hint
             && hint.is_empty()
             && !searching
@@ -665,7 +673,8 @@ impl EditorState {
             && (start == 0
                 || text[start..].is_ascii()
                 || previous(text, next(text, start)) == start)
-            && (!screen.had_hint || text.len().saturating_add(hint.len()) < VIEWPORT_THRESHOLD)
+            && (!screen.had_hint
+                || !screen.windowed && text.len().saturating_add(hint.len()) < VIEWPORT_THRESHOLD)
             && (screen.had_hint || screen.tail.is_some() && hint.is_empty())
         {
             if screen.had_hint {
@@ -680,6 +689,9 @@ impl EditorState {
                     screen.output.push_str("\x1b[2m");
                     let mut end = caret;
                     draw_text(hint, screen.width, &mut screen.output, &mut end);
+                    if end.row >= screen.height {
+                        return screen.draw(prompt, text, cursor, hint);
+                    }
                     screen.output.push_str("\x1b[0m");
                     viewport::move_to(&mut screen.output, end, caret);
                 }

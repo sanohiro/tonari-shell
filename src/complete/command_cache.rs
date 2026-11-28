@@ -1,6 +1,7 @@
 use crate::pattern::directory;
 use std::cell::RefCell;
 use std::ffi::CStr;
+use std::fs::{File, Metadata};
 use std::ops::ControlFlow;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -14,6 +15,16 @@ struct Stamp {
     identity: (u64, u64),
     modified: (i64, i64),
     changed: (i64, i64),
+}
+
+impl Stamp {
+    fn new(meta: &Metadata) -> Self {
+        Self {
+            identity: (meta.dev(), meta.ino()),
+            modified: (meta.mtime(), meta.mtime_nsec()),
+            changed: (meta.ctime(), meta.ctime_nsec()),
+        }
+    }
 }
 
 struct Listing {
@@ -130,31 +141,27 @@ pub(super) fn scan(
     editing: bool,
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
-    let Ok(meta) = path.metadata() else {
-        return ControlFlow::Continue(());
-    };
-    let stamp = Stamp {
-        identity: (meta.dev(), meta.ino()),
-        modified: (meta.mtime(), meta.mtime_nsec()),
-        changed: (meta.ctime(), meta.ctime_nsec()),
+    let open = || {
+        File::options()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY)
+            .open(path)
     };
     CACHE.with_borrow_mut(|cache| {
         let slot = cache.directories.iter().position(|(dir, _, _)| dir == path);
         if let Some(i) = slot {
             let (_, old, listing) = &cache.directories[i];
-            if *old == stamp {
+            let Ok(meta) = path.metadata() else {
+                return ControlFlow::Continue(());
+            };
+            if *old == Stamp::new(&meta) {
                 let Some(listing) = listing else {
                     return directory::scan(path, prefix, visit);
                 };
                 // The stamp includes directory permission changes. Verify that
                 // the process can still open a directory under its current fd limit.
                 if !*checked_fd {
-                    if std::fs::File::options()
-                        .read(true)
-                        .custom_flags(libc::O_DIRECTORY)
-                        .open(path)
-                        .is_err()
-                    {
+                    if open().is_err() {
                         return ControlFlow::Continue(());
                     }
                     *checked_fd = true;
@@ -172,6 +179,23 @@ pub(super) fn scan(
             cache.directories.swap_remove(i);
         }
 
+        // Open every alternate spelling independently. Only the names are shared:
+        // visit still checks candidates and EXECIGNORE through the current PATH entry.
+        let Ok(dir) = open() else {
+            return ControlFlow::Continue(());
+        };
+        let Ok(meta) = dir.metadata() else {
+            return ControlFlow::Continue(());
+        };
+        let stamp = Stamp::new(&meta);
+        if meta.ino() != 0
+            && let Some(listing) = cache.directories.iter().find_map(|(_, old, listing)| {
+                listing.as_ref().filter(|l| l.complete && *old == stamp)
+            })
+        {
+            drop(dir);
+            return listing.visit_prefix(prefix, editing, visit);
+        }
         // Directory sizes are filesystem-specific. Bound this initial capacity hint.
         let entries = (meta.len() / 32).min(256) as usize;
         let mut listing = Some(Listing {
@@ -181,7 +205,7 @@ pub(super) fn scan(
             index: Vec::with_capacity(entries),
         });
         let mut tails = [0; 256];
-        let result = directory::scan_checked(path, b"", &mut |raw, kind| {
+        let result = directory::scan_checked(dir, b"", &mut |raw, kind| {
             if let (Some(name), Some(active)) = (raw, &mut listing)
                 && !active.push(name, kind, &mut tails)
             {

@@ -48,6 +48,119 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_whole_audit_function_import_modes(self):
+        functions = {"BASH_FUNC_good%%": "() { echo ok; }", "BASH_FUNC_a-b%%": "() { echo dash; }"}
+        source = 'type -t good; type -t a-b; shopt -qo posix; echo "mode=$? env=${POSIXLY_CORRECT-unset}"'
+        cases = [
+            ([], {}, False, b"function\nfunction\nmode=1 env=unset\n", False),
+            (["--posix"], {}, False, b"function\nmode=0 env=y\n", True),
+            ([], {"POSIXLY_CORRECT": ""}, False, b"function\nmode=0 env=\n", True),
+            ([], {"POSIX_PEDANTIC": ""}, False, b"function\nmode=0 env=y\n", True),
+            (["+o", "posix"], {"POSIXLY_CORRECT": "user"}, False, b"function\nfunction\nmode=0 env=user\n", False),
+            ([], {"SHELLOPTS": "posix"}, False, b"function\nfunction\nmode=0 env=y\n", False),
+            ([], {}, True, b"function\nfunction\nmode=0 env=y\n", False),
+            (["-p"], {}, False, b"mode=1 env=unset\n", False),
+            (["--posix", "-n"], {}, False, b"", False),
+        ]
+        for shell in self.shells_for(5):
+            for flags, options, as_sh, expected, rejected in cases:
+                for entries in (functions | options, options | functions):
+                    with self.subTest(shell=shell, flags=flags, keys=list(entries), as_sh=as_sh):
+                        result = subprocess.run(["sh" if as_sh else shell, *flags, "-c", source],
+                                                executable=shell, env=self.env | entries, cwd=self.cwd,
+                                                capture_output=True, timeout=5)
+                        self.assertEqual((result.returncode, result.stdout), (0, expected))
+                        if rejected:
+                            self.assertIn(b"error importing function definition for `a-b'", result.stderr)
+                        else:
+                            self.assertEqual(result.stderr, b"")
+
+    def test_whole_audit_exec_hands_the_terminal_back(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                controller, master = pty.fork()
+                if controller == 0:
+                    try:
+                        original = os.getpgrp()
+                        check_parent = 'import os; p=os.getppid(); print(int(os.getpgid(p)==p))'
+                        cases = [
+                            ('exec "$1" -c "import os; print(os.getpgrp())"',
+                             f"{original}\n".encode()),
+                            ('exec ./missing-program; "$1" -c "$2"; :', b"1\n"),
+                        ]
+                        for source, expected in cases:
+                            result = subprocess.run(
+                                [shell, "--norc", "-ic", source, "sh", sys.executable, check_parent],
+                                cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL,
+                                capture_output=True, timeout=4)
+                            if (result.returncode, result.stdout, os.tcgetpgrp(0)) != (
+                                    0, expected, original):
+                                os._exit(1)
+                        if shell == TONARI:
+                            other_master, other_slave = pty.openpty()
+                            try:
+                                result = subprocess.run(
+                                    [shell, "--norc", "-ic",
+                                     'exec ./missing-program 2>"$1"; shopt -qo monitor; echo "$?"',
+                                     "sh", os.ttyname(other_slave)],
+                                    cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL,
+                                    capture_output=True, timeout=4)
+                                if (result.returncode, result.stdout, os.tcgetpgrp(0)) != (
+                                        0, b"0\n", original):
+                                    os._exit(3)
+                            finally:
+                                os.close(other_master)
+                                os.close(other_slave)
+                        os._exit(0)
+                    except BaseException:
+                        os._exit(2)
+                try:
+                    _, status = os.waitpid(controller, 0)
+                    self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+                finally:
+                    os.close(master)
+
+    def test_whole_audit_job_control_without_controlling_terminal(self):
+        command = 'case $- in *m*) echo on;; *) echo off;; esac; set -m; shopt -qo monitor'
+        for shell in self.shells_for(5):
+            for opts in (["-ic"], ["+m", "-ic"], ["-mi", "-c"], ["-c"]):
+                with self.subTest(shell=shell, opts=opts):
+                    p = subprocess.run([shell, "--noprofile", "--norc", *opts, command],
+                                       start_new_session=True, stdin=subprocess.DEVNULL,
+                                       env=self.env, cwd=self.cwd, capture_output=True, timeout=5)
+                    self.assertEqual((p.returncode, p.stdout), (0, b"off\n"))
+                    self.assertEqual(b"no job control in this shell" in p.stderr, opts != ["-c"])
+
+    def test_whole_audit_shared_stdin_command_boundary(self):
+        for shell in self.shells_for(5):
+            for padding in (8, 800, 3600):
+                for consume, expected, suffix in [
+                    ("IFS= read -r line", b"ok\\data/next\n", 'ok\\data\nprintf "%s/next\\n" "$line"\n'),
+                    ("/bin/cat", b"external data\n", "external data\n"),
+                ]:
+                    source = self.cwd / "input.sh"
+                    source.write_text("if true; then\n" + "if true; then :; fi\n" * padding
+                                      + consume + "\nfi\n" + suffix)
+                    with self.subTest(shell=shell, padding=padding, consume=consume), source.open("rb") as script:
+                        result = subprocess.run([shell], stdin=script, env=self.env, cwd=self.cwd,
+                                                capture_output=True, timeout=5)
+                        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
+
+    def test_whole_audit_shared_stdin_trailing_comment_is_data(self):
+        for shell in self.shells_for(5):
+            for padding in (0, 12000):
+                for extra in ("", "; echo closing-line"):
+                    command = ("if :; then\n: 'first\nif marker\n" + "x" * padding
+                               + "end'\nIFS= read -r data\nprintf '<%s>\\n' \"$data\"\nfi" + extra
+                               + "\n# payload fi\necho tail\n")
+                    source = self.cwd / "script"
+                    source.write_text(command)
+                    with self.subTest(shell=shell, padding=padding, extra=extra), source.open("rb") as script:
+                        p = subprocess.run([shell], stdin=script, env=self.env, cwd=self.cwd,
+                                           capture_output=True, timeout=5)
+                        expected = b"<# payload fi>\n" + (b"closing-line\n" if extra else b"") + b"tail\n"
+                        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, expected, b""))
+
     def test_second_review_job_traps_and_exec(self):
         source = """f(){ trap 'echo ERR' ERR; false; }; f; echo first:$?; false; echo last:$?
 trap - ERR; trap : USR1 CONT CHLD; trap '' KILL STOP; trap"""
@@ -1162,6 +1275,53 @@ printf '%s/%s/%s/%s' "${!a[*]}" "${a[7]}" "${a[9]}" "${#a[2000]}" """
         complete(b"probe-al", b"probe-al")
         complete(b"probe-be", b"probe-beta ")
 
+    def test_command_completion_through_path_aliases(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell), tempfile.TemporaryDirectory() as root:
+                work = Path(root)
+                for dirname, filename in (("first", "zzcmd-a"), ("other", "zzcmd-b")):
+                    directory = work / dirname
+                    directory.mkdir()
+                    (directory / filename).touch(mode=0o700)
+                # Same number and length of names, same mtime, different inodes.
+                mtime = (work / "first").stat().st_mtime_ns
+                os.utime(work / "other", ns=(mtime, mtime))
+                (work / "alias").symlink_to("first")
+                script = """PATH=first:other:alias:first
+compgen -c zzcmd-
+compgen -c zzcmd-
+EXECIGNORE='first/*'
+compgen -c zzcmd-
+/bin/rm alias && /bin/ln -s other alias
+compgen -c zzcmd-
+/bin/mv other/zzcmd-b other/zzcmd-c
+compgen -c zzcmd-
+/bin/chmod 600 other/zzcmd-c
+compgen -c zzcmd- || echo none
+"""
+                p = subprocess.run([shell, "-c", script], cwd=work, env=self.env,
+                                   capture_output=True, timeout=5)
+                self.assertEqual((p.returncode, p.stderr, p.stdout.splitlines()), (0, b"",
+                    [b"zzcmd-a", b"zzcmd-b", b"zzcmd-a", b"zzcmd-a"] * 2
+                    + [b"zzcmd-b", b"zzcmd-a", b"zzcmd-b", b"zzcmd-b",
+                       b"zzcmd-c", b"zzcmd-c", b"none"]))
+                if os.geteuid() != 0:
+                    parent = work / "restricted"
+                    parent.mkdir()
+                    (parent / "link").symlink_to("../first")
+                    try:
+                        access = """PATH=first:restricted/link
+compgen -c zzcmd-
+/bin/chmod 600 restricted
+compgen -c zzcmd-
+"""
+                        p = subprocess.run([shell, "-c", access], cwd=work, env=self.env,
+                                           capture_output=True, timeout=5)
+                        self.assertEqual((p.returncode, p.stderr, p.stdout),
+                                         (0, b"", b"zzcmd-a\n" * 3))
+                    finally:
+                        parent.chmod(0o700)
+
     def test_function_source_after_changing_arg0(self):
         source = "shopt -s extdebug\na() { :; }\nBASH_ARGV0=changed\nb() { :; }\ndeclare -F a b"
         for shell in self.shells_for(minimum=5):
@@ -2052,6 +2212,34 @@ for args in '-t -1' '-n x' '-N -1' '-u -3' '-u x' '-k'; do
     read $args </dev/null 2>/dev/null; echo $?
 done
 """, 0, b"0\n1\n1\n1\n1\n1\n1\n2\n", minimum=5)
+
+    def test_read_uses_tmout_and_preserves_partial_input(self):
+        path = self.cwd / "record"
+        path.write_bytes(b"x" * 8192 + b"\n")
+        self.compare(r"""
+TMOUT=.000001 read -r record <record; echo "$?/${#record}"
+read -r -t .000001 record <record; echo "$?/${#record}"
+for TMOUT in 0 invalid -1; do
+    value=before; read value <<<ready; echo "$?/$value"
+done
+TMOUT=.01 read -r -u 7 value 7<&- 2>/dev/null; echo "$?"
+value=old; TMOUT=.01 read -r value </dev/null; echo "$?/$value"
+{ sleep .08; echo later; } | { TMOUT=.001 read -t 2 value; echo "$?/$value"; }
+""", 0, b"0/8192\n0/8192\n0/ready\n0/ready\n0/ready\n1\n1/\n0/later\n", minimum=5)
+
+        for shell in self.shells_for(5):
+            read_fd, write_fd = os.pipe()
+            with os.fdopen(read_fd, "rb") as source, os.fdopen(write_fd, "wb", 0) as writer:
+                writer.write(b"ready\npartial")
+                result = subprocess.run(
+                    [shell, "-c", 'read -r line; echo "$?/$line"; '
+                     'read -r line; echo "$?/$line"; '
+                     'read -r -t 0 line; echo "$?/$line"'],
+                    stdin=source, capture_output=True, cwd=self.cwd,
+                    env=self.env | {"TMOUT": ".05"}, timeout=3,
+                )
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, f"0/ready\n{128 + signal.SIGALRM}/partial\n1/partial\n".encode(), b""))
 
     def test_set_prints_reusable_scalars_and_arrays(self):
         self.compare(r"""__plain=yes
@@ -4180,6 +4368,21 @@ show @(entry-???-?.log|x?.t.xt)
         self.assertEqual(expected.stdout.count(b"\0"), 4200)
         self.compare(source, 0, expected.stdout)
 
+    def test_numeric_glob_sorts_large_decimal_filenames(self):
+        names = ["10", "8", "008", "90000000000000000000", "100000000000000000000",
+                 "+7", "90000000000000000000z"]
+        siblings = [f"{i:02}x" for i in range(40)]
+        for name in names + siblings:
+            (self.cwd / name).touch()
+        # Equal numeric keys retain the filename collation order. A non-digit
+        # anywhere in a filename makes it an ordinary string.
+        ascending = [names[i] for i in (2, 1, 0, 3, 4)] + sorted(names[5:] + siblings)
+        script = ('for GLOBSORT in numeric -numeric; do printf "%s\\n" *; done; '
+                  ': > 7; GLOBSORT=numeric; a=(*); echo "${a[0]}/${a[1]}"')
+        result = self.command(TONARI, script)
+        self.assertEqual((result.returncode, result.stdout.decode().splitlines(), result.stderr),
+                         (0, ascending + ascending[::-1] + ["7/008"], b""))
+
     def test_glob_sort_order_after_directory_changes(self):
         for i in range(96):
             (self.cwd / f"{['A', 'é', '雪', '🌱'][i % 4]}-{i:03}.txt").touch()
@@ -4985,6 +5188,69 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_whole_audit_sourced_functions_with_parse_time_aliases(self):
+        defs = self.cwd / "alias-definitions"
+        defs.write_text("""alias ll='ls -l'
+alias renamed=physical
+alias show='echo from-alias'
+alias start='if true; then'
+alias finish=fi
+alias quiet=:
+renamed()
+{
+    start
+        show "$1"
+    finish
+    quiet
+} >out
+physical "two words"
+cat out
+alias say='echo first'
+configured()
+{
+    false || {
+        value='x
+}
+y'
+    }
+    say "$value"
+}
+alias say='echo second'
+configured
+say last
+""")
+        self.compare("shopt -s expand_aliases; . ./alias-definitions", 0,
+                     b"from-alias two words\nfirst x\n}\ny\nsecond last\n")
+
+    def test_whole_audit_sourced_function_closing_boundaries(self):
+        defs = self.cwd / "definitions"
+        defs.write_text("""first()
+{
+    cat <<'END'
+}
+END
+    sample='inside
+}
+quote'
+    printf '<%s>\\n' "$sample"
+} >body-output
+second()
+{
+    false || {
+        sample=done
+    }
+    echo "$sample"
+} &&
+    second
+alias print_line='echo expanded'
+third()
+{
+    print_line
+}
+""")
+        self.compare("shopt -s expand_aliases; . ./definitions; first; cat body-output; third",
+                     0, b"done\n}\n<inside\n}\nquote>\nexpanded\n")
+
     def test_source_consecutive_function_boundaries(self):
         def definitions(names, body):
             return "".join(f"{name}() {{\n{body}\n}}\n" for name in names)
@@ -5322,7 +5588,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                                   capture_output=True, timeout=5)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             if shell == TONARI:
-                self.assertEqual(proc.stderr, b"")
+                self.assertIn(proc.stderr, (b"", b"tonari: no job control in this shell\n"))
             profiles.append(proc.stdout)
         self.assertEqual(profiles[0], profiles[1])
         self.assertIn(b"ignoreboth", profiles[0])

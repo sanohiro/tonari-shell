@@ -297,6 +297,10 @@ pub(super) fn open_redirect(path: &str, flags: i32) -> Option<OwnedFd> {
 }
 
 impl Action<'_> {
+    pub(super) fn same_fd(&self) -> bool {
+        matches!(self, Self::Dup(from, to) if from == to)
+    }
+
     pub(super) fn destination(&self) -> RawFd {
         match *self {
             Self::Open(fd, ..)
@@ -308,6 +312,9 @@ impl Action<'_> {
     }
 
     fn references(&self, fd: RawFd) -> bool {
+        if self.same_fd() {
+            return false;
+        }
         self.destination() == fd
             || match self {
                 Self::Dup(src, _) => *src == fd,
@@ -317,6 +324,9 @@ impl Action<'_> {
     }
 
     fn references_extra(&self) -> bool {
+        if self.same_fd() {
+            return false;
+        }
         self.destination() >= 3
             || match self {
                 Self::Dup(src, _) => *src >= 3,
@@ -384,6 +394,9 @@ pub(super) fn apply_protected(
                 }
             }
             Action::Dup(src, dst) => {
+                if src == dst {
+                    continue;
+                }
                 if let Err(error) = duplicate(*src, *dst) {
                     if error.raw_os_error() == Some(libc::EBADF) {
                         diagnostic!("{src}: Bad file descriptor");
@@ -518,6 +531,16 @@ impl SavedFd {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_effective_actions_relocate_private_files() {
+        let file = fd::PrivateFile::new(std::fs::File::open("/dev/null").unwrap()).unwrap();
+        let n = file.as_raw_fd();
+        protect_fds(&[Action::Dup(n, n)]).unwrap();
+        assert_eq!(file.as_raw_fd(), n);
+        protect_fds(&[Action::Dup(n, n), Action::Dup(n, 1)]).unwrap();
+        assert_ne!(file.as_raw_fd(), n);
+    }
 
     #[test]
     fn restore_relocates_a_tracked_file_before_reusing_its_number() {

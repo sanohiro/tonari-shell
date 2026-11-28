@@ -143,7 +143,7 @@ impl Session {
         self.functions.insert(name, function);
     }
 
-    pub(crate) fn import_function(&mut self, entry: &[u8]) {
+    pub(crate) fn import_function(&mut self, entry: &[u8], posix: bool) {
         let Some(rest) = entry.strip_prefix(b"BASH_FUNC_") else {
             return;
         };
@@ -156,7 +156,7 @@ impl Session {
         if !is_function_name(name) || !value.starts_with("() {") {
             return;
         }
-        if name.contains('/') {
+        if name.contains('/') || posix && !crate::word::is_identifier(name) {
             diagnostic!("error importing function definition for `{name}'");
             return;
         }

@@ -636,7 +636,11 @@ pub(super) fn prepare_expanded(
         redirects: Vec::new(),
         assignments,
         empty_status: captured.get().unwrap_or(0),
-        environment: Default::default(),
+        environment: if raw.direct_exec {
+            external::ChildEnvironment::ReplaceShell
+        } else {
+            external::ChildEnvironment::Inherit
+        },
     };
     if session.xtrace && !cmd.words.is_empty() {
         trace_line(session, last_status, |out| {
@@ -818,7 +822,7 @@ pub(super) fn prepare_redirects(
                     };
                     crate::expansion::Error::from(reason).in_expression(&label)
                 })?;
-            if r.target == Target::MoveWord {
+            if r.target == Target::MoveWord && (r.variable.is_some() || fd != r.fd) {
                 moved = Some(fd);
             }
         }
@@ -827,7 +831,7 @@ pub(super) fn prepare_redirects(
         }
         redirects.push(Redirect {
             line: r.line,
-            variable: None,
+            variable: r.variable,
             fd: r.fd,
             target,
             word,
