@@ -91,6 +91,13 @@ pub(crate) enum Matcher<T> {
     Invalid,
 }
 
+// A wildcard followed by an unfinished escape cannot match. Native fnmatch
+// implementations disagree when the subject itself ends in a backslash.
+pub(crate) fn unfinished_star_escape(text: &str) -> bool {
+    text.strip_suffix("*\\")
+        .is_some_and(|prefix| prefix.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0)
+}
+
 impl<T: AsRef<str>> Matcher<T> {
     pub(crate) fn new(pattern: T) -> Self {
         Self::compile(pattern, false)
@@ -110,11 +117,7 @@ impl<T: AsRef<str>> Matcher<T> {
                 }
             }
         }
-        // A wildcard followed by an unfinished escape cannot match. Native
-        // fnmatch implementations disagree when the subject ends in a backslash.
-        if let Some(prefix) = text.strip_suffix("*\\")
-            && prefix.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0
-        {
+        if unfinished_star_escape(text) {
             return Self::Invalid;
         }
         if let Some(list) = text.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
@@ -432,6 +435,9 @@ pub(crate) fn trim_boundary(
     longest: bool,
 ) -> Option<usize> {
     let pattern = compiled.text;
+    if unfinished_star_escape(pattern) {
+        return None;
+    }
     let group = compiled.group.as_ref();
     // A question mark consumes one character. An ASCII boundary has the
     // same width in every supported locale.

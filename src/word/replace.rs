@@ -75,6 +75,9 @@ pub(super) fn substitute(
     expand_amp: bool,
 ) -> String {
     let pattern = compiled.text;
+    if crate::pattern::unfinished_star_escape(pattern) {
+        return text;
+    }
     let fold = compiled.fold;
     let extglob = compiled.extended;
     use ReplaceMode::*;
