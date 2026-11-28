@@ -8,16 +8,22 @@ Release executables were timed in interleaved order on a native Apple M1 and a n
 
 | Workload | Apple M1 (ms) | Linux x86-64 (ms) |
 | --- | ---: | ---: |
-| 1,500-line function via redirected stdin | 511.563 / 6.792 / 14.880 | 917.246 / 3.586 / 8.140 |
-| 800 physical directory changes | 7.157 / 6.703 / 18.539 | 1.136 / 1.124 / 3.252 |
-| Read about 1 MiB line by line | 10.716 / 6.967 / 28.158 | 4.777 / 1.771 / 14.801 |
-| Count-limited mapfile, 1,200 lines | 5.862 / 4.526 / 12.007 | 2.297 / 0.971 / 3.226 |
-| 5,000 formatted integers | 10.068 / 10.083 / 23.621 | 2.070 / 2.101 / 9.133 |
-| Startup with BASH_ENV | 4.180 / 4.153 / 9.046 | 0.263 / 0.248 / 0.629 |
+| 1,500-line function via redirected stdin | 643.668 / 8.793 / 21.922 | 914.811 / 3.537 / 8.146 |
+| 800 physical directory changes | 8.267 / 8.782 / 21.203 | 1.116 / 1.107 / 3.208 |
+| Read about 1 MiB line by line | 12.345 / 7.997 / 33.119 | 4.695 / 1.701 / 14.656 |
+| Count-limited mapfile, 1,200 lines | 10.507 / 7.019 / 17.655 | 2.269 / 0.952 / 3.178 |
+| 5,000 formatted integers | 15.200 / 14.943 / 40.493 | 2.021 / 2.046 / 8.990 |
+| Startup with BASH_ENV | 5.071 / 5.907 / 13.100 | 0.254 / 0.248 / 0.620 |
 
 PTY latency uses an already running shell and measures from input to the corresponding visible response. With 10,000 records or directory entries on M1, median / p95 for the review build were 0.107 / 0.111 ms for Ctrl-R and 3.651 / 3.724 ms for Tab. GNU Bash measured 0.281 / 0.299 and 7.360 / 7.768 ms. A 16 KiB bracketed paste measured 2.409 / 2.435 ms for Tonari and 17.080 / 17.480 ms for Bash across interleaved trials. [Input harness](../tools/bench_editor_input.py)
 
-Linux PTY measurements (current Tonari median / p95) were 0.049 / 0.070 ms for one committed scalar, 1.462 / 1.510 ms for a 16 KiB paste and 0.098 / 0.154 ms for Ctrl-R with 10,000 entries. Filename completion over 10,000 files took 1.426 / 1.435 ms versus Bash at 1.590 / 1.632 ms; this workload still exceeds the two-thirds target. A separate M1 run measured 3.61 ms from exec to the clean first prompt, versus 3.68 ms for #54 and 9.57 ms for GNU Bash. [Native Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/46139408556) · [Startup harness](../tools/bench_startup.py)
+Linux PTY measurements (current Tonari median / p95) were 0.060 / 0.072 ms for one committed scalar, 1.420 / 1.523 ms for a 16 KiB paste and 0.101 / 0.118 ms for Ctrl-R with 10,000 entries. Filename completion over 10,000 files took 1.417 / 1.449 ms versus Bash at 1.597 / 1.620 ms. This end-to-end completion time exceeds the two-thirds target. A separate M1 run measured 3.61 ms from exec to the clean first prompt, versus 3.68 ms for #54 and 9.57 ms for GNU Bash. [Native Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/46140024935) · [Startup harness](../tools/bench_startup.py)
+
+At revision `06c2e21`, the stripped macOS arm64 executable grew from 1,913,968 to 2,030,160 bytes and imported only libSystem. The stripped Linux x86-64 static PIE grew from 2,529,112 to 2,674,168 bytes and had no shared-library dependency. The change includes the grapheme segmenter and its Unicode data as well as the shell and parser corrections. Linux peak sampled RSS while holding a 16 MiB variable was 20,056 KiB in Tonari and 21,896 KiB in Bash. The 800-alias Linux benchmark took 40.639 / 1.191 / 1.597 ms; it remains above two thirds of Bash time. [Executable and memory measurements](https://github.com/sanohiro/tonari-shell/actions/runs/46140024935)
+
+Fourteen parser and expansion fixtures measured on the M1 all finished within two thirds of GNU Bash wall time. For 800 literal POSIX alias definitions the previous build, current build and Bash took 17.881 / 5.104 / 10.534 ms. A 400-arm case statement took 34.185 / 5.368 / 11.055 ms. The UTF-8 character-count fixture checks its 100-character result before reporting the time. [Language benchmark](../tests/review_language.py)
+
+A function called with a command-prefix assignment can declare the same name local, unset it and reassign it. The reassigned value must reach a child and the original global must survive the call. On M1, 8,000 calls through the corrected scope path took 17.149 ms, compared with 16.472 ms before the correction and 57.242 ms in Bash. Ordinary local unset took 11.883 ms versus 12.323 and 45.753 ms. [Execution and scope witnesses](../tests/review_runtime.py)
 
 4,000 行の関数では、M1 のファイル起動は 14.19 ms、リダイレクトは 14.27 ms、共有パイプ経由は 65.28 ms でした。Bash は同順に 30.47、30.70、81.30 ms です。パイプ入力では子が次に読む文字を残す必要があり、この条件では 2/3 目標に届いていません。シェル操作・ジョブ制御を測る別の23ケースでは、M1 の Tonari は Bash より全件速く、21件が 2/3 以内でした。残る2件はリダイレクト付き PATH 探索（51.962 → 39.118 ms）と EXIT トラップ付きサブシェル（38.263 → 29.082 ms）です。
 

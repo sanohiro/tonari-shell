@@ -1109,6 +1109,19 @@ select ref in 2+4; do echo "$a"; break; done 2>/dev/null <<< 1""",
         got = self.command(TONARI, r"""IFS=' '; read x <<< 'a \ '; printf '<%s>' "$x" """)
         self.assertEqual((got.returncode, got.stdout, got.stderr), (0, b"<a  >", b""))
 
+        record = self.cwd / "record"
+        for space in (b" ", b"\t"):
+            record.write_bytes(b" a  b\\" + space + b"  \n")
+            for opts, expected in [
+                ("x", b"<a  b" + space + b"><>"),
+                ("x y", b"<a><b" + space + b">"),
+                ("-r x", b"<a  b\\><>"),
+                ("-r x y", b"<a><b\\>"),
+            ]:
+                with self.subTest(space=space, opts=opts):
+                    got = self.command(TONARI, f'unset y; read {opts} <record && printf "<%s><%s>" "$x" "$y"')
+                    self.assertEqual((got.returncode, got.stdout, got.stderr), (0, expected, b""))
+
     def test_umask_permission_copies_see_preceding_clauses(self):
         got = self.command(TONARI, "umask 022; umask u=rw,go=u; umask; umask 077; umask g=u,o+g; umask")
         self.assertEqual((got.returncode, got.stdout, got.stderr), (0, b"0111\n0000\n", b""))

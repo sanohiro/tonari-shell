@@ -13,7 +13,14 @@ import tempfile
 
 def benchmarks(programs, env, scratch):
     case = "x=$(case item399 in\n" + "".join(f" item{i}) :;;\n" for i in range(400)) + " esac)"
+    for name in ("escaped", "escaped" + chr(92)):
+        directory = Path(scratch, name)
+        directory.mkdir()
+        for i in range(96):
+            (directory / f"f{i}").touch()
     workloads = {
+        "ordinary-path-glob": 'for ((i=0;i<200;i++)); do set -- escaped/f*; done; [[ $# == 96 ]]',
+        "escaped-path-glob": r"""bs='\'; for ((i=0;i<200;i++)); do set -- escaped${bs}/f*; done; [[ $# == 96 ]]""",
         "case-400": case,
         "arith-quoted": 'k=one; declare -A a; a[one]=0; for ((i=0;i<2000;i++)); do ((a["$k"]++)); done',
         "array-snapshot": 'a=({1..100}); for ((i=0;i<500;i++)); do : "prefix${a[@]}end"; done',
@@ -48,6 +55,31 @@ def benchmarks(programs, env, scratch):
                     raise RuntimeError(f"{name}/{k}: {sub.stderr!r}")
                 if run: samples[k].append(elapsed)
         print(name + "," + ",".join(f"{statistics.median(samples[k]):.3f}" for k in programs),flush=True)
+
+
+def pathname_separators(sh, bash, root, env):
+    for directory, filename in (("tmp", "normal"), ("tmp\\", "backslash")):
+        (root / directory).mkdir()
+        (root / directory / filename).touch()
+    script = r"""bs='\'
+printf '<%s>\n' tmp${bs}/* tm[p]${bs}/* tmp${bs}${bs}/* tm[p]\/n* tmp${bs}/normal
+"""
+    expected = b"<tmp/normal>\n<tmp\\/backslash>\n<tmp\\/backslash>\n<tmp/normal>\n<tmp\\/normal>\n"
+    for shell in (sh, bash):
+        result = subprocess.run([shell, "--noprofile", "--norc", "-c", script], cwd=root,
+                                env=env, capture_output=True, check=True)
+        assert result.stdout == expected, (shell, result)
+    print("ok pathname separators from expansion")
+
+    # A pathname separator ends a bracket expression even when shell-quoted.
+    # nullglob discards an actual unmatched pattern and preserves plain text.
+    script = r"""shopt -s nullglob
+set -- [absent\/word] [absent/word] [absent\/] [absent\/word]*; printf '<%s>\n' "$@"
+"""
+    result = subprocess.run([sh, "--noprofile", "--norc", "-c", script], cwd=root,
+                            env=env, capture_output=True, check=True)
+    assert result.stdout == b"<[absent/word]>\n<[absent/word]>\n<[absent/]>\n", result
+    print("ok pathname brackets separated by a slash")
 
 
 def main():
@@ -96,6 +128,7 @@ def main():
             if args.before: programs["before"] = args.before.resolve()
             benchmarks(programs, env, scratch)
             return
+        pathname_separators(sh, bash, Path(scratch), env)
         version = subprocess.check_output([bash, "-c", 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"'], env=env, text=True)
         for name, script in cases.items():
             options = env

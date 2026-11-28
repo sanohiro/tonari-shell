@@ -26,6 +26,11 @@ def main():
         "prefix attributes": """declare -i n=4; n=2+3 printenv n; set -o posix; n=2+3 :; echo "$n"; declare -u upper; upper=mixed :; echo "$upper";""",
         "case converted settings": """touch a.txt; declare -l GLOBIGNORE; GLOBIGNORE='*.TXT'; echo *;""",
         "assigned shell name": """declare BASH_ARGV0=changed; echo "$0"; f(){ local BASH_ARGV0=local; echo "$0/$BASH_ARGV0"; }; f; echo "$0";""",
+        "export after unsetting a prefix local": """f(){
+  local v=x; unset v; declare -p v; v=again; printenv v || echo hidden
+  unset v; v=again; printenv v || echo hidden
+}; g(){ local v=x; declare +x v; unset v; v=again; printenv v || echo hidden; }
+v=outer; v=temp f; v=temp g; f; echo "$v" """,
         "pipeline index isolation": """a=(one two); i=0; echo "${a[i++]}" | cat; echo "$i"; shopt -s lastpipe; echo | echo "${a[i++]}"; echo "$i";""",
         "named descriptor close": """exec {v}>descriptor; : {v}>&-; echo $?;""",
         "EXIT redirection": """trap 'echo end' EXIT; { eval 'exit 7 >/dev/null'; } >/dev/null;""",
@@ -48,7 +53,7 @@ EOF
 """,
         "compound redirection": """f(){ { if [[ $1 == hi ]]; then echo "$2"; fi; } >result; }; f hi ok; cat result; f bye no; cat result;""",
         "foreground job shorthand": """set -m; exec 3>&1 >/dev/null
-/bin/sh -c 'exit 9' & p=$!; j=%1; command "$j" >ignored
+/bin/sh -c 'kill -STOP "$$"; exit 9' & p=$!; wait "$p"; j=%1; command "$j" >ignored
 echo "$?:$_:$((p==$!))" >&3; test ! -e ignored
 """,
         "background job shorthand": """set -m; exec 3>&1 >/dev/null

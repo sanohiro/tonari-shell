@@ -665,7 +665,9 @@ pub(crate) fn has_magic(text: &str, pathname: bool) -> bool {
     while let Some(c) = bytes.next() {
         match c {
             b'\\' => {
-                bytes.next();
+                if bytes.next() == Some(b'/') && pathname {
+                    bracket = false;
+                }
             }
             b'*' | b'?' => return true,
             b'[' => bracket = true,
@@ -793,17 +795,23 @@ pub(crate) fn pathnames(
 }
 
 pub(crate) fn unescape(component: &str) -> std::borrow::Cow<'_, str> {
+    unescape_component(component, false)
+}
+
+fn unescape_component(component: &str, before_slash: bool) -> std::borrow::Cow<'_, str> {
     if !component.as_bytes().contains(&b'\\') {
         return std::borrow::Cow::Borrowed(component);
     }
     let mut literal = String::with_capacity(component.len());
     let mut chars = component.chars();
     while let Some(c) = chars.next() {
-        literal.push(if c == '\\' {
-            chars.next().unwrap_or(c)
-        } else {
-            c
-        });
+        if c != '\\' {
+            literal.push(c);
+        } else if let Some(quoted) = chars.next() {
+            literal.push(quoted);
+        } else if !before_slash {
+            literal.push(c);
+        }
     }
     std::borrow::Cow::Owned(literal)
 }
@@ -884,12 +892,21 @@ fn paths(
         }
         let grouped = options.extglob && extended::has_group(part);
         if !grouped && !has_magic(part, true) {
-            let literal = unescape(part);
+            let literal = unescape_component(part, !rest.is_empty());
             for prefix in &mut paths {
                 prefix.push_str(&literal);
             }
             continue;
         }
+        // Bash matches a wildcard directory component against directory entries.
+        // A final backslash in that component denotes a literal backslash.
+        let quoted_component;
+        let part = if !rest.is_empty() && trailing_escape(part) {
+            quoted_component = [part, "\\"].concat();
+            quoted_component.as_str()
+        } else {
+            part
+        };
         let extended = (grouped || options.nocaseglob)
             .then(|| extended::Pattern::for_path(part, grouped, options.nocaseglob, locale));
         let matcher = extended.is_none().then(|| Matcher::compile(part, true));

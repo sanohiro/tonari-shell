@@ -616,7 +616,10 @@ impl Session {
             } else if fresh_local
                 && !flags.inherit
                 && !self.shopt.localvar_inherit
-                && let Some(outer) = self.variables.get(name).filter(|v| !v.temporary)
+                && let Some(outer) = self
+                    .variables
+                    .get(name)
+                    .filter(|v| v.origin != super::BindingOrigin::CommandPrefix)
             {
                 // Only these attributes survive shadowing. Keep the outer
                 // value in its binding until the declaration is accepted.
@@ -657,7 +660,10 @@ impl Session {
             if fresh_local {
                 var.dynamic = false;
                 var.nameref = false;
-                if !var.temporary && !flags.inherit && !self.shopt.localvar_inherit {
+                if var.origin != super::BindingOrigin::CommandPrefix
+                    && !flags.inherit
+                    && !self.shopt.localvar_inherit
+                {
                     var.readonly = false;
                     var.integer = false;
                     var.letter_case = None;
@@ -667,7 +673,11 @@ impl Session {
                 }
             }
             if self.function_depth != 0 && !attribute && !flags.global {
-                var.temporary = false;
+                if var.origin == super::BindingOrigin::CommandPrefix {
+                    var.origin = super::BindingOrigin::LocalFromPrefix;
+                } else if fresh_local {
+                    var.origin = super::BindingOrigin::Ordinary;
+                }
             }
             let making_array = flags.array || flags.associative || array.is_some();
             if making_array

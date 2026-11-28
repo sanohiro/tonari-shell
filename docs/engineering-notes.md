@@ -6,6 +6,8 @@ A function arriving through stdin can span thousands of lines. Re-parsing its fu
 
 Check file and process effects at shell boundaries. Assignment-only commands update the shell without temporarily exporting each earlier assignment. An ordinary redirection unwinds before an EXIT trap, while a function or sourced file can supply a distinct execution context. Interactive history is saved after the top-level EXIT trap. Buffered `mapfile` restores unread bytes on a regular file before invoking a callback that might share the descriptor. A change to a timing shortcut needs a public-entry witness for both the result and the state left behind. [Execution and scope](../tests/review_runtime.py) · [Builtins](../tests/review_builtins.py)
 
+A function local derived from a temporary exported command prefix keeps its export provenance on the first unset. An ordinary local and an explicitly unexported binding need different restoration behavior. Check both the environment inside a child and the original variable after function return. 一時代入と同名のローカル変数では、関数内の再代入値が子に渡るか、関数を出た後に元の値が戻るかの両方を確認します。
+
 For editing and history, check both the text buffer and its display across a pasted UTF-8 sequence, undo, and suspension for a caught signal. Edit cursor positions use Unicode grapheme boundaries. Test persisted history using concurrent sessions and a pre-existing file, including a final line without a newline. A successful write to a new file alone cannot detect loss of earlier entries. [PTY and history tests](../tests/review_interactive.py)
 
 GNU Bash 5.3 では `test` の括弧内にある空文字列を誤って真とする場合があります。Tonari はそのグループの値を参照して偽を返します。

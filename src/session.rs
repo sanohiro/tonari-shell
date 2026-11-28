@@ -64,13 +64,21 @@ enum LetterCase {
     Capitalize,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum BindingOrigin {
+    #[default]
+    Ordinary,
+    CommandPrefix,
+    LocalFromPrefix,
+}
+
 #[derive(Clone, Default)]
 struct Variable {
     // A binding keeps its name in saved scopes. The process environment is
     // immutable until exec or entry into a new shell session.
     inherited: std::cell::OnceCell<bool>,
     dynamic: bool,
-    temporary: bool,
+    origin: BindingOrigin,
     letter_case: Option<LetterCase>,
     nameref: bool,
     readonly: bool,
@@ -1458,10 +1466,16 @@ impl Session {
         for (name, value) in assignments.drain(..) {
             // A special builtin's environment persists in the nearest real
             // binding. A function prefix can itself hide another prefix.
-            if self.variables.get(&name).is_some_and(|v| v.temporary) {
+            if self
+                .variables
+                .get(&name)
+                .is_some_and(|v| v.origin == BindingOrigin::CommandPrefix)
+            {
                 for scope in self.locals.iter_mut().rev() {
                     if let Some(previous) = scope.variables.remove(&name)
-                        && !previous.as_ref().is_some_and(|v| v.temporary)
+                        && !previous
+                            .as_ref()
+                            .is_some_and(|v| v.origin == BindingOrigin::CommandPrefix)
                     {
                         break;
                     }
@@ -1473,7 +1487,7 @@ impl Session {
             let var = self.variables.entry(name).or_default();
             var.exported = true;
             var.declared = true;
-            var.temporary = false;
+            var.origin = BindingOrigin::Ordinary;
             if let Some(array) = var.elements.as_mut() {
                 Rc::make_mut(array).insert(0, value);
             } else {
@@ -1504,7 +1518,7 @@ impl Session {
             let original = self.variables.insert(
                 name.clone(),
                 Variable {
-                    temporary: true,
+                    origin: BindingOrigin::CommandPrefix,
                     declared: true,
                     value: Some(value.clone()),
                     exported: true,

@@ -225,11 +225,13 @@ impl Session {
         if name == "PATH" {
             self.hashes.clear();
         }
-        if let Some(index) = self
+        let scope_index = self
             .locals
             .iter()
-            .rposition(|scope| scope.variables.contains_key(name))
-            && (self.variables.get(name).is_some_and(|v| v.temporary)
+            .rposition(|scope| scope.variables.contains_key(name));
+        let current = self.variables.get(name);
+        if let Some(index) = scope_index
+            && (current.is_some_and(|v| v.origin == super::BindingOrigin::CommandPrefix)
                 || !self.shopt.localvar_unset && index + 1 < self.locals.len())
         {
             // Unsetting a caller's local exposes the binding it was shadowing.
@@ -252,19 +254,19 @@ impl Session {
             }
             return;
         }
+        let declared =
+            scope_index.is_some_and(|i| self.shopt.localvar_unset || i + 1 == self.locals.len());
+        // Unset clears a local's attributes. A local made from a command
+        // prefix keeps export for the next assignment, without exposing the
+        // value of the previously shadowed binding.
+        let exported = declared
+            && current
+                .is_some_and(|v| v.exported && v.origin == super::BindingOrigin::LocalFromPrefix);
         self.variables.insert(
             name.into(),
             Variable {
-                declared: self
-                    .locals
-                    .iter()
-                    .rev()
-                    .take(if self.shopt.localvar_unset {
-                        usize::MAX
-                    } else {
-                        1
-                    })
-                    .any(|scope| scope.variables.contains_key(name)),
+                declared,
+                exported,
                 ..Variable::default()
             },
         );
