@@ -191,7 +191,8 @@ mapfile -t r <<< data; r+=("${src[@]}"); printf '<%s>' "${r[@]}" """,
                                 env=env, capture_output=True, check=True)
         assert result.stdout == b"onetwo", result
         print("ok associative replacement appends to the preceding write")
-        version = subprocess.check_output([bash, "-c", 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"'], env=env, text=True)
+        release = subprocess.check_output([bash, "-c", 'printf "%s.%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}" "${BASH_VERSINFO[2]}"'], env=env, text=True)
+        version = release.rsplit(".", 1)[0]
         for name, script in cases.items():
             options = env
             if name == "alias print with operands":
@@ -209,10 +210,9 @@ mapfile -t r <<< data; r+=("${src[@]}"); printf '<%s>' "${r[@]}" """,
                 # Ubuntu 24.04 Bash 5.2.21 preserves direct values literally.
                 # Debian 5.2.37 and GNU 5.3.20 expand both process substitutions.
                 expected = (0, b'<[<(printf x)]=<(printf y)><direct><done>')
-                allowed = [expected]
-                if version == "5.2":
-                    allowed.append((0, b'<[<(printf x)]=<(printf y)><literal><done>'))
-                assert results[0] == expected and results[1] in allowed, results
+                literal = (0, b'<[<(printf x)]=<(printf y)><literal><done>')
+                reference = literal if release == "5.2.21" else expected
+                assert results == [expected, reference], (release, results)
             elif results[0] != results[1]:
                 raise AssertionError(f"{name}: {results!r}; {observed[0].stderr!r}")
             print(f"ok {name}")

@@ -115,6 +115,12 @@ for selector in prx pri pxa pt; do
     declare -"$selector" | sed -n 's/^declare -[a-zA-Z]* \(zz_[a-z]*\)=.*/\1/p'
     echo .
 done
+for attr in t i x r c l u n; do
+  unset mutation; declare +"$attr" -"$attr" mutation=value
+  declare -p mutation | grep -qx 'declare -- mutation="value"' || exit 3
+done
+declare +t | grep -qx 'zz_int=4' || exit 1
+declare -px +x > exports && grep -q ' zz_env=' exports && ! grep -q ' zz_int=' exports || exit 2
 f(){ local zz_env=v zz_local=v; local -r zz_const=v; local -rp | sed -n 's/^declare [-a-z]* \(zz_[a-z]*\)=.*/\1/p'; }
 f'''
         frames = """shopt -s extdebug

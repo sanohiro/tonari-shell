@@ -6,6 +6,7 @@ use super::{LetterCase, Session, Variable, is_identifier, print_attribute};
 
 #[derive(Default)]
 struct Options {
+    listing_attributes: u32,
     print: bool,
     nameref: Option<bool>,
     array: bool,
@@ -38,21 +39,8 @@ impl ListingFilter {
     }
 
     fn new(flags: &Options) -> Self {
-        let attributes = [
-            (flags.readonly, b'r'),
-            (flags.exported, b'x'),
-            (flags.integer, b'i'),
-            (flags.nameref, b'n'),
-            (flags.traced, b't'),
-            (flags.lower, b'l'),
-            (flags.upper, b'u'),
-            (flags.capitalize, b'c'),
-        ]
-        .into_iter()
-        .filter(|(on, _)| *on == Some(true))
-        .fold(0, |bits, (_, flag)| bits | Self::bit(flag));
         Self {
-            attributes,
+            attributes: flags.listing_attributes,
             indexed: flags.array,
             associative: flags.associative,
         }
@@ -231,6 +219,13 @@ impl Options {
         let exporting = command == "export";
         let attribute = readonly || exporting;
         let mut flags = Options {
+            listing_attributes: if readonly {
+                ListingFilter::bit(b'r')
+            } else if exporting {
+                ListingFilter::bit(b'x')
+            } else {
+                0
+            },
             readonly: readonly.then_some(true),
             exported: exporting.then_some(true),
             ..Options::default()
@@ -252,6 +247,25 @@ impl Options {
                     diagnostic!("{command}: {option}: unsupported option");
                     return Err(());
                 }
+                let scalar = match c {
+                    'r' => Some(&mut flags.readonly),
+                    'x' => Some(&mut flags.exported),
+                    'i' => Some(&mut flags.integer),
+                    'n' if !exporting => Some(&mut flags.nameref),
+                    't' => Some(&mut flags.traced),
+                    'l' => Some(&mut flags.lower),
+                    'u' => Some(&mut flags.upper),
+                    'c' => Some(&mut flags.capitalize),
+                    _ => None,
+                };
+                if let Some(setting) = scalar {
+                    if on {
+                        flags.listing_attributes |= ListingFilter::bit(c as u8);
+                    }
+                    // Bash applies enabled attributes before all removals.
+                    *setting = Some(on && *setting != Some(false));
+                    continue;
+                }
                 match c {
                     'a' if on => flags.array = true,
                     'a' => flags.remove_array = true,
@@ -261,19 +275,11 @@ impl Options {
                         flags.functions = true;
                         flags.function_names = true;
                     }
-                    't' => flags.traced = Some(on),
                     'f' => flags.functions = true,
-                    'r' => flags.readonly = Some(on),
                     'g' => flags.global = on,
-                    'i' => flags.integer = Some(on),
-                    'c' => flags.capitalize = Some(on),
-                    'l' => flags.lower = Some(on),
-                    'u' => flags.upper = Some(on),
                     'n' if exporting => flags.exported = Some(false),
-                    'n' => flags.nameref = Some(on),
                     'I' => flags.inherit = on,
                     'p' => flags.print = true,
-                    'x' => flags.exported = Some(on),
                     _ => {
                         diagnostic!("{command}: {option}: unsupported option");
                         return Err(());
@@ -297,16 +303,9 @@ fn print_variables(
     if operands.is_empty()
         && !local
         && !flags.print
-        && flags.exported.is_none()
-        && flags.readonly.is_none()
+        && flags.listing_attributes == 0
         && !flags.array
         && !flags.associative
-        && flags.nameref.is_none()
-        && flags.integer.is_none()
-        && flags.traced.is_none()
-        && flags.capitalize.is_none()
-        && flags.lower.is_none()
-        && flags.upper.is_none()
     {
         return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
     }
@@ -744,7 +743,7 @@ impl Session {
                 .filter(|_| !making_array && remove_reference.is_none())
             {
                 let dest = value.or(var.value.as_deref()).unwrap_or("");
-                if on
+                if flags.listing_attributes & ListingFilter::bit(b'n') != 0
                     && (target.is_some()
                         || var.elements.is_some()
                         || value.or(var.value.as_deref()).is_some()
