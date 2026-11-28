@@ -1,5 +1,19 @@
 # Engineering notes / 開発知見
 
+## Reusing parsed shell operations and paging history / 展開・解析の再利用と履歴のページ送り
+
+Measure a sourced file through two endpoints. A ready-shell-to-exit timer includes destruction of all the functions just defined. A second marker emitted immediately after `source` returns measures when an interactive caller can continue. Tonari lets the OS reclaim the function AST at process exit, after shell cleanup runs. Function removal and redefinition in a continuing session still release their old bodies. Storing uncalled commands in a second compact AST representation made little difference in an isolated M1 comparison (400 functions, 1.593 and 1.596 ms). The simpler representation suffices. [Measurements](benchmarks.md#round-six-runtime)
+
+A current-shell substitution can capture `echo` and `printf` in memory when expansion and the builtin cannot alter the scope. Tests include a function overriding `echo`, `printf -v`, `%n`, and modifying arithmetic. The arithmetic compiler handles eager expressions over ordinary decimal bindings. Short-circuiting, recursive variable evaluation and indexed operands keep their shell evaluation rules. Scalar character counts belong to the binding and are invalidated on mutation. When a literal brace product contains dynamic words, its expansion must still respect quoting, ordering and argument boundaries. Loops can reuse small, entirely literal brace products while brace expansion is enabled. Recheck builtin lookup and the option on each iteration. `set --` consumes its argv, so preserve its final operand for `$_`, including the `--` operand when the list is empty.
+
+The history picker can skip runs of identical journal bytes and repeated command fields whose timestamps and directories differ. Validate the number of metadata fields before skipping a suffix. A command may itself contain a literal tab. Keep input checks at block boundaries and during scanning. For file command substitution, an initial size is a capacity hint. A regular file can grow between stat and read, and a stream can appear at the path before open. The file path still uses nonblocking open, verifies the opened object and reads through EOF. The native C control times the same ordinary-file operations on the same fixture.
+
+関数を多数定義する `source` は、呼び出し元に制御が戻る時刻と、シェルが終了する時刻を別々に測る。終了時にはトラップなどの後処理を済ませてから、関数の構文木のメモリをOSに返す。セッション中の関数削除・再定義では従来どおり解放する。未実行のコマンドを別の構文木で保持する試作は、M1の400関数で差が小さく、採用を見送った。
+
+現在のシェルで実行する `${ …; }` は、引数展開や組み込みの副作用を確かめてから出力をメモリに取る。短絡評価や変数内の算術式、配列添字は通常の評価処理に任せる。文字数は変数の値と一緒に保持し、代入・読み込み・スコープ切り替えを回帰試験する。ブレース展開では、引用や動的な展開が混ざる入力でも引数の順序と境界を保つ。ループ内でリテラルの展開結果を再利用するときも、関数による上書きと `set +B` を毎回確認する。`set -- a b` は引数を消費する前に末尾の `b` を `$_` 用に保存する。
+
+履歴の重複判定では、同じバイト列が並ぶ場合と、コマンドだけ同じで時刻やディレクトリが違う場合を測る。後者ではコマンド中のタブを区切りと誤認しないよう、メタデータの列数も調べる。通常ファイルの `$(<file)` は、読み始めた後にファイルが伸びる場合に備えてEOFまで確認し、FIFOへの置き換わりにも対応する。小さなファイル500回の費用を同じ操作のCプログラムとも比較した。
+
 ## Compiling patterns, reading here strings and resolving physical paths / パターンの再利用・入力・物理パス
 
 A pattern applied to an array can share its compiled representation across elements. For a static right operand of `[[ == ]]`, the cache also needs the active character and collation locale and the setting of `globasciiranges`. Compare the same function with a freshly expanded pattern after changing `LC_ALL` twice. Extended matching must accept both simple ASCII member lists and general bracket expressions. The former crashed in `GLOBIGNORE='tree/[ab]'` and in case-insensitive extended patterns. A member mask avoids allocation for simple lists. Turkish case folding uses the general representation because ASCII I can fold to a non-ASCII character.
