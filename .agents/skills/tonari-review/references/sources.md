@@ -24,6 +24,8 @@ xcrun xctrace export --input cpu.trace --toc
 xcrun xctrace export --input wait.trace --toc
 ```
 
+On Linux, `bash tools/ci/review-perf.sh /tmp/review-counters COMMAND ARG...` saves the host event list and one probe per candidate before collecting supported events on the chosen workload. The manual native benchmark workflow also accepts `{"runner":["ubuntu-24.04"],"suite":["review-perf"]}` for a checked array workload. The hosted job records its initial perf policy, temporarily permits user-mode counters when possible, and restores the initial policy. The local script uses the existing permissions.
+
 For symbol attribution, keep a separate matching optimized build with debug symbols. For Linux, inspect a supported event with `perf record -e EVENT -g -- COMMAND` and `perf report --stdio`. Keep all analysis tools on the developer host. A useful summary reports on-CPU work separately from blocked time.
 
 Intel's catalog repository carries Apache-2.0 at its root. Its linux-perf skill, reference files and upstream provenance identify MIT. Apple's plugin guide declares MIT in its upstream README. The catalog records the license that applies to each text.

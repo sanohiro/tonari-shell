@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## Independent review of existing shell behavior / 既存コードの独立レビュー
+
+A reviewer independently identified an ownership-induced full-array copy and a wrong directory-stack operation on old releases. For command completion it found duplicate directory visits inside one Tab but missed repeated visits across ordinary Tabs. Record both dimensions before consulting prior results. The revised instructions recovered redundant listing writes on a hidden fourth snapshot. Outcomes, false leads and per-review cost are in the [trial record](review-evaluation.md).
+
+修正前のソースだけを渡すと、配列の全コピーと `pushd -` の状態不整合を発見できた。一方、Tab 内の重複を見つけても Tab 間の無駄を見逃した。通常の入力で二度続けて実行し、呼び出しの内側と呼び出し間で繰り返す処理を個別に数える。[ネイティブ計測](benchmarks.md#independent-review-trial)
+
 ## Streamed shell input, history and execution state / 入力・履歴・実行状態
 
 A function arriving through stdin can span thousands of lines. Re-parsing its full prefix at each physical newline can turn a linear read into seconds of work. Track lines that could end the open command and keep the real parser responsible for syntax and boundaries. A seekable stream can look ahead and restore its offset. A pipe is shared with commands such as `read`, so the shell needs a path that leaves the following input available. A here-document attached inside a substitution may finish on a later physical line; attach that extent to its original command, including when printing a function definition. [Native comparisons](benchmarks.md#review-2026-11-28)
