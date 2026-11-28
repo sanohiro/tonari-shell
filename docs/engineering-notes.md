@@ -1,5 +1,19 @@
 # Engineering notes / 開発知見
 
+## Command substitution, directory scans and shared file offsets / コマンド置換・ディレクトリ走査・共有FD
+
+A query in command substitution can use the builtin's ordinary output routine with a memory destination. A function override, an observable trap or a change to the parent's logical directory invalidates that shortcut. For a helper that evaluates positional arithmetic, inspect the actual argument too. An argument can itself be an arithmetic expression with a side effect. The differential tests cover a renamed working directory, overridden builtins, an unsuccessful lookup and an argument that modifies a variable in the child. A process substitution must still create a child whose PID and exit status are observable through `$!` and `wait`.
+
+An ASCII prefix can reject directory entries during enumeration for case-insensitive filename expansion. Keep the full matcher for Unicode candidates and locale-sensitive folding. Linux can check executability without a separate type query for a regular file identified by the current directory read. A cached directory entry needs a live type check. On the Linux test filesystem, successive replacements sometimes had identical directory timestamps and size. A searchable directory that has replaced an executable must disappear from command candidates.
+
+A buffered `read` on a regular file must restore the shared file offset **before** assigning the destination. Expanding an associative-array key in that assignment can consume another line from the same descriptor. The regression witness checks the stored value and the following unread line against GNU Bash. Timing history paging also requires varying both the metadata and the commands. A file with identical records exercises a different path from one where only the command repeats.
+
+コマンド置換で組み込みの出力先をメモリに切り替えると、問い合わせごとの fork を省ける。関数による上書き、トラップ、論理ディレクトリの状態が親に影響する場合は子プロセスで実行する。位置引数を算術式で使う関数では、呼び出し側が渡した値にも副作用がありうる。プロセス置換では子の PID と終了値を呼び出し元が取得できるようにする。
+
+大文字小文字を区別しないファイル名展開では、列挙中に ASCII の接頭辞を比較できる。Unicode とロケール固有の折り畳みは通常の照合に渡す。Linux の補完でファイル種別の再取得を省けるのは、その場で得た通常ファイルの情報に限る。実行ファイルを検索可能なディレクトリに置き換えても、ディレクトリの時刻とサイズが変わらない場合があるため、キャッシュからの候補は再確認する。
+
+通常ファイルを先読みした `read` は、代入先を評価する前に FD の位置を戻す。連想配列のキーを決める処理が同じ FD から読む場合のデータ欠落を、GNU Bash との比較で検証した。履歴では、全行が同一、コマンドだけ同一、二つのコマンドが交互に出現する履歴を個別に測る。[Measurements and controls / 実測と対照実験](benchmarks.md#round-seven-paths)
+
 ## Reusing parsed shell operations and paging history / 展開・解析の再利用と履歴のページ送り
 
 Measure a sourced file through two endpoints. A ready-shell-to-exit timer includes destruction of all the functions just defined. A second marker emitted immediately after `source` returns measures when an interactive caller can continue. Tonari lets the OS reclaim the function AST at process exit, after shell cleanup runs. Function removal and redefinition in a continuing session still release their old bodies. Storing uncalled commands in a second compact AST representation made little difference in an isolated M1 comparison (400 functions, 1.593 and 1.596 ms). The simpler representation suffices. [Measurements](benchmarks.md#round-six-runtime)
