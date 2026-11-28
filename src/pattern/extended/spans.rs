@@ -14,6 +14,7 @@ pub(crate) fn match_ends(
     if text.len() < 256
         || !pattern.text.contains(['*', '+'])
         || text.as_bytes().contains(&0)
+        || pattern.text.ends_with('\\')
         || pattern.text.contains("[.")
         || pattern.text.contains("[=")
     {
@@ -37,40 +38,11 @@ pub(crate) fn match_ends(
     {
         return None;
     }
-    // A mandatory literal outside any group must occur in every match.
-    // An empty table records a proven miss without allocating a full row.
-    if let Some(lit @ (Atom::Text(s) | Atom::FoldedText(s, _))) = atoms.last()
-        && !s.is_empty()
+    if atoms
+        .last()
+        .is_some_and(|atom| !possible_tail(atom, text, ascii, anchored))
     {
-        let hay = text.as_bytes();
-        let needle = s.as_bytes();
-        let folded = matches!(lit, Atom::FoldedText(..));
-        let possible = if folded && !ascii {
-            let Atom::FoldedText(_, locale) = lit else {
-                unreachable!()
-            };
-            if anchored {
-                super::literal_edge(lit, text, false).ok()?.is_some()
-            } else {
-                text.char_indices()
-                    .any(|(i, _)| crate::pattern::folded_prefix(&text[i..], s, *locale).is_some())
-            }
-        } else if anchored {
-            hay.len() >= needle.len()
-                && if folded {
-                    hay[hay.len() - needle.len()..].eq_ignore_ascii_case(needle)
-                } else {
-                    hay.ends_with(needle)
-                }
-        } else if !folded {
-            memchr::memmem::find(hay, needle).is_some()
-        } else {
-            let first = needle[0];
-            memchr::memchr2(first.to_ascii_uppercase(), first.to_ascii_lowercase(), hay).is_some()
-        };
-        if !possible {
-            return Some(Vec::new());
-        }
+        return Some(Vec::new());
     }
     let mut ends: Vec<_> = (0..=text.len())
         .map(|i| {
@@ -85,25 +57,7 @@ pub(crate) fn match_ends(
     for atom in atoms.iter().rev() {
         let (repeat, optional) = match atom {
             Atom::Text(s) | Atom::FoldedText(s, _) => {
-                if !ascii && let Atom::FoldedText(needle, locale) = atom {
-                    for (i, _) in text.char_indices() {
-                        ends[i] = crate::pattern::folded_prefix(&text[i..], needle, *locale).map_or(MISS, |n| ends[i+n]);
-                    }
-                    ends[text.len()] = MISS;
-                    continue;
-                }
-                for i in 0..ends.len() {
-                    ends[i] = bytes
-                        .get(i..i + s.len())
-                        .filter(|candidate| {
-                            if matches!(atom, Atom::FoldedText(..)) {
-                                candidate.eq_ignore_ascii_case(s.as_bytes())
-                            } else {
-                                *candidate == s.as_bytes()
-                            }
-                        })
-                        .map_or(MISS, |_| ends[i + s.len()]);
-                }
+                literal_row(&mut ends, atom, s, text, ascii);
                 continue;
             }
             Atom::Star => (true, true),
@@ -169,6 +123,59 @@ pub(crate) fn match_ends(
         }
     }
     Some(ends)
+}
+
+// A required literal outside every group must occur in the match. Rejecting it
+// here avoids allocating a row when the subject cannot contain the pattern.
+fn possible_tail(atom: &Atom, text: &str, ascii: bool, anchored: bool) -> bool {
+    if anchored {
+        return !matches!(super::literal_edge(atom, text, false), Ok(None));
+    }
+    match atom {
+        Atom::Text(s) => memchr::memmem::find(text.as_bytes(), s.as_bytes()).is_some(),
+        Atom::FoldedText(s, locale) => {
+            if s.is_empty() {
+                return true;
+            }
+            if ascii {
+                let b = s.as_bytes()[0];
+                memchr::memchr2(
+                    b.to_ascii_uppercase(),
+                    b.to_ascii_lowercase(),
+                    text.as_bytes(),
+                )
+                .is_some()
+            } else {
+                text.char_indices()
+                    .any(|(i, _)| crate::pattern::folded_prefix(&text[i..], s, *locale).is_some())
+            }
+        }
+        _ => true,
+    }
+}
+
+fn literal_row(ends: &mut [usize], atom: &Atom, needle: &str, text: &str, ascii: bool) {
+    if !ascii && let Atom::FoldedText(_, locale) = atom {
+        for (i, _) in text.char_indices() {
+            ends[i] = crate::pattern::folded_prefix(&text[i..], needle, *locale)
+                .map_or(MISS, |n| ends[i + n]);
+        }
+        ends[text.len()] = MISS;
+        return;
+    }
+    for i in 0..ends.len() {
+        ends[i] = text
+            .as_bytes()
+            .get(i..i + needle.len())
+            .filter(|candidate| {
+                if matches!(atom, Atom::FoldedText(..)) {
+                    candidate.eq_ignore_ascii_case(needle.as_bytes())
+                } else {
+                    *candidate == needle.as_bytes()
+                }
+            })
+            .map_or(MISS, |_| ends[i + needle.len()]);
+    }
 }
 
 fn unit_mask(atom: &Atom) -> Option<u128> {

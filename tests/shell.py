@@ -81,6 +81,11 @@ shopt -s nocasematch; s=${s}K; echo "${s//*k/ok}"
         mismatch = self.command(TONARI, "s=aaa; [[ $s == !(z)*!(z)*[y] ]]")
         self.assertEqual(mismatch.returncode, 1)
 
+    def test_scaling_incomplete_escape_in_pattern(self):
+        script = r"""p='*\'; printf -v s '%0300d' 0; s=${s//0/\\}
+v=${s//$p/X}; x=${s##$p}; echo "${#v} ${#x}" """
+        self.compare(script, 0, b"300 300\n")
+
     def test_scaling_erasedups_tracks_trim_delete_and_import(self):
         (self.cwd / "history-data").write_text("aa\nbb\naa\n")
         script = r"""HISTSIZE=6; HISTCONTROL=erasedups
