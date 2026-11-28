@@ -41,13 +41,14 @@ class ShellTests(unittest.TestCase):
     def test_scaling_multiline_readers_leave_following_input(self):
         source = ("a=(\n" + "entry\n" * 300 +
                   ")\nx=$(\n:\necho one\n); y=\"first\nsecond\"\n" +
+                  "(\n" + "x=$((1))\n" * 300 + "echo \"$x\"\n)\n" +
                   "a0=ab\\\ncd\n" +
                   "read -r v\nfrom-stdin\necho \"${#a[@]}/$x/$a0/$v\"\n")
         for shell in (BASH, TONARI):
             proc = subprocess.run([shell], input=source.encode(), capture_output=True,
                                   cwd=self.cwd, env=self.env, timeout=5)
             self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
-                             (0, b"300/one/abcd/from-stdin\n", b""))
+                             (0, b"1\n300/one/abcd/from-stdin\n", b""))
 
     def test_scaling_array_updates_keep_declaration_and_callback_scope(self):
         script = r"""declare -A m=([k]=old); a=(two 2 three)

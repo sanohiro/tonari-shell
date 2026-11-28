@@ -398,15 +398,21 @@ fn run(
                 _ => {}
             }
         }
-        if n != 0
+        if let Some(incomplete) = state.incomplete
+            && n != 0
             && !(session.histexpand && session.history_enabled && session.source_depth == 0)
-            && still_open(state.incomplete, &input[line_start..])
             && !session.reads_aliases()
         {
-            if std::str::from_utf8(&input[line_start..]).is_err() {
+            let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);
+            };
+            if still_open(Some(incomplete), line.as_bytes())
+                || matches!(incomplete, parser::Incomplete::Subshell)
+                    && line.contains(')')
+                    && parser::word_line(line, session)
+            {
+                continue;
             }
-            continue;
         }
         if let Some(hint) = &mut state.here_doc {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {

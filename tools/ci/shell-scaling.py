@@ -2,10 +2,12 @@
 
 import os
 import signal
+import subprocess
 from pathlib import Path
 from statistics import median
 import sys
 import tempfile
+import time
 
 from bench_scripts import sample
 
@@ -14,7 +16,9 @@ def workloads(n):
     yield "array literal", "a=(\n" + "entry\n" * n + ')\necho ${#a[@]}', str(n)
     yield "subshell", "(\n" + ":\n" * n + "echo ok\n)", "ok"
     yield "substitution", "x=$(\n" + ":\n" * n + 'echo ok\n); echo "$x"', "ok"
-    yield "subshell with inner closers", "(\n" + "x=$((1))\n" * n + "echo ok\n)", "ok"
+    nested = "(\n" + "x=$((1))\n" * n + "echo ok\n)"
+    yield "subshell with inner closers", nested, "ok"
+    yield "subshell from pipe", nested, "ok"
     yield "UTF-8 array", "a=(\n" + "日本語\n" * n + ')\necho ${#a[@]}', str(n)
     yield "continued word", "x=" + "a\\\n" * n + 'b; echo ${#x}', str(n + 1)
     yield "double quote", 'x="' + "a\n" * n + '"; echo ${#x}', str(2 * n)
@@ -46,6 +50,17 @@ def workloads(n):
         yield label, f'{init}; for ((i=0;i<{n*4};i++)); do {key}="${{{key}}}x"; done; echo ${{#{key}}}', str(n*4+1)
 
 
+def pipe_sample(shell, source, expected, env, cwd):
+    data = (source + "\n").encode()
+    start = time.perf_counter_ns()
+    result = subprocess.run([shell, "--noprofile", "--norc"], input=data,
+                            cwd=cwd, env=env, capture_output=True)
+    elapsed = (time.perf_counter_ns() - start) / 1e6
+    if (result.returncode, result.stdout, result.stderr) != (0, expected, b""):
+        raise RuntimeError(f"{shell} streamed subshell: {result}")
+    return elapsed
+
+
 def main():
     def deadline(*_):
         raise TimeoutError
@@ -58,6 +73,15 @@ def main():
         root = Path(tmp)
         (root / "records").write_text("record\n" * max(sizes))
         env = dict(HOME=tmp, LC_ALL="C", PATH="/usr/bin:/bin")
+        # Earlier Tonari and Bash can skip the required suffix after a nullable
+        # group. Probe the two references so a future fix can be compared too.
+        miss_status = [
+            subprocess.run([shell, "--noprofile", "--norc", "-c", "[[ aaa == !(z)*!(z)*y ]]"],
+                           env=env, cwd=root, check=False).returncode
+            for shell in shells
+        ]
+        if miss_status[1] != 1 or any(code not in (0, 1) for code in miss_status):
+            raise ValueError(f"Unexpected extglob statuses {miss_status}")
         print("case\tsize\tprevious_ms\ttonari_ms\tbash_ms", flush=True)
         for n in sizes:
             for label, source, expected in workloads(n):
@@ -70,10 +94,14 @@ def main():
                         k = (trial+j) % len(shells)
                         if slow[k]:
                             continue
-                        answer = "0" if label == "negated extglob" and k != 1 else expected
+                        answer = str(miss_status[k]) if label == "negated extglob" else expected
                         signal.alarm(12)
                         try:
-                            ms = sample(shells[k], script, (answer + "\n").encode(), env, True)
+                            stdout = (answer + "\n").encode()
+                            if label == "subshell from pipe":
+                                ms = pipe_sample(shells[k], source, stdout, env, root)
+                            else:
+                                ms = sample(shells[k], script, stdout, env, True)
                         except TimeoutError:
                             slow[k] = True
                             continue

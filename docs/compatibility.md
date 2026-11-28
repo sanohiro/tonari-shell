@@ -1,5 +1,13 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Required glob suffixes and global array elements / glob の末尾とグローバル配列
+
+On GNU Bash 5.3.20, `s=aaa; [[ $s == !(z)*!(z)*y ]]` succeeds. The final literal `y` is required, so Tonari returns 1. Reaching the end of the subject at a nullable group still requires matching the remaining pattern. The same rule applies when the suffix requires one character, or when the negative group itself excludes empty input. Regression tests exercise conditional matching, replacement and trimming.
+
+Inside a function with a local associative array `m`, GNU Bash 5.2.21 and 5.3.20 write `declare -g 'm[k]=new'` into the local array in the comparison fixture. Tonari writes the global binding selected by `-g`. The test inspects both the local value before return and the global value afterward. [Shell comparisons](../tests/shell.py)
+
+否定 extglob が空文字列に到達しても、後ろのリテラルや `?` には対応する文字が必要になる。また、ローカルの同名配列がある関数内でも `declare -g` による要素代入はグローバル配列を更新する。どちらも Bash との差を許容する。[実測](benchmarks.md#shell-scaling)
+
 ## Failed compound array assignment / 配列の一括代入中のエラー
 
 With `a=(old); a+=([1]=first [-99]=invalid)`, the second subscript lies outside the array. An EXIT trap sees `old first` and the shell emits a diagnostic. Tonari and GNU Bash 5.3 exit with status 1. Ubuntu's Bash 5.2.21 exits successfully despite the error. Tonari keeps the failure visible to callers and preserves the preceding successful write. [Regression test](../tests/shell.py)

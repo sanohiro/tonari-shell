@@ -260,6 +260,17 @@ pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize)
     })
 }
 
+// A line made only of complete shell words cannot close an open subshell.
+pub(crate) fn word_line(source: &str, session: &crate::Session) -> bool {
+    with_read_options(session, 1, || {
+        lex(source, false, false).is_ok_and(|(tokens, _, _)| {
+            tokens
+                .iter()
+                .all(|token| matches!(token, Token::Word(_) | Token::Newline))
+        })
+    })
+}
+
 pub(crate) fn here_word(session: &crate::Session, source: &str) -> Result<Word, Error> {
     with_read_options(session, session.line(), || expansion_string(source))
 }
