@@ -5188,6 +5188,35 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_whole_audit_sourced_function_closing_boundaries(self):
+        defs = self.cwd / "definitions"
+        defs.write_text("""first()
+{
+    cat <<'END'
+}
+END
+    sample='inside
+}
+quote'
+    printf '<%s>\\n' "$sample"
+} >body-output
+second()
+{
+    false || {
+        sample=done
+    }
+    echo "$sample"
+} &&
+    second
+alias print_line='echo expanded'
+third()
+{
+    print_line
+}
+""")
+        self.compare("shopt -s expand_aliases; . ./definitions; first; cat body-output; third",
+                     0, b"done\n}\n<inside\n}\nquote>\nexpanded\n")
+
     def test_source_consecutive_function_boundaries(self):
         def definitions(names, body):
             return "".join(f"{name}() {{\n{body}\n}}\n" for name in names)

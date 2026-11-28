@@ -248,6 +248,23 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             _ => Err(size),
         }
     };
+    // Indented compound commands inside functions can have many closing
+    // braces. Try the first flush-left brace before probing their prefixes.
+    // This is one bounded hint; a brace in a quote or here-doc can miss.
+    const FUNCTION_CLOSE_WINDOW: usize = 8192;
+    let nearby = &buffered[..buffered.len().min(FUNCTION_CLOSE_WINDOW)];
+    if close == b"}"
+        && !aliases
+        && parser::opens_function(header)
+        && let Some(at) = memchr::memmem::find(nearby, b"\n}")
+        && let Some(len) = memchr::memchr(b'\n', &nearby[at + 2..])
+    {
+        let size = at + 3 + len;
+        let lines = memchr::memchr_iter(b'\n', &buffered[..size]).count();
+        if let Some(unit) = probe(size, lines)? {
+            return Ok(unit);
+        }
+    }
     if close == b")" {
         // Inner substitutions, arithmetic and quoted parentheses can resemble
         // a terminator. Probe candidate physical lines at doubling distances.
@@ -405,4 +422,38 @@ fn inline_terminators_inside_heredocs_have_bounded_parse_attempts() {
         attempts <= 12,
         "{attempts} probes for 256 false terminators"
     );
+}
+
+#[test]
+fn indented_groups_in_functions_probe_the_outer_boundary_once() {
+    let first = "configured()\n";
+    let unit = "{\n    : || {\n        v=0\n    }\n    echo \"$v\"\n}\n";
+    let following = "next()\n{\n    v=1\n}\n".repeat(100);
+    let text = format!("{unit}{following}");
+    let mut attempts = Vec::new();
+    let (_, consumed, lines) = buffered_compound(first, text.as_bytes(), true, false, |size| {
+        attempts.push(size);
+        parser::parse(&format!("{first}{}", &text[..size]))
+    })
+    .unwrap();
+    assert_eq!(attempts, [unit.len()]);
+    assert_eq!((consumed, lines), (unit.len(), unit.lines().count()));
+}
+
+#[test]
+fn flush_left_braces_in_function_data_preserve_the_read_boundary() {
+    let first = "configured()\n";
+    for unit in [
+        "{\n    v='line\n}\nlast'\n}\n",
+        "{\n    cat <<EOF\n}\nEOF\n}\n",
+        "{\n    v=2\n    }\n",
+        "{\n    v=3\n} >out\n",
+    ] {
+        let text = format!("{unit}next()\n{{\n    :\n}}\n");
+        let (_, consumed, lines) = buffered_compound(first, text.as_bytes(), true, false, |size| {
+            parser::parse(&format!("{first}{}", &text[..size]))
+        })
+        .unwrap();
+        assert_eq!((consumed, lines), (unit.len(), unit.lines().count()));
+    }
 }

@@ -3,7 +3,6 @@ import argparse
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import random
 import shutil
@@ -66,11 +65,11 @@ def main():
                                       median=statistics.median(series),
                                       p95=sorted(series)[math.ceil(.95 * len(series)) - 1])), flush=True)
 
-        def prompt_case(name, n, body, case_env, marks):
+        def prompt_case(name, n, body, case_env, marks, check=CHECK):
             # Record expansion of EPOCHREALTIME in-shell around each section.
             # A missing completion function or nonzero source status prevents readiness.
             rc.write_text("tn_start=$EPOCHREALTIME\n" + body + "\ntn_end=$EPOCHREALTIME\n"
-                          + (CHECK + "\n" if n else "")
+                          + (check + "\n" if n else "")
                           + "printf '%s\\n' " + " ".join(f'"$tn_{key}"' for key in marks)
                           + ' > "$TN_RC_TIMES"\nPS1=' + repr(PROMPT.decode()) + "\n")
             def sample(shell):
@@ -87,6 +86,17 @@ def main():
         core_env = env | {"BASH_COMPLETION_COMPAT_DIR": str(compat)}
         for n in (1, 2, 4):
             prompt_case("source-empty-compat", n, load * n, core_env, ["start", "end"])
+
+        # Grow a sourced file independently of the number of times it is loaded.
+        # The first indented brace closes a nested group inside each declaration.
+        for n in (16, 32, 64):
+            definitions = root / "definitions.sh"
+            definitions.write_text("".join(
+                f"sample_{i}()\n{{\n    false || {{\n        v={i}\n    }}\n"
+                '    result=$v\n}\n' for i in range(n)))
+            check = f'sample_{n - 1} && [[ $result == {n - 1} ]] || exit 1'
+            prompt_case("nested-definitions", n, load, env | {"TN_PACKAGE": str(definitions)},
+                        ["start", "end"], check)
 
         # Insert only timestamp assignments between complete top-level commands.
         # Check the exact distro file before relying on its physical line numbers.

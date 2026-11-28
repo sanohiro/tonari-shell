@@ -65,3 +65,36 @@ On macOS the Japanese frame p99 rose from 7.895 to 10.308 ms versus the baseline
 The Linux login miss against the two-thirds target included five profile utilities in a separate syscall trace. The clean trace recorded only the shell's exec. Linux three-stage pipelines at 32 repetitions also missed at 19.399 / 24.548 ms. The 1 MiB slow-reader test took 33.282 / 37.092 ms on Linux, with a direct OS pipeline at 32.001 ms. On macOS the three times were 204.498 / 205.249 / 209.444 ms. For a CPU-bound control, appending and measuring a growing Japanese string 24,000 times reduced Linux user task-clock from 24.47 to 4.80 ms. Hardware cycles, instructions and branch events were unavailable. Bash 5.2 lacked numeric GLOBSORT, so its Linux numeric-sort timings are omitted.
 
 両 OS のネイティブ実行で 11 ジョブが完走した。端末の表は各 100 回の先頭応答と、文字・カーソルを確認したフレームの p95 / p99 / 最大値。macOS の日本語入力は先頭描画後も処理が続き、フレーム p99 は旧版 7.895 ms から 10.308 ms に増えた。Linux の 1 CPU 制限では長い ASCII 入力のフレーム p99 が 1.579 ms になった。起動表ではプロンプトと最初のコマンドを分けている。Linux のログインではシステムプロファイルが外部コマンドを 5 本起動し、3 段パイプラインも Bash 比 2/3 の目標を超えた。遅い読み手には同じ読み手を用いた OS 直接実行、文字数計算には task-clock を対照として用いた。数値はすべて中間リビジョン `fd906ad` の結果である。
+
+## Command completion through PATH aliases / 同じディレクトリを指す PATH の補完
+
+When two PATH entries open the same directory, Tonari reuses its complete name listing. It checks the device, nonzero inode and directory timestamps on the opened descriptor. Before sharing the list, Tonari opens the alternate spelling. It applies executable and `EXECIGNORE` checks to candidates through the current PATH entry. This preserves repeated names and their PATH order in `compgen -c`, including after a symlink is retargeted or a command is renamed. [Cache implementation](../src/complete/command_cache.rs) · [Regression tests](../tests/shell.py)
+
+On a physical Apple M1, 60 interleaved fresh shells per case completed the same command on the first and second Tab. Values below are p50 / p95 milliseconds to the completed text and caret. The fixture used 1,024 names per directory. The native macOS `/usr/bin` and `/bin` are distinct directories. Both Tonari arm64 executables were 2,146,192 bytes and linked only libSystem. Reproduce with `python tools/ci/completion-alias.py before=/path/to/ee00503 after=/path/to/d38b4ae bash=/path/to/bash --runs 60` in the PTY driver's pyte environment. [Measurement driver](../tools/ci/completion-alias.py)
+
+| PATH and Tab / 操作 | Before / 変更前 | After / 変更後 | GNU Bash 5.3.20 |
+|---|---:|---:|---:|
+| Directory + symlink, first Tab | 1.022 / 1.256 | 0.586 / 0.732 | 2.379 / 3.178 |
+| Directory + symlink, second Tab | 0.061 / 0.162 | 0.081 / 0.140 | 1.582 / 1.774 |
+| Two distinct directories, first Tab | 1.059 / 2.198 | 1.024 / 2.573 | 2.453 / 3.879 |
+| One directory, first Tab | 0.640 / 1.426 | 0.729 / 1.692 | 1.875 / 3.786 |
+| Native system PATH, first Tab | 0.658 / 1.576 | 0.652 / 1.809 | 1.755 / 4.262 |
+
+A separate running-shell control repeated `compgen -c zzuni` 256 times and checked all 256 outputs. Across seven interleaved runs, the symlink case rose from 7.926 to 10.265 ms, or about 9 µs per call, including the check that the alias can still be opened. The single-directory case took 7.345 and 7.192 ms, and two distinct directories took 8.832 and 8.827 ms.
+
+同一ディレクトリを指す PATH では、実際に開いた FD のデバイス・inode・変更時刻を確かめ、完全な名前一覧を再利用する。実行権限と `EXECIGNORE` は各パスで判定し、重複する候補の順序を保つ。物理 M1 で最初の Tab の中央値は 1.022 ms から 0.586 ms、p95 は 1.256 ms から 0.732 ms になった。2 回目の Tab の中央値は 0.061 ms から 0.081 ms に増えた。別名でも毎回ディレクトリを開けるか確認するため、`compgen` を 256 回繰り返した場合の増分は 1 回あたり約 9 µs だった。
+
+On Ubuntu's real `/usr/bin:/bin` PATH, 50 interleaved fresh shells gave first-Tab medians of 1.105 / 0.606 / 0.816 ms for the original main, revised Tonari and GNU Bash 5.2.21. The second Tab took 0.054 / 0.055 / 0.757 ms. One distinct directory took 0.289 / 0.289 / 0.235 ms on first use, and two distinct directories took 0.479 / 0.483 / 0.383 ms. These fixtures distinguish reusing an opened directory's names from the cost of building a new index. Ubuntu の初回 Tab は、同一ディレクトリを指す標準 PATH で Bash を下回った。個別のディレクトリだけの初回は依然 Bash のほうが速く、2 回目は Tonari のほうが速い。[Native checks and samples](https://github.com/sanohiro/tonari-shell/actions/runs/46169194265)
+
+## Checked release workloads / 修正後の実測
+
+The following Linux medians include startup. All three programs ran on the same native Xeon 6975P-C runner for each comparison. Data size, iteration count and output were checked by the drivers. [Release artifacts](https://github.com/sanohiro/tonari-shell/actions/runs/46169194265)
+
+| Workload / 条件 | Main 1754509 (ms) | Revised d38b4ae (ms) | GNU Bash 5.2.21 (ms) |
+|---|---:|---:|---:|
+| Double-quoted file with 768 lines of parameter defaults | 75.323 | 1.261 | 2.155 |
+| 150 anchored regex misses with 2,048 leading characters | 3.370 | 0.445 | 3.590 |
+| 4,096 short builtin writes to an open descriptor | 5.209 | 3.936 | 12.657 |
+| 32 pipelines with three stages | 19.942 | 19.894 | 24.664 |
+
+Linux で 4,096 回の書き込みをループの外で一度だけリダイレクトすると 2.331 ms、直接ファイルへ書く対照は 1.745 ms だった。共有パイプから標準入力を読む 768 行の別試験では、先読みで後続コマンドからデータを奪わないよう両シェルとも細かく読み、`strace` では Tonari 13,099 回、Bash 13,095 回の read を記録した。先頭からの構文再解析を省くことと、共有入力の境界を保つことは別々に検証した。[Stream attribution](https://github.com/sanohiro/tonari-shell/actions/runs/46168594507)
