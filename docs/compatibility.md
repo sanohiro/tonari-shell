@@ -38,6 +38,10 @@ Listings such as `command -v`, `jobs`, `help`, `kill -l`, `caller`, `dirs`, `pus
 
 ## Required glob suffixes and global array elements / glob の末尾とグローバル配列
 
+With `GLOBSORT=numeric`, Tonari orders `90000000000000000000` before `100000000000000000000`. With `-numeric`, the larger number comes first. GNU Bash 5.3.20 converts both names with `strtoimax` and treats them as equal on overflow. On the macOS comparison filesystem it returned the same relative order in both directions. Tonari compares all significant digits and uses filename collation for equal values such as `008` and `8`, as the Bash manual specifies. [GNU Bash variable reference](https://www.gnu.org/software/bash/manual/html_node/Bash-Variables.html#index-GLOBSORT) · [Forward and reverse sort checks](../tools/ci/whole-language.py)
+
+`GLOBSORT=numeric` では、整数型に収まらない数字だけのファイル名も全桁の数値で並べる。数値が等しい場合はファイル名順で決まり、`-numeric` ではその順序も反転する。GNU Bash 5.3.20 は変換時に上限を超えた値を同じ値として扱う。
+
 On GNU Bash 5.3.20, `s=aaa; [[ $s == !(z)*!(z)*y ]]` succeeds. The final literal `y` is required, so Tonari returns 1. Reaching the end of the subject at a nullable group still requires matching the remaining pattern. The same rule applies when the suffix requires one character, or when the negative group itself excludes empty input. Regression tests exercise conditional matching, replacement and trimming.
 
 Inside a function with a local associative array `m`, GNU Bash 5.2.21 and 5.3.20 write `declare -g 'm[k]=new'` into the local array in the comparison fixture. Tonari writes the global binding selected by `-g`. The test inspects both the local value before return and the global value afterward. [Shell comparisons](../tests/shell.py)

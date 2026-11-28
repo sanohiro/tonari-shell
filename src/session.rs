@@ -1193,10 +1193,17 @@ impl Session {
         if var.elements.is_some() || var.nameref || var.letter_case.is_some() || var.dynamic {
             return false;
         }
-        let Some(value) = var.scalar_mut() else {
+        let Some(value) = var.value.as_mut() else {
             return false;
         };
         value.push_str(suffix);
+        let cached = var.char_count.get();
+        if cached != 0 {
+            let length = u32::try_from(crate::word::character_count(suffix))
+                .ok()
+                .and_then(|length| cached.checked_add(length));
+            var.char_count.set(length.unwrap_or(0));
+        }
         var.declared = true;
         var.exported |= self.allexport;
         true
@@ -1449,7 +1456,12 @@ impl Session {
         }
     }
 
-    pub(crate) fn stored_char_count(&self, name: &str) -> Option<usize> {
+    pub(crate) fn stored_char_count(&self, name: &str, follow_refs: bool) -> Option<usize> {
+        let name = if follow_refs && self.is_nameref(name) {
+            self.scalar_reference_target(name)?
+        } else {
+            name
+        };
         if !is_identifier(name)
             || matches!(
                 name,

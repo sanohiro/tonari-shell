@@ -117,6 +117,7 @@ impl Screen {
         Ok(())
     }
     pub(super) fn window_frame(&mut self, prompt: &str, text: &str, cursor: usize, hint: &str) {
+        self.windowed = true;
         self.output.clear();
         let mut pos = self.prompt.draw(prompt, self.width, &mut self.output);
         let width = self.width;

@@ -25,6 +25,7 @@ pub struct Launch {
     pub group: Option<pid_t>,
     tty: Option<RawFd>,
     pub background: bool,
+    pub single: bool,
     defer_tty: bool,
     shell_modes: Option<libc::termios>,
 }
@@ -487,7 +488,6 @@ pub struct Jobs {
     table: Vec<Job>,
     detached: Vec<pid_t>,
     inherited: Vec<Job>,
-    serial: u32,
     // Bash keeps completed background statuses available to wait by PID.
     finished: std::collections::VecDeque<(pid_t, u8)>,
 }
@@ -598,6 +598,7 @@ impl Jobs {
             defer_tty: single && foreground_fd.is_some() && crate::editor::preview::can_wait(),
             shell_modes: foreground_fd.and_then(terminal_modes),
             background,
+            single,
         }
     }
     // A command substitution or foreground pipeline builtin may list its
@@ -624,7 +625,6 @@ impl Jobs {
         self.monitor = false;
         self.table.clear();
         self.detached.clear();
-        self.serial = 0;
         self.finished.clear();
     }
     pub(crate) fn restore_initial_group(&self) {
@@ -689,9 +689,9 @@ impl Jobs {
         };
         let last = job.last_pid();
         if launch.background {
-            self.store(job);
+            let id = self.store(job);
             if !self.quiet && self.terminal().is_some() {
-                stderr_line!("[{}] {}", self.serial, last.unwrap_or(0));
+                stderr_line!("[{id}] {}", last.unwrap_or(0));
             }
             Ok((0, last))
         } else {
@@ -802,18 +802,13 @@ impl Jobs {
         }
     }
 
-    fn store(&mut self, mut job: Job) {
-        self.serial = self
-            .inherited
-            .iter()
-            .chain(&self.table)
-            .map(|j| j.id)
-            .max()
-            .unwrap_or(0)
-            + 1;
-        job.id = self.serial;
+    fn store(&mut self, mut job: Job) -> u32 {
+        // New IDs follow both tables. Waiting and disowning preserve their order.
+        let id = self.all_jobs().next_back().map_or(1, |last| last.id + 1);
+        job.id = id;
         self.table.push(job);
         crate::traps::job_changed();
+        id
     }
     fn foreground(
         &self,

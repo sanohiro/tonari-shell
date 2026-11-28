@@ -78,11 +78,11 @@ struct WordSyntax {
     quote: Quoting,
     groups: Vec<(char, Quoting)>,
     dollar: bool,
-    redirect: bool,
+    redirect: Option<char>,
 }
 
 impl WordSyntax {
-    fn consume(&mut self, c: char) -> WordChar {
+    fn consume(&mut self, c: char, group_process_substitutions: bool) -> WordChar {
         let unquoted = matches!(self.quote, Quoting::Unquoted);
         let expandable = unquoted || matches!(self.quote, Quoting::Double);
         let in_group = !self.groups.is_empty();
@@ -93,6 +93,7 @@ impl WordSyntax {
             WordChar::Quoted
         } else if c == '`' && expandable
             || self.dollar && matches!(c, '(' | '{')
+            || group_process_substitutions && self.redirect.is_some() && c == '('
             || in_group && unquoted && c == '('
         {
             let close = match c {
@@ -104,14 +105,14 @@ impl WordSyntax {
             WordChar::Quoted
         } else {
             let kind = self.quote.consume(c);
-            if in_group || self.redirect && c == '|' {
+            if in_group || self.redirect == Some('>') && c == '|' {
                 WordChar::Quoted
             } else {
                 kind
             }
         };
         self.dollar = c == '$' && expandable;
-        self.redirect = c == '>' && kind == WordChar::Unquoted;
+        self.redirect = (matches!(c, '<' | '>') && kind == WordChar::Unquoted).then_some(c);
         kind
     }
 }
@@ -135,6 +136,7 @@ fn command_span(line: &str, cursor: usize) -> (std::ops::Range<usize>, bool) {
     let mut groups: Vec<Group> = Vec::new();
     let mut quoting = Quoting::default();
     let mut dollar = false;
+    let mut redirect = false;
     for (i, c) in line.char_indices() {
         let unquoted = matches!(quoting, Quoting::Unquoted);
         let expandable = unquoted || matches!(quoting, Quoting::Double);
@@ -150,8 +152,9 @@ fn command_span(line: &str, cursor: usize) -> (std::ops::Range<usize>, bool) {
             let previous = i.checked_sub(1).map(|p| line.as_bytes()[p]);
             let at_boundary =
                 previous.is_none_or(|b| b.is_ascii_whitespace() || b";|&".contains(&b));
-            let command =
-                c == '`' || line.as_bytes().get(i + 1) != Some(&b'(') && (dollar || at_boundary);
+            let command = c == '`'
+                || redirect
+                || line.as_bytes().get(i + 1) != Some(&b'(') && (dollar || at_boundary);
             groups.push(Group {
                 start: i + 1,
                 close: if c == '`' { '`' } else { ')' },
@@ -163,6 +166,7 @@ fn command_span(line: &str, cursor: usize) -> (std::ops::Range<usize>, bool) {
             quoting.consume(c);
         }
         dollar = c == '$' && expandable;
+        redirect = matches!(c, '<' | '>') && unquoted;
     }
     for group in groups {
         if group.command && group.start <= cursor && group.start > span.start {
@@ -182,7 +186,7 @@ impl<'a> Context<'a> {
         let mut token = self.command_start;
         let mut punctuation = false;
         let mut quoting = WordSyntax::default();
-        let mut end = self.command_end;
+        let end = self.command_end;
         let mut current = None;
         let mut start = self.cursor;
         let mut emit = |a: usize, b: usize, punct: bool| {
@@ -206,11 +210,9 @@ impl<'a> Context<'a> {
         };
         for (off, c) in self.line[self.command_start..self.command_end].char_indices() {
             let i = self.command_start + off;
-            let protected = quoting.consume(c) != WordChar::Unquoted;
-            if !protected && matches!(c, ';' | '|' | '&' | '\n') {
-                end = i;
-                break;
-            }
+            // The command span is already bounded. Readline applies word breaks
+            // inside closed process substitutions when constructing COMP_WORDS.
+            let protected = quoting.consume(c, false) != WordChar::Unquoted;
             let split = !protected && breaks.contains(c);
             let white = split && matches!(c, ' ' | '\t');
             if white || punctuation != split {
@@ -254,7 +256,7 @@ impl<'a> Context<'a> {
         let mut current = None;
         for (offset, c) in line[span.clone()].char_indices() {
             let i = span.start + offset;
-            let kind = quoting.consume(c);
+            let kind = quoting.consume(c, true);
             let separator = kind == WordChar::Unquoted && (c.is_whitespace() || "|;&".contains(c));
             if i == cursor {
                 current = Some(words.len());

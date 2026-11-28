@@ -48,6 +48,48 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_whole_audit_function_import_modes(self):
+        functions = {"BASH_FUNC_good%%": "() { echo ok; }", "BASH_FUNC_a-b%%": "() { echo dash; }"}
+        source = 'type -t good; type -t a-b; shopt -qo posix; echo "mode=$? env=${POSIXLY_CORRECT-unset}"'
+        cases = [
+            ([], {}, False, b"function\nfunction\nmode=1 env=unset\n", False),
+            (["--posix"], {}, False, b"function\nmode=0 env=y\n", True),
+            ([], {"POSIXLY_CORRECT": ""}, False, b"function\nmode=0 env=\n", True),
+            ([], {"POSIX_PEDANTIC": ""}, False, b"function\nmode=0 env=y\n", True),
+            (["+o", "posix"], {"POSIXLY_CORRECT": "user"}, False, b"function\nfunction\nmode=0 env=user\n", False),
+            ([], {"SHELLOPTS": "posix"}, False, b"function\nfunction\nmode=0 env=y\n", False),
+            ([], {}, True, b"function\nfunction\nmode=0 env=y\n", False),
+            (["-p"], {}, False, b"mode=1 env=unset\n", False),
+            (["--posix", "-n"], {}, False, b"", False),
+        ]
+        for shell in self.shells_for(5):
+            for flags, options, as_sh, expected, rejected in cases:
+                for entries in (functions | options, options | functions):
+                    with self.subTest(shell=shell, flags=flags, keys=list(entries), as_sh=as_sh):
+                        result = subprocess.run(["sh" if as_sh else shell, *flags, "-c", source],
+                                                executable=shell, env=self.env | entries, cwd=self.cwd,
+                                                capture_output=True, timeout=5)
+                        self.assertEqual((result.returncode, result.stdout), (0, expected))
+                        if rejected:
+                            self.assertIn(b"error importing function definition for `a-b'", result.stderr)
+                        else:
+                            self.assertEqual(result.stderr, b"")
+
+    def test_whole_audit_shared_stdin_command_boundary(self):
+        for shell in self.shells_for(5):
+            for padding in (8, 800, 3600):
+                for consume, expected, suffix in [
+                    ("IFS= read -r line", b"ok\\data/next\n", 'ok\\data\nprintf "%s/next\\n" "$line"\n'),
+                    ("/bin/cat", b"external data\n", "external data\n"),
+                ]:
+                    source = self.cwd / "input.sh"
+                    source.write_text("if true; then\n" + "if true; then :; fi\n" * padding
+                                      + consume + "\nfi\n" + suffix)
+                    with self.subTest(shell=shell, padding=padding, consume=consume), source.open("rb") as script:
+                        result = subprocess.run([shell], stdin=script, env=self.env, cwd=self.cwd,
+                                                capture_output=True, timeout=5)
+                        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
+
     def test_second_review_job_traps_and_exec(self):
         source = """f(){ trap 'echo ERR' ERR; false; }; f; echo first:$?; false; echo last:$?
 trap - ERR; trap : USR1 CONT CHLD; trap '' KILL STOP; trap"""
@@ -4179,6 +4221,19 @@ show @(entry-???-?.log|x?.t.xt)
         self.assertEqual(expected.returncode, 0)
         self.assertEqual(expected.stdout.count(b"\0"), 4200)
         self.compare(source, 0, expected.stdout)
+
+    def test_numeric_glob_sorts_large_decimal_filenames(self):
+        names = ["10", "8", "008", "90000000000000000000", "100000000000000000000",
+                 "+7", "90000000000000000000z"]
+        for name in names:
+            (self.cwd / name).touch()
+        # Equal numeric keys retain the filename collation order. A non-digit
+        # anywhere in a filename makes it an ordinary string.
+        ascending = [names[i] for i in (2, 1, 0, 3, 4, 5, 6)]
+        script = 'for GLOBSORT in numeric -numeric; do printf "%s\\n" *; done'
+        result = self.command(TONARI, script)
+        self.assertEqual((result.returncode, result.stdout.decode().splitlines(), result.stderr),
+                         (0, ascending + ascending[::-1], b""))
 
     def test_glob_sort_order_after_directory_changes(self):
         for i in range(96):

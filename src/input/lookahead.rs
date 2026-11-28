@@ -54,6 +54,51 @@ pub(super) fn file_group(
     Some((program, 1 + memchr::memchr_iter(b'\n', &bytes).count()))
 }
 
+pub(super) fn parse_buffered(
+    first: &str,
+    rest: &[u8],
+    session: &Session,
+    line: usize,
+) -> Result<Vec<parser::Statement>, parser::Error> {
+    let rest = std::str::from_utf8(rest)
+        .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
+    let mut unit = String::with_capacity(first.len() + rest.len());
+    unit.push_str(first);
+    unit.push_str(rest);
+    parser::session_source_at(&unit, false, session, line)
+}
+
+// A script on regular stdin shares its offset with read and external commands.
+// Inspect one larger window without advancing that offset. Commit only the
+// boundary of a complete unit accepted by the ordinary parser.
+pub(super) fn shared_compound(
+    reader: &mut std::io::BufReader<crate::execute::fd::PrivateFile>,
+    first: &str,
+    session: &Session,
+    line: usize,
+) -> Option<(Vec<parser::Statement>, usize)> {
+    use std::io::{Seek, SeekFrom};
+    const WINDOW: u64 = 64 * 1024;
+
+    let offset = reader.stream_position().ok()?;
+    let file = reader.get_ref();
+    let meta = file.metadata().ok()?;
+    let bytes = meta.len().saturating_sub(offset).min(WINDOW) as usize;
+    if !meta.is_file() || bytes <= reader.buffer().len() {
+        return None;
+    }
+    let mut data = vec![0; bytes];
+    let n = file.read_at(&mut data, offset).ok()?;
+    let (program, consumed, lines) = buffered_compound(first, &data[..n], false, false, |count| {
+        parse_buffered(first, &data[..count], session, line)
+    })
+    .ok()?;
+    reader
+        .seek(SeekFrom::Start(offset + consumed as u64))
+        .ok()?;
+    Some((program, lines))
+}
+
 // Adjacent function declarations can share one source buffer. Only commit
 // a batch after the normal parser has verified every top-level statement.
 pub(super) fn function_run(

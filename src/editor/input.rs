@@ -107,6 +107,7 @@ pub(super) fn wait_for_key(session: &Session, millis: i32) -> io::Result<bool> {
 pub(super) struct Keys {
     pub(super) queued: VecDeque<u8>,
     expansions: usize,
+    continuing_burst: bool,
     pub(super) anchor_history: bool,
     sequence: Vec<u8>,
 }
@@ -114,6 +115,7 @@ pub(super) struct Keys {
 impl Keys {
     // Bound one frame of committed text. Stop at control keys even within this budget.
     pub(super) const BURST_BYTES: usize = 4096;
+    pub(super) const FIRST_FRAME_BYTES: usize = 256;
     pub(super) const MAX_QUEUED_BYTES: usize = 64 * 1024;
     const MAX_MACRO_EXPANSIONS: usize = 64;
 
@@ -160,6 +162,7 @@ impl Keys {
             return Ok(Some(key));
         }
         self.expansions = 0;
+        self.continuing_burst = false;
         byte()
     }
 
@@ -268,8 +271,13 @@ impl Keys {
         // Gather an immediately available run without waiting for more keys.
         // A bound keeps long streams responsive to signals and screen updates.
         let mut bytes = [0; Self::BURST_BYTES];
+        let limit = if self.continuing_burst {
+            bytes.len()
+        } else {
+            Self::FIRST_FRAME_BYTES
+        };
         let mut n = 0;
-        while n < bytes.len() {
+        while n < limit {
             let Some(b) = self.immediate() else { break };
             if !session.bindings.literal_byte(b) {
                 self.queued.push_front(b);
@@ -277,6 +285,15 @@ impl Keys {
             }
             bytes[n] = b;
             n += 1;
+        }
+        // Paint the first packet promptly. Retain at most the next key so the
+        // normal editor loop can coalesce the rest without reading past Enter.
+        self.continuing_burst = n == limit;
+        if self.continuing_burst
+            && self.queued.is_empty()
+            && let Some(b) = self.immediate()
+        {
+            self.queued.push_back(b);
         }
         let mut rest = &bytes[..n];
         loop {

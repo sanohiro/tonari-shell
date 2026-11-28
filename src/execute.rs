@@ -300,14 +300,16 @@ fn deferred_redirects(redirects: &[Redirect<Word>], session: &Session) -> bool {
 fn enter_stage(
     session: &mut Session,
     compound: Option<&crate::parser::Command>,
-    background: bool,
+    launch: crate::jobs::Launch,
     piped: bool,
 ) {
     let explicit = matches!(compound, Some(crate::parser::Command::Subshell(_)));
     session.enter_subshell();
     session.parenthesized_subshell = explicit;
-    session.pipeline_subshell = !explicit && piped;
-    session.jobs.forked(!explicit && !background);
+    // A standalone background command can receive /dev/null on stdin without
+    // becoming a pipeline stage.
+    session.pipeline_subshell = !explicit && !launch.single && piped;
+    session.jobs.forked(!explicit && !launch.background);
     if explicit {
         session.command_string = false;
     }
@@ -327,23 +329,28 @@ fn start_raw(
     if session.keyword {
         separate_keyword_arguments(&mut raw);
     }
-    let observable = needs_ordered_redirects(&raw, session)
+    // An assignment can invoke arithmetic through the target's attributes or
+    // a nameref, even when its right-hand side is a literal. In the background
+    // expansion failures and the subshell depth also belong to a real child.
+    let observable = launch.background
+        && (!raw.assignments.is_empty()
+            || !raw.redirects.is_empty()
+            || raw.words.iter().any(|w| w.as_literal().is_none()))
+        || raw.assignments.iter().any(|(name, value)| {
+            let name = name.strip_suffix('+').unwrap_or(name);
+            !matches!(value, Assignment::Scalar(Word::Literal(_)))
+                || !crate::parser::is_identifier(name)
+                || session.integer(name)
+                || session.is_nameref(name)
+                || session.readonly(name)
+        })
+        || needs_ordered_redirects(&raw, session)
         || deferred_redirects(&raw.redirects, session)
         || raw
             .redirects
             .iter()
             .any(|r| redirection_observable(r, session))
-        || raw.words.iter().any(|w| stage_expansion(w, session))
-        || raw.assignments.iter().any(|(name, value)| {
-            name.contains('[')
-                || match value {
-                    Assignment::Scalar(word) => stage_expansion(word, session),
-                    Assignment::Array(_, items, _) => items
-                        .words
-                        .iter()
-                        .any(|(index, word)| index.is_some() || stage_expansion(word, session)),
-                }
-        });
+        || raw.words.iter().any(|w| stage_expansion(w, session));
     if !observable {
         return match prepare(raw, session, last_status, CommandContext::Pipeline) {
             Ok(mut cmd) => start(
@@ -371,7 +378,7 @@ fn start_raw(
         enter_stage(
             session,
             raw.compound.as_deref(),
-            launch.background,
+            launch,
             input.is_some() || output.is_some(),
         );
         coprocess::after_fork(session);
@@ -385,14 +392,20 @@ fn start_raw(
         }
         session.stdin_redirected |= input.is_some();
         let code = if apply(&setup, libc::PIPE_BUF, session) {
-            // A simple stage expands words in the child process at the
-            // caller's BASH_SUBSHELL depth, then enters its execution frame.
+            // A foreground pipeline increments BASH_SUBSHELL after word
+            // expansion. Asynchronous stages enter that level before expansion.
             let result = if raw.compound.is_none() && !needs_ordered_redirects(&raw, session) {
-                session.subshell_depth -= 1;
+                let later = u32::from(!launch.background);
+                session.subshell_depth -= later;
                 let prepared = prepare(raw, session, last_status, CommandContext::Child);
-                session.subshell_depth += 1;
+                session.subshell_depth += later;
                 match prepared {
-                    Ok(cmd) => run_prepared(cmd, None, last_status, true, session),
+                    Ok(mut cmd) => {
+                        if launch.single && launch.background {
+                            cmd.environment = external::ChildEnvironment::ReplaceShell;
+                        }
+                        run_prepared(cmd, None, last_status, true, session)
+                    }
                     Err(e) => {
                         e.report("");
                         Ok(e.flow(session))
@@ -443,6 +456,9 @@ fn start(
     session: &mut Session,
     launch: crate::jobs::Launch,
 ) -> io::Result<Stage> {
+    if launch.single && launch.background {
+        cmd.environment = external::ChildEnvironment::ReplaceShell;
+    }
     let builtin = builtin(cmd, last_status, session).or_else(|| {
         cmd.prepare_missing_hook(session)
             .then_some(Builtin::Function)
@@ -668,7 +684,7 @@ fn fork_stage(
         enter_stage(
             session,
             cmd.compound.as_deref(),
-            launch.background,
+            launch,
             input.is_some() || output.is_some(),
         );
         if cmd.missing_hook && !launch.background {
@@ -1133,7 +1149,7 @@ fn run_external(
             if cmd.redirects.is_empty() && session.jobs.is_empty() && !session.pipeline_subshell {
                 external::ChildEnvironment::ReplaceShell
             } else {
-                external::ChildEnvironment::Inherit
+                cmd.environment
             };
         let executable = External::for_words(cmd, session, &cmd.words, None, environment)?;
         return Ok(Flow::Continue(
@@ -1325,7 +1341,7 @@ fn assign_existing_word(session: &mut Session, key: &str, word: &Word) -> bool {
             [Part::Parameter { name, .. } | Part::BraceParameter(name)]
                 if name.starts_with('#') =>
             {
-                if let Some(n) = session.stored_char_count(&name[1..]) {
+                if let Some(n) = session.stored_char_count(&name[1..], true) {
                     return session.assign_existing_literal(key, itoa::Buffer::new().format(n));
                 }
             }

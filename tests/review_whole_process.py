@@ -1,0 +1,85 @@
+"""Public shell checks for process ownership, descriptor restoration and I/O."""
+
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+
+def cases():
+    yield "integer assignment isolation", """
+declare -i n=41; side=0; n=side++ | :; echo "$side,$n,${PIPESTATUS[*]}"
+n=side++ & p=$!; wait "$p"; echo "$side,$n,$?"
+shopt -s lastpipe; : | n=side++; echo "$side,$n,${PIPESTATUS[*]}"
+""", "0,41,0 0\n0,41,0\n1,0,0 0"
+    yield "nameref integer assignment", """
+declare -i n=8; declare -n ref=n; i=0; ref=i++ | :; echo "$i:$n"
+set -o posix; ref=i++ : | :; echo "$i:$n"
+""", "0:8\n0:8"
+    yield "asynchronous argument and redirect levels", """
+f(){ echo "$1:$BASH_SUBSHELL"; }; f "$BASH_SUBSHELL" & wait
+echo "$BASH_SUBSHELL:$((0))" | cat & wait
+: | echo "$BASH_SUBSHELL" & wait
+echo "$BASH_SUBSHELL" | cat
+echo ok >"depth$BASH_SUBSHELL" & wait; cat depth1
+""", "1:1\n1:0\n1\n0\nok"
+    yield "background expansion failure remains waitable", """
+exec 2>errors
+readonly v=keep; v=changed & p=$!
+[[ $p =~ ^[0-9]+$ ]]; echo "pid=$?"; wait "$p"; echo "$?:$v"
+shopt -s failglob; : ./missing-file-*.none & p=$!
+[[ $p =~ ^[0-9]+$ ]]; echo "pid=$?"; wait "$p"; echo "$?"
+grep -q 'readonly variable' errors && grep -q 'no match' errors && echo reported
+""", "pid=0\n1:keep\npid=0\n1\nreported"
+    yield "asynchronous external environment", """
+echo "$SHLVL"; /usr/bin/printenv SHLVL & wait
+SHLVL=9 /usr/bin/printenv SHLVL & wait
+/usr/bin/printenv SHLVL </dev/null & wait
+/usr/bin/printenv SHLVL | cat & wait
+: | /usr/bin/printenv SHLVL & wait
+set -m; /usr/bin/printenv SHLVL & wait; echo "$SHLVL"
+""", "1\n0\n8\n0\n1\n1\n0\n1"
+    yield "temporary redirects and shared reader", """
+exec 7<input; exec 8<&7; { IFS= read -ru8 a; : <&9; } 2>errors
+printf '%s/%s\n' "$?" "$a"; cat <&7; echo 'outside'
+""", "1/first\nsecond\noutside"
+    yield "pipeline early reader", """
+set -o pipefail; a=$(<large); printf '%s' "$a" | "$1" -c 'import os; print(os.read(0, 1).decode())'
+echo "${PIPESTATUS[*]}"
+""", "x\n141 0"
+    yield "pipe shared with an external reader", """
+{ printf 'aa\nbb\n'; } | { IFS= read -r a; cat; echo "stored:$a"; }
+""", "bb\nstored:aa"
+    yield "disowned coprocess stays usable", """
+coproc HELPER { read -r x; echo "ack:$x"; }; r=${HELPER[0]}; w=${HELPER[1]}; p=$HELPER_PID
+disown "$p"; echo "${HELPER[0]+set}:${HELPER_PID+set}"
+echo hi >&"$w"; IFS= read -ru "$r" line; echo "$?:$line"
+""", "set:set\n0:ack:hi"
+    yield "signal while waiting", """
+trap 'echo handled' USR1
+( sleep .05; kill -USR1 "$$"; sleep .05; exit 7 ) & p=$!
+wait "$p"; rc=$?; (( rc > 128 )); echo "interrupted=$?"
+wait "$p"; echo "final=$?"
+""", "handled\ninterrupted=0\nfinal=7"
+
+
+def main():
+    for shell in map(lambda arg: Path(arg).resolve(), sys.argv[1:]):
+        for label, script, expected in cases():
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "input").write_bytes(b"first\nsecond\n")
+                (root / "large").write_bytes(b"x" * 1024 * 1024)
+                p = subprocess.run([shell, "--noprofile", "--norc", "-c", script,
+                                    "check", sys.executable], cwd=root,
+                                   env=dict(PATH="/usr/bin:/bin", LC_ALL="C", HOME=tmp),
+                                   capture_output=True, timeout=8)
+                want = (0, (expected + "\n").encode(), b"")
+                if (p.returncode, p.stdout, p.stderr) != want:
+                    raise AssertionError(f"{shell} {label}: {p.returncode, p.stdout, p.stderr}; expected {want}")
+                print(f"ok {shell.name} {label}")
+
+
+if __name__ == "__main__":
+    main()

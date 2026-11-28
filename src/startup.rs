@@ -38,6 +38,7 @@ pub(crate) struct Environment {
     pub shell_level: i64,
     pub execution_string: bool,
     pub posix: bool,
+    pub posix_pedantic: bool,
     pub ignore_eof: Option<String>,
     pub compat: Option<String>,
     pub shellopts: Option<String>,
@@ -45,19 +46,20 @@ pub(crate) struct Environment {
 }
 
 impl Environment {
-    pub fn read(session: &mut Session, changed_ids: bool) -> Self {
+    pub fn read(session: &mut Session, changed_ids: bool, invocation: &Invocation) -> Self {
         use std::ffi::CStr;
         let mut settings = Self {
             skip_startup_files: changed_ids,
             ..Self::default()
         };
         let import = !session.privileged && !changed_ids;
+        let mut functions = Vec::new();
         let mut lower_eof = None;
         let mut pwd = None;
         let mut entry = crate::execute::inherited_env();
 
         // SAFETY: the single interpreter thread is still in initialization.
-        // No shell code runs or changes environ, and no borrowed entry escapes.
+        // No shell code runs or changes environ, and borrows end before read returns.
         unsafe {
             while !(*entry).is_null() {
                 let raw = *entry;
@@ -84,16 +86,28 @@ impl Environment {
                             .unwrap_or(0)
                     }
                     b"POSIXLY_CORRECT" => settings.posix = true,
+                    b"POSIX_PEDANTIC" => settings.posix_pedantic = true,
                     b"BASH_EXECUTION_STRING" => settings.execution_string = true,
                     b"IGNOREEOF" => settings.ignore_eof = Some(utf8().unwrap_or("").into()),
                     b"ignoreeof" => lower_eof = Some(utf8().unwrap_or("").into()),
                     b"BASH_COMPAT" => settings.compat = utf8().map(str::to_owned),
                     b"SHELLOPTS" if import => settings.shellopts = utf8().map(str::to_owned),
                     b"BASHOPTS" if import => settings.bashopts = utf8().map(str::to_owned),
-                    _ if key.starts_with(b"BASH_FUNC_") && import => session.import_function(bytes),
+                    _ if import && !invocation.options.check && key.starts_with(b"BASH_FUNC_") => {
+                        functions.push(bytes);
+                    }
                     _ => {}
                 }
             }
+        }
+        // Environment entries have no ordering guarantee. Resolve the shell mode
+        // before importing any functions, including when its flag appears later.
+        let posix = invocation
+            .options
+            .posix
+            .unwrap_or(settings.posix || settings.posix_pedantic);
+        for function in functions {
+            session.import_function(function, posix);
         }
         session.initialize_directory(pwd);
         settings.ignore_eof = settings.ignore_eof.or(lower_eof);

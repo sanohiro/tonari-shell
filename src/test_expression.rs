@@ -111,18 +111,24 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             }
             Binary(w, op @ ("<" | ">" | "=" | "==" | "!="), right)
                 if (!session.shopt.nocasematch || matches!(*op, "<" | ">"))
-                    && let Some(right) = right.as_literal()
                     && let Some(v) = w.stored_parameter(session) =>
             {
-                if matches!(*op, "<" | ">") {
-                    let order = pattern::text_order(v, right, session);
-                    return Ok(if *op == "<" {
-                        order.is_lt()
-                    } else {
-                        order.is_gt()
-                    });
+                if let Some(right) = right.as_literal() {
+                    if matches!(*op, "<" | ">") {
+                        let order = pattern::text_order(v, right, session);
+                        return Ok(if *op == "<" {
+                            order.is_lt()
+                        } else {
+                            order.is_gt()
+                        });
+                    }
+                    return builtins::binary(v, op, right).map_err(error);
                 }
-                return builtins::binary(v, op, right).map_err(error);
+                if matches!(*op, "=" | "==" | "!=")
+                    && let Some(right) = right.stored_quoted_parameter(session)
+                {
+                    return Ok((v == right) != (*op == "!="));
+                }
             }
             _ => {}
         }
@@ -204,12 +210,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                 "=" | "==" | "!=" => {
                     if !session.xtrace
                         && !session.shopt.nocasematch
-                        && let crate::word::Word::Expanded(parts) = right
-                        && matches!(
-                            parts.as_slice(),
-                            [crate::word::Part::Parameter { quoted: true, .. }]
-                        )
-                        && let Some(value) = right.stored_parameter(session)
+                        && let Some(value) = right.stored_quoted_parameter(session)
                     {
                         return Ok((left == value) != (op == "!="));
                     }

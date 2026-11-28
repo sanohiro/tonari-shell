@@ -22,6 +22,9 @@ if [[ $SUITE == review-perf ]]; then
   bash tools/ci/review-perf.sh "$out" "$current" --norc -c "$program"
   exit
 fi
+if [[ $SUITE == whole-* ]]; then
+  exec bash tools/ci/whole-audit.sh "$current" "$bin/baseline" "$out"
+fi
 source tools/ci/bash-source.sh
 if [[ $SUITE == second-review ]]; then
   if [[ $RUNNER_OS == macOS ]]; then

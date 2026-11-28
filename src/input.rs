@@ -309,7 +309,19 @@ pub(crate) fn still_open(
                         && parser::validate_tail(&format!("case x in\n{text}\nesac"), session, 1))
         }
         Some(SingleQuote) => memchr::memchr2(b'\'', 0, line).is_none(),
-        Some(DoubleQuote) => !line.iter().any(|b| b"\"\0$`\\".contains(b)),
+        Some(DoubleQuote) => {
+            // Simple dollar parameters cannot close a double quote. Nested
+            // expansions, escapes and quote delimiters still need the lexer.
+            let mut bytes = line.iter();
+            while let Some(&byte) = bytes.next() {
+                if matches!(byte, b'"' | 0 | b'`' | b'\\')
+                    || byte == b'$' && matches!(bytes.as_slice().first(), Some(b'(' | b'{' | b'['))
+                {
+                    return false;
+                }
+            }
+            true
+        }
         Some(Message("line continuation")) => line
             .strip_suffix(b"\\\n")
             .is_some_and(|s| s.iter().all(plain)),
@@ -541,7 +553,7 @@ fn run(
             input.clear();
             continue;
         }
-        let buffered = line_start == 0 && n != 0 && !shared_offset && !session.verbose;
+        let buffered = line_start == 0 && n != 0 && !reader.buffer().is_empty() && !session.verbose;
         let mut result = parse_prefix(session, text, buffered, |s| {
             parser::session_source_at(text, n == 0, s, base_line)
         });
@@ -569,12 +581,7 @@ fn run(
                 return error(e, 1);
             }
             let parse = |size| {
-                let rest = std::str::from_utf8(&reader.buffer()[..size])
-                    .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
-                let mut unit = String::with_capacity(text.len() + size);
-                unit.push_str(text);
-                unit.push_str(rest);
-                parser::session_source_at(&unit, false, session, base_line)
+                lookahead::parse_buffered(text, &reader.buffer()[..size], session, base_line)
             };
             let batch = if !from_stdin
                 && !session.onecmd
@@ -596,6 +603,20 @@ fn run(
                     session.command_number += extra_commands;
                 }
                 reader.consume(consumed);
+                base_line += lines;
+                result = Ok(program);
+            } else if shared_offset
+                && line_start == 0
+                && matches!(
+                    result,
+                    Err(parser::Error::Incomplete(parser::Incomplete::CompoundEnd(
+                        _
+                    )))
+                )
+                && !session.reads_aliases()
+                && let Some((program, lines)) =
+                    lookahead::shared_compound(&mut reader, text, session, base_line)
+            {
                 base_line += lines;
                 result = Ok(program);
             }

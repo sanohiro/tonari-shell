@@ -273,11 +273,25 @@ pub(super) fn append_expansion(
     let paths = &mut fields[start..];
     match key {
         "" | "name" => {}
-        "numeric" => paths.sort_by_cached_key(|p| {
-            if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) {
-                (false, p.parse::<i64>().unwrap_or(i64::MAX))
-            } else {
-                (true, 0)
+        "numeric" => paths.sort_by_cached_key(|name| {
+            #[derive(Eq, Ord, PartialEq, PartialOrd)]
+            enum Number {
+                Small(u64),
+                Large(usize, Box<str>),
+                Text,
+            }
+            if !name.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+                return Number::Text;
+            }
+            match name.parse::<u64>() {
+                Ok(n) => Number::Small(n),
+                Err(e) if e.kind() == &std::num::IntErrorKind::PosOverflow
+                    && name.bytes().all(|b| b.is_ascii_digit()) =>
+                {
+                    let digits = name.trim_start_matches('0');
+                    Number::Large(digits.len(), digits.into())
+                }
+                Err(_) => Number::Text,
             }
         }),
         "size" | "blocks" | "mtime" | "ctime" | "atime" => paths.sort_by_cached_key(|p| {
